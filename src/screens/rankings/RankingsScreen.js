@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
-  Platform, Image, Animated, Dimensions,
+  Platform, Image, Animated, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { db } from '../../config/firebase';
 import useAuthStore from '../../store/useAuthStore';
 import Avatar from '../../components/FramedAvatar';
@@ -22,6 +23,24 @@ const TIERS = {
   goat: { label: 'GOAT', color: COLORS.red },
 };
 const getTier = (u) => TIERS[u?.streakLevel] || TIERS.noob;
+
+// Mêmes seuils que le profil — la barre reflète la progression de Streak Level
+const STREAK_LEVELS = [
+  { id: 'noob', minPoints: 0 },
+  { id: 'bronze', minPoints: 500 },
+  { id: 'silver', minPoints: 2000 },
+  { id: 'gold', minPoints: 5000 },
+  { id: 'goat', minPoints: 15000 },
+];
+const streakPct = (u) => {
+  const pts = u?.streakPoints || 0;
+  const lvl = u?.streakLevel || 'noob';
+  const idx = Math.max(0, STREAK_LEVELS.findIndex(l => l.id === lvl));
+  const cur = STREAK_LEVELS[idx];
+  const next = STREAK_LEVELS[idx + 1];
+  const seg = next ? Math.min(Math.max((pts - cur.minPoints) / (next.minPoints - cur.minPoints), 0), 1) : 1;
+  return ((idx + seg) / (STREAK_LEVELS.length - 1)) * 100;
+};
 const fmtGG = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : `${n || 0}`);
 const thumbOf = (v) => v?.thumbnail || v?.thumbnailUrl || null;
 
@@ -173,7 +192,7 @@ function YourRankCard({ myRank, userProfile, topUsers }) {
 /* ------------------------------------------------------------ Player Row */
 function PlayerRow({ user, maxGG, navigation }) {
   const tier = getTier(user);
-  const pct = maxGG > 0 ? Math.max((user.ggCount / maxGG) * 100, 4) : 4;
+  const pct = Math.max(streakPct(user), 2);
   return (
     <TouchableOpacity onPress={() => navigation.navigate('UserProfile', { userId: user.uid })} style={s.pRow} activeOpacity={0.85}>
       <Text style={[s.pRank, { color: tier.color }]}>{user.rank}</Text>
@@ -235,6 +254,7 @@ export default function RankingsScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [videosOfDay, setVideosOfDay] = useState([]);
   const [myRank, setMyRank] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const timer = setInterval(() => setNow2(new Date()), 1000);
@@ -251,15 +271,18 @@ export default function RankingsScreen({ navigation }) {
 
   const fetchRankings = async () => {
     try {
+      // Top vidéos — charger les 50 meilleures pour avoir assez de diversité
       const videosSnap = await getDocs(
-        query(collection(db, 'videos'), orderBy('ggCount', 'desc'), limit(10))
+        query(collection(db, 'videos'), orderBy('ggCount', 'desc'), limit(50))
       );
       const videos = videosSnap.docs.map((d, i) => ({ rank: i + 1, id: d.id, ...d.data() }));
-      setTopVideos(videos.slice(0, 5));
+      // Top 5 vidéos avec au moins 1 GG
+      setTopVideos(videos.filter(v => (v.ggCount || 0) > 0).slice(0, 5));
 
-      // Agrège les GG par joueur (depuis le top vidéos)
+      // Agrège les GG par joueur depuis toutes les vidéos chargées
       const userGGs = {};
       videos.forEach((v) => {
+        if (!v.userId || !(v.ggCount > 0)) return;
         if (!userGGs[v.userId]) {
           userGGs[v.userId] = { uid: v.userId, username: v.username, avatar: v.avatar || '', plan: v.plan || 'free', streakLevel: v.streakLevel, ggCount: 0 };
         }
@@ -305,6 +328,7 @@ export default function RankingsScreen({ navigation }) {
       });
       setVideosOfDay(todayVideos.slice(0, 5).map((v, i) => ({ ...v, rank: i + 1 })));
     } catch(e){}
+    setLoading(false);
   };
 
   const endOfMonth = new Date(now2.getFullYear(), now2.getMonth() + 1, 0, 23, 59, 59);
@@ -360,7 +384,9 @@ export default function RankingsScreen({ navigation }) {
         {activeTab === 'topgg' && (
           <>
             {topUsers.length === 0 ? (
-              <Text style={s.empty}>No rankings yet — post clips and get GG-ed!🎮</Text>
+              loading
+                ? <ActivityIndicator color={COLORS.gold} size="large" style={{ marginTop: 60 }} />
+                : <Text style={s.empty}>No rankings yet — post clips and get GG-ed!🎮</Text>
             ) : (
               <>
                 {/* Bandeau enjeu */}

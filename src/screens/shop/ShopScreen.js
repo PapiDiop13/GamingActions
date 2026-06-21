@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { doc, runTransaction, getDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { awardPoints } from '../../utils/points';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { FRAMES, VIDEO_FRAMES, COMMENT_FRAMES, getFrameById, getVideoFrameById, getCommentFrameById } from '../../constants/frames';
 import { ElectricRing, ElectricBorder, RotatingElectricRing } from '../../components/ElectricEffect';
 import useAuthStore from '../../store/useAuthStore';
@@ -60,6 +61,7 @@ async function purchaseWithPoints(userId, cost, onSuccess) {
     await onSuccess();
     return { ok: true };
   } catch (e) {
+    await logError(LOG_CONTEXT.SHOP_FAIL, e, userId);
     return { ok: false, reason: e.message };
   }
 }

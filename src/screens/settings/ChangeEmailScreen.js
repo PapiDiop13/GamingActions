@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, Platform, Alert, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';

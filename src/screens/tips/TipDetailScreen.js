@@ -16,6 +16,7 @@ import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
 import { optimizeVideoUrl } from '../../config/cloudinary';
 import useAuthStore from '../../store/useAuthStore';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import Avatar from '../../components/FramedAvatar';
 import { commentFrameStyle } from '../../constants/frames';
 import { findBannedWords, censorText, logModeration } from '../../utils/moderation';

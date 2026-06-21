@@ -824,3 +824,63 @@ export const decayStreakPoints = onSchedule(
     logger.info(`decayStreakPoints: ${count} users penalized (-${DECAY_PER_DAY} pts each)`);
   }
 );
+/**
+ * reshuffleFeedOrder — reassigns randomOrder to all videos every 6 hours.
+ *
+ * Why: randomOrder is set once at upload time. Without reshuffling, all users
+ * always see videos in the same fixed sequence — not a real shuffle.
+ * This function assigns a fresh random value to every video 4× per day,
+ * so each user's feed feels genuinely different on every app open.
+ *
+ * Batch writes: Firestore batch limit = 500 ops. We process in chunks of 400
+ * to stay safely under the limit and avoid partial failures.
+ *
+ * Performance: ~550 videos = 2 batches = fast (~200ms total write time).
+ * At 10k+ videos, consider limiting to videos posted in the last 90 days.
+ */
+export const reshuffleFeedOrder = onSchedule(
+  {
+    schedule: "every 6 hours",
+    timeZone: "America/Toronto",
+    memory: "256MiB",
+  },
+  async () => {
+    logger.info("reshuffleFeedOrder: start");
+
+    const snap = await db.collection("videos")
+      .where("contentType", "==", "clip")
+      .get();
+
+    if (snap.empty) {
+      logger.info("reshuffleFeedOrder: no videos found");
+      return;
+    }
+
+    const BATCH_SIZE = 400; // Stay under Firestore's 500-op batch limit
+    let batch = db.batch();
+    let count = 0;
+    let batchCount = 0;
+
+    for (const videoDoc of snap.docs) {
+      // timestamp-seeded unique value — same formula as UploadScreen.js
+      // Using Date.now() as base prevents collisions between concurrent writes
+      const newOrder = Date.now() + Math.floor(Math.random() * 100000);
+      batch.update(videoDoc.ref, { randomOrder: newOrder });
+      count++;
+
+      if (count % BATCH_SIZE === 0) {
+        await batch.commit();
+        batchCount++;
+        batch = db.batch(); // Start fresh batch
+      }
+    }
+
+    // Commit any remaining writes
+    if (count % BATCH_SIZE !== 0) {
+      await batch.commit();
+      batchCount++;
+    }
+
+    logger.info(`reshuffleFeedOrder: ${count} videos reshuffled in ${batchCount} batch(es)`);
+  }
+);

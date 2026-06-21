@@ -14,6 +14,7 @@ import {
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
 import { GAMES } from '../../constants/games';
+import { fetchPeriodStats, fetchTopErrors, fetchRecentErrors } from '../../utils/errorLogger';
 
 const HARDCODED_ADMINS = [
   'admin@gamingactions.com',
@@ -64,7 +65,17 @@ export default function AdminScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
 
   // OVERVIEW
-  const [stats, setStats] = useState({});
+  const [stats, setStats]            = useState({});
+  const [periodStats, setPeriodStats] = useState({});
+  const [statPeriod, setStatPeriod]  = useState('today');
+  const [topErrors, setTopErrors]    = useState([]);
+  const [uploadAlert, setUploadAlert] = useState(false);
+  const PERIODS = [
+    { key: 'today', label: 'Today' },
+    { key: 'week',  label: 'Week'  },
+    { key: 'month', label: 'Month' },
+    { key: 'total', label: 'Total' },
+  ];
   const loadOverview = async () => {
     setLoading(true);
     try {
@@ -82,9 +93,15 @@ export default function AdminScreen({ navigation, route }) {
         banned: uS.docs.filter(d=>d.data().banned).length,
         restricted: vS.docs.filter(d=>d.data().restricted).length,
       });
+      const [ps, te] = await Promise.all([fetchPeriodStats(statPeriod), fetchTopErrors(5)]);
+      if (ps) { setPeriodStats(ps); if (ps.uploadFail >= 3) setUploadAlert(true); }
+      setTopErrors(te);
     } catch(e){}
     setLoading(false);
   };
+  useEffect(() => {
+    if (tab === 'overview') fetchPeriodStats(statPeriod).then(ps => { if (ps) setPeriodStats(ps); });
+  }, [statPeriod]);
 
   // REPORTS
   const [reports, setReports] = useState([]);
@@ -565,20 +582,73 @@ export default function AdminScreen({ navigation, route }) {
 
         {/* OVERVIEW */}
         {tab==='overview'&&(
-          <View style={st.grid}>
-            {[
-              {l:'Users',v:stats.users,c:COLORS.blue},{l:'Videos',v:stats.videos,c:COLORS.gold},
-              {l:'Total GG',v:stats.totalGG,c:COLORS.gold},{l:'Follows',v:stats.follows,c:COLORS.green},
-              {l:'Reports',v:stats.pendingReports,c:COLORS.red},{l:'Restricted',v:stats.restricted,c:COLORS.red},
-              {l:'Creators',v:stats.creators,c:COLORS.blue},{l:'Legendary',v:stats.legendary,c:COLORS.gold},
-              {l:'Banned',v:stats.banned,c:COLORS.red},
-            ].map((s,i)=>(
-              <View key={i} style={[st.statBox,{borderColor:s.c+'30'}]}>
-                <Text style={[st.statVal,{color:s.c}]}>{s.v??'--'}</Text>
-                <Text style={st.statLbl}>{s.l}</Text>
+          <>
+            {/* Upload alert */}
+            {uploadAlert&&(
+              <View style={{flexDirection:'row',alignItems:'center',backgroundColor:'rgba(255,45,85,0.12)',borderWidth:1,borderColor:COLORS.red,borderRadius:12,padding:12,marginBottom:14}}>
+                <Ionicons name="warning" size={18} color={COLORS.red}/>
+                <Text style={{flex:1,color:COLORS.red,fontWeight:'800',fontSize:13,marginLeft:8}}>⚠️ Upload alert — {periodStats.uploadFail}+ failed uploads detected</Text>
               </View>
-            ))}
-          </View>
+            )}
+            {/* Period filter */}
+            <View style={{flexDirection:'row',marginBottom:14,gap:8}}>
+              {PERIODS.map(p=>(
+                <TouchableOpacity key={p.key} onPress={()=>setStatPeriod(p.key)}
+                  style={{flex:1,paddingVertical:8,borderRadius:10,alignItems:'center',
+                    backgroundColor: statPeriod===p.key ? COLORS.gold : COLORS.card,
+                    borderWidth:0.5, borderColor: statPeriod===p.key ? COLORS.gold : COLORS.gray3}}>
+                  <Text style={{fontSize:11,fontWeight:'800',color: statPeriod===p.key ? COLORS.black : COLORS.gray}}>{p.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {/* Period stats */}
+            <View style={[st.grid,{marginBottom:16}]}>
+              {[
+                {l:'New Users',   v:periodStats.users,         c:COLORS.blue},
+                {l:'New Videos',  v:periodStats.videos,        c:COLORS.gold},
+                {l:'GG Votes',    v:periodStats.ggs,           c:COLORS.gold},
+                {l:'Uploads OK',  v:periodStats.uploadSuccess, c:COLORS.green},
+                {l:'Uploads ❌',  v:periodStats.uploadFail,    c:periodStats.uploadFail>=3?COLORS.red:COLORS.gray},
+                {l:'Errors',      v:periodStats.errors,        c:periodStats.errors>=5?COLORS.red:COLORS.gray},
+              ].map((s,i)=>(
+                <View key={i} style={[st.statBox,{borderColor:s.c+'40'}]}>
+                  <Text style={[st.statVal,{color:s.c}]}>{s.v??'--'}</Text>
+                  <Text style={st.statLbl}>{s.l}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Totaux globaux */}
+            <Text style={[st.secTitle,{fontSize:13,marginBottom:10}]}>TOTALS</Text>
+            <View style={st.grid}>
+              {[
+                {l:'Users',v:stats.users,c:COLORS.blue},{l:'Videos',v:stats.videos,c:COLORS.gold},
+                {l:'Total GG',v:stats.totalGG,c:COLORS.gold},{l:'Follows',v:stats.follows,c:COLORS.green},
+                {l:'Reports',v:stats.pendingReports,c:COLORS.red},{l:'Restricted',v:stats.restricted,c:COLORS.red},
+                {l:'Creators',v:stats.creators,c:COLORS.blue},{l:'Legendary',v:stats.legendary,c:COLORS.gold},
+                {l:'Banned',v:stats.banned,c:COLORS.red},
+              ].map((s,i)=>(
+                <View key={i} style={[st.statBox,{borderColor:s.c+'30'}]}>
+                  <Text style={[st.statVal,{color:s.c}]}>{s.v??'--'}</Text>
+                  <Text style={st.statLbl}>{s.l}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Top errors */}
+            {topErrors.length>0&&(
+              <>
+                <Text style={[st.secTitle,{fontSize:13,marginTop:20,marginBottom:10}]}>🔥 TOP ERRORS</Text>
+                {topErrors.map((e,i)=>(
+                  <View key={e.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:COLORS.card,borderRadius:10,padding:10,marginBottom:6,borderWidth:0.5,borderColor:e.count>=5?COLORS.red:COLORS.gray3}}>
+                    <Text style={{fontSize:11,fontWeight:'900',color:e.count>=5?COLORS.red:COLORS.gold,width:28}}>#{i+1}</Text>
+                    <Text style={{flex:1,fontSize:11,fontWeight:'700',color:COLORS.white}}>{e.context}</Text>
+                    <View style={{backgroundColor:e.count>=5?COLORS.redDim:COLORS.goldDim,borderRadius:8,paddingHorizontal:8,paddingVertical:3}}>
+                      <Text style={{fontSize:11,fontWeight:'900',color:e.count>=5?COLORS.red:COLORS.gold}}>{e.count}x</Text>
+                    </View>
+                  </View>
+                ))}
+              </>
+            )}
+          </>
         )}
 
         {/* REPORTS */}
@@ -1081,24 +1151,54 @@ export default function AdminScreen({ navigation, route }) {
         )}
         {tab==='errors'&&(
           <>
-            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+            <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
               <Text style={st.secTitle}>Error Logs</Text>
               <TouchableOpacity onPress={loadErrors} style={[st.actionBtn,{paddingHorizontal:12}]}>
                 <Ionicons name="refresh" size={16} color={COLORS.black}/>
               </TouchableOpacity>
             </View>
-            {errorLogs.length===0?<Text style={st.hint}>No errors logged yet.</Text>:errorLogs.map(err=>(
-              <View key={err.id} style={[st.reportCard,{borderLeftWidth:3,borderLeftColor:COLORS.red}]}>
-                <View style={{flexDirection:'row',alignItems:'center',marginBottom:4}}>
-                  <Ionicons name="bug" size={14} color={COLORS.red}/>
-                  <Text style={{fontSize:12,fontWeight:'800',color:COLORS.red,marginLeft:6}}>{err.context||'Unknown'}</Text>
-                  <Text style={{fontSize:10,color:COLORS.gray,marginLeft:'auto'}}>{err.createdAt?.toDate?err.createdAt.toDate().toLocaleString():''}</Text>
-                </View>
-                {err.code&&<Text style={{fontSize:11,color:COLORS.gold,marginBottom:2}}>Code: {err.code}</Text>}
-                <Text style={{fontSize:11,color:COLORS.gray}} numberOfLines={3}>{err.message}</Text>
-                {err.userId&&<Text style={{fontSize:10,color:COLORS.gray,marginTop:4}}>User: {err.userId}</Text>}
-              </View>
-            ))}
+
+            {/* Top errors by frequency */}
+            {topErrors.length>0&&(
+              <>
+                <Text style={[st.secTitle,{fontSize:12,color:COLORS.gold,marginBottom:8}]}>🔥 MOST FREQUENT</Text>
+                {topErrors.slice(0,5).map((e,i)=>(
+                  <View key={e.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:COLORS.card,borderRadius:10,padding:10,marginBottom:6,borderLeftWidth:3,borderLeftColor:e.count>=5?COLORS.red:COLORS.gold}}>
+                    <Text style={{fontSize:10,fontWeight:'900',color:e.count>=5?COLORS.red:COLORS.gold,width:22}}>#{i+1}</Text>
+                    <View style={{flex:1}}>
+                      <Text style={{fontSize:11,fontWeight:'800',color:COLORS.white}}>{e.context}</Text>
+                      <Text style={{fontSize:10,color:COLORS.gray}}>Last seen: {e.lastSeen?.toDate?e.lastSeen.toDate().toLocaleString():''}</Text>
+                    </View>
+                    <View style={{backgroundColor:e.count>=5?COLORS.redDim:COLORS.goldDim,borderRadius:8,paddingHorizontal:8,paddingVertical:4,marginLeft:8}}>
+                      <Text style={{fontSize:12,fontWeight:'900',color:e.count>=5?COLORS.red:COLORS.gold}}>{e.count}x</Text>
+                    </View>
+                  </View>
+                ))}
+                <View style={{height:1,backgroundColor:COLORS.gray3,marginVertical:14}}/>
+              </>
+            )}
+
+            {/* Recent error list */}
+            <Text style={[st.secTitle,{fontSize:12,color:COLORS.gray,marginBottom:8}]}>RECENT ERRORS</Text>
+            {errorLogs.length===0
+              ? <Text style={st.hint}>No errors logged yet.</Text>
+              : errorLogs.map(err=>{
+                const isUpload = err.context?.includes('upload');
+                const borderC  = isUpload ? COLORS.red : COLORS.gray3;
+                return (
+                  <View key={err.id} style={[st.reportCard,{borderLeftWidth:3,borderLeftColor:borderC}]}>
+                    <View style={{flexDirection:'row',alignItems:'center',marginBottom:4}}>
+                      <Ionicons name={isUpload?'cloud-upload':'bug'} size={14} color={isUpload?COLORS.red:COLORS.gold}/>
+                      <Text style={{fontSize:11,fontWeight:'800',color:isUpload?COLORS.red:COLORS.gold,marginLeft:6,flex:1}}>{err.context||'Unknown'}</Text>
+                      <Text style={{fontSize:9,color:COLORS.gray}}>{err.createdAt?.toDate?err.createdAt.toDate().toLocaleString():''}</Text>
+                    </View>
+                    {err.code&&<Text style={{fontSize:10,color:COLORS.gold,marginBottom:2}}>Code: {err.code}</Text>}
+                    <Text style={{fontSize:11,color:COLORS.gray}} numberOfLines={2}>{err.message}</Text>
+                    {err.userId&&<Text style={{fontSize:9,color:COLORS.gray2,marginTop:3}}>uid: {err.userId}</Text>}
+                  </View>
+                );
+              })
+            }
           </>
         )}
 

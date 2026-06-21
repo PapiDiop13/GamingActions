@@ -4,6 +4,13 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 
+// Static import — dynamic import can crash in production builds on iOS.
+// If expo-tracking-transparency is not available (Expo Go, Android), the try/catch handles it.
+let TrackingTransparency = null;
+try {
+  TrackingTransparency = require('expo-tracking-transparency');
+} catch (_) {}
+
 const { width } = Dimensions.get('window');
 const LOGO_URI = 'https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg';
 
@@ -41,14 +48,17 @@ export default function OnboardingScreen({ navigation }) {
   const askTrackingOnce = async () => {
     if (askedTracking) return;
     setAskedTracking(true);
+    // Guard: module unavailable (Expo Go, Android) or already asked
+    if (!TrackingTransparency) return;
     try {
-      const TT = await import('expo-tracking-transparency');
-      const { status } = await TT.getTrackingPermissionsAsync();
+      // Small delay — iOS requires the app UI to be fully rendered before showing ATT prompt
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const { status } = await TrackingTransparency.getTrackingPermissionsAsync();
       if (status === 'undetermined') {
-        await TT.requestTrackingPermissionsAsync();
+        await TrackingTransparency.requestTrackingPermissionsAsync();
       }
     } catch (e) {
-      // Module indisponible (Expo Go) ou erreur — on ignore, pas de crash
+      // Silently ignore — tracking permission is optional, never crash the app
     }
   };
 

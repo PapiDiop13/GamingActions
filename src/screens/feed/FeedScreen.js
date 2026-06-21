@@ -6,17 +6,20 @@ import {
   TouchableWithoutFeedback, KeyboardAvoidingView, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../../constants/colors';
 import useFeedStore from '../../store/useFeedStore';
 import useAuthStore from '../../store/useAuthStore';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { globalNavigate } from '../../utils/navigationRef';
+import { recordView } from '../../utils/feedAlgo';
 import { CONSOLES, GENRES } from '../../constants/data';
 import { GAMES } from '../../constants/games';
 import useUserStore from '../../store/useUserStore';
-import { collection, query, where, onSnapshot, getDoc, getDocs, doc, updateDoc, deleteDoc, increment, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, getDoc, getDocs, doc, updateDoc, deleteDoc, increment, arrayUnion, arrayRemove, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { optimizeVideoUrl } from '../../config/cloudinary';
 import ConsoleIcon from '../../components/ConsoleIcon';
@@ -26,8 +29,14 @@ import FramedAvatar from '../../components/FramedAvatar';
 
 
 const { width: SW, height: SH } = Dimensions.get('window');
+// Tab bar height (matches MainNavigator CustomTabBar)
+const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 80 : 60;
 const HEADER_H = Platform.OS === 'ios' ? 110 : 90;
-const CARD_HEIGHT = SH - HEADER_H;
+// CRITICAL: subtract tab bar height so the feed card never goes under the navbar.
+// iOS Pro Max (932px): 932 - 110 - 80 = 742px card
+// iPhone Pro (852px):  852 - 110 - 80 = 662px card
+// iPhone SE (667px):   667 - 110 - 80 = 477px card
+const CARD_HEIGHT = SH - HEADER_H - TAB_BAR_HEIGHT;
 
 function shuffle(arr) {
   const a = [...arr];
@@ -283,9 +292,10 @@ function CommentBubble({ comment, onReply, compact, navigation }) {
     <TouchableOpacity activeOpacity={0.9} onLongPress={handleLongPress} delayLongPress={350} style={[
       sheetS.commentCard,
       compact && { padding: 8, marginBottom: 6 },
-      hasBorder && { borderColor, borderWidth: 1.5 },
-      isChampionFrame && { borderColor: '#E8C96B', borderWidth: 2 },
-      hasBorder && cf.glow && { shadowColor: borderColor, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 5 },
+      // Frames visible in compact (preview) too — just slightly thinner border
+      hasBorder && { borderColor, borderWidth: compact ? 1 : 1.5 },
+      isChampionFrame && { borderColor: '#E8C96B', borderWidth: compact ? 1.5 : 2 },
+      !compact && hasBorder && cf.glow && { shadowColor: borderColor, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 5 },
     ]}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
         <TouchableOpacity onPress={() => { if (comment.userId) globalNavigate('UserProfile', { userId: comment.userId }); }} activeOpacity={0.7}>
@@ -346,31 +356,133 @@ function CommentBubble({ comment, onReply, compact, navigation }) {
 }
 
 function CommentsSheet({ visible, video, onClose, userProfile }) {
-  const { getVideoComments, addComment, fetchComments } = useFeedStore();
+  const { user } = useAuthStore();
+  const [allComments, setAllComments] = useState([]);
+  const [replies, setReplies]         = useState({});
   const [commentText, setCommentText] = useState('');
-  const [replyTo, setReplyTo] = useState(null);
-  const comments = getVideoComments(video?.id);
-  const MAX = 100;
+  const [replyTarget, setReplyTarget] = useState(null);
+  const [loading, setLoading]         = useState(true);
+  const replyTargetRef = useRef(null);
+  const MAX = 150;
 
+  // Real-time listener — separated into top-level + reply map
   useEffect(() => {
-    if (visible && video?.id) {
-      const unsub = fetchComments(video.id);
-      return () => unsub && unsub();
-    }
+    if (!visible || !video?.id) return;
+    setLoading(true);
+    // No orderBy in the query — avoids requiring a composite Firestore index.
+    // We sort in memory instead (small dataset per video, negligible cost).
+    const q = query(
+      collection(db, 'comments'),
+      where('videoId', '==', video.id)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const all = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt?.seconds || 0) * 1000;
+          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt?.seconds || 0) * 1000;
+          return ta - tb; // ascending — oldest first
+        });
+      // Debug: log parentId values to verify Firestore write
+      if (__DEV__) {
+        all.forEach(c => console.log('[CommentsSheet] comment:', c.id, 'parentId:', c.parentId, 'text:', c.text?.slice(0,20)));
+      }
+      // A reply has parentId = string (comment ID). Top-level has parentId = null or undefined.
+      const topLevel = all.filter(c => !c.parentId).reverse();
+      const replyMap = {};
+      all.filter(c => c.parentId && typeof c.parentId === 'string').forEach(r => {
+        if (!replyMap[r.parentId]) replyMap[r.parentId] = [];
+        replyMap[r.parentId].push(r);
+      });
+      setAllComments(topLevel);
+      setReplies(replyMap);
+      setLoading(false);
+    });
+    return () => unsub();
   }, [visible, video?.id]);
 
-  if (!video) return null;
+  const handleReply = ({ parentId, username }) => {
+    const target = { parentId, username };
+    replyTargetRef.current = target;
+    setReplyTarget(target);
+    setCommentText('@' + username + ' ');
+  };
 
-  const handleSend = () => {
-    const body = (replyTo ? '@' + replyTo + ' ' : '') + commentText.trim();
-    if (body && userProfile) {
-      addComment(video.id, body, userProfile);
-      setCommentText('');
-      setReplyTo(null);
+  const handleSend = async () => {
+    const body = commentText.trim();
+    if (!body || !user?.uid || !video?.id) return;
+    // Capture BOTH state and ref at function entry — whichever is non-null wins
+    // This double-capture makes the closure immune to async timing issues
+    const capturedState = replyTarget;                // state value at call time
+    const capturedRef   = replyTargetRef.current;     // ref value at call time
+    const currentReplyTarget = capturedState || capturedRef;
+    if (__DEV__) console.log('[CommentsSheet] handleSend — replyTarget:', currentReplyTarget);
+    replyTargetRef.current = null;
+    setReplyTarget(null);
+    setCommentText('');
+
+    // Extract @mentions and #hashtags for indexing + notifications
+    const mentions  = (body.match(/@(\w+)/g) || []).map(m => m.slice(1));
+    const hashtags  = (body.match(/#(\w+)/g) || []).map(h => h.slice(1).toLowerCase());
+
+    try {
+      await addDoc(collection(db, 'comments'), {
+        videoId:              video.id,
+        userId:               user.uid,
+        username:             userProfile?.username || 'Player',
+        avatar:               userProfile?.avatar || '',
+        accountType:          userProfile?.accountType || 'gamer',
+        plan:                 userProfile?.plan || 'free',
+        equippedFrame:        userProfile?.equippedFrame || 'none',
+        equippedCommentFrame: userProfile?.equippedCommentFrame || 'none',
+        isChampion:           userProfile?.isChampion || false,
+        isCurrentLeader:      userProfile?.isCurrentLeader || false,
+        streakLevel:          userProfile?.streakLevel || 'noob',
+        text:    body,
+        likes:   0,
+        likedBy: [],
+        mentions,
+        hashtags,
+        parentId:  currentReplyTarget?.parentId || null,
+        createdAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, 'videos', video.id), { commentsCount: increment(1) });
+
+      // Notify video owner
+      if (!currentReplyTarget && video.userId && video.userId !== user.uid) {
+        await addDoc(collection(db, 'notifications'), {
+          userId: video.userId, type: 'comment',
+          fromUserId: user.uid, fromUsername: userProfile?.username || 'Someone',
+          text: 'commented: "' + body.slice(0, 50) + '"',
+          videoId: video.id, read: false, createdAt: serverTimestamp(),
+        });
+      }
+      // Notify parent comment author on reply
+      if (currentReplyTarget?.parentId) {
+        try {
+          const parentSnap = await getDoc(doc(db, 'comments', currentReplyTarget.parentId));
+          if (parentSnap.exists()) {
+            const ownerId = parentSnap.data().userId;
+            if (ownerId && ownerId !== user.uid) {
+              await addDoc(collection(db, 'notifications'), {
+                userId: ownerId, type: 'reply',
+                fromUserId: user.uid, fromUsername: userProfile?.username || 'Someone',
+                text: 'replied to your comment: "' + body.slice(0, 40) + '"',
+                videoId: video.id, read: false, createdAt: serverTimestamp(),
+              });
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      await logError(LOG_CONTEXT.COMMENT_FAIL, e, user?.uid);
     }
   };
 
-  const remaining = MAX - commentText.length;
+  const totalCount = allComments.length + Object.values(replies).reduce((s,r) => s + r.length, 0);
+  const remaining  = MAX - commentText.length;
+
+  if (!video) return null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" statusBarTranslucent>
@@ -382,20 +494,28 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
           <View style={sheetS.handle} />
           <View style={sheetS.tabRow}>
             <Ionicons name="chatbubble-outline" size={14} color={COLORS.gold} />
-            <Text style={sheetS.tabText}> {comments.length} Comments</Text>
+            <Text style={sheetS.tabText}> {totalCount} Comments</Text>
           </View>
           <ScrollView style={sheetS.list} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: 8 }}>
-            {comments.length === 0 ? (
+            {loading ? (
+              <ActivityIndicator color={COLORS.gold} size="large" style={{ marginTop: 40 }} />
+            ) : allComments.length === 0 ? (
               <Text style={sheetS.emptyText}>No comments yet. Be the first! 👇</Text>
-            ) : comments.map((c) => (
-              <CommentBubble key={c.id} comment={c} onReply={setReplyTo} />
+            ) : allComments.map((c) => (
+              <SheetCommentItem
+                key={c.id}
+                comment={c}
+                replies={replies[c.id] || []}
+                onReply={handleReply}
+                currentUserId={user?.uid}
+              />
             ))}
           </ScrollView>
-          {replyTo && (
+          {replyTarget && (
             <View style={sheetS.replyBar}>
               <Ionicons name="return-down-forward" size={14} color={COLORS.blue} />
-              <Text style={sheetS.replyBarText}> Replying to @{replyTo}</Text>
-              <TouchableOpacity onPress={() => setReplyTo(null)} style={{ marginLeft: 'auto' }}>
+              <Text style={sheetS.replyBarText}> Replying to @{replyTarget.username}</Text>
+              <TouchableOpacity onPress={() => { replyTargetRef.current = null; setReplyTarget(null); setCommentText(''); }} style={{ marginLeft: 'auto' }}>
                 <Ionicons name="close-circle" size={18} color={COLORS.gray} />
               </TouchableOpacity>
             </View>
@@ -406,15 +526,15 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
               <TextInput
                 value={commentText}
                 onChangeText={t => setCommentText(t.slice(0, MAX))}
-                placeholder={replyTo ? `Reply to @${replyTo}...` : 'Add a comment...'}
+                placeholder={replyTarget ? `Reply to @${replyTarget.username}...` : 'Add a comment... Use @ and #'}
                 placeholderTextColor={COLORS.gray}
                 style={sheetS.input}
                 autoFocus
                 maxLength={MAX}
                 multiline
               />
-              {commentText.length > 70 && (
-                <Text style={{ fontSize: 10, color: remaining < 15 ? COLORS.red : COLORS.gray, textAlign: 'right', marginTop: 2 }}>{remaining}</Text>
+              {commentText.length > 100 && (
+                <Text style={{ fontSize: 10, color: remaining < 20 ? COLORS.red : COLORS.gray, textAlign: 'right', marginTop: 2 }}>{remaining}</Text>
               )}
             </View>
             <TouchableOpacity
@@ -431,24 +551,234 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
   );
 }
 
+// ── SheetCommentItem — renders one comment bubble in the bottom sheet ─────────
+// Supports 1-level replies, @mention highlight (blue), #hashtag highlight (gold),
+// like with optimistic update, and "View X replies" expand/collapse.
+function SheetCommentItem({ comment, replies = [], onReply, currentUserId, isReply = false }) {
+  const [liked, setLiked]         = useState(!!(comment.likedBy || []).includes(currentUserId));
+  const [likeCount, setLikeCount] = useState(comment.likes || 0);
+  const [showReplies, setShowReplies] = useState(false);
+  const [editing, setEditing]     = useState(false);
+  const [editText, setEditText]   = useState(comment.text || '');
+  const [deleted, setDeleted]     = useState(false);
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const isOwn   = comment.userId === currentUserId;
+  const ADMINS  = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
+
+  const handleLongPress = () => {
+    const options = [];
+    if (isOwn) {
+      options.push({ text: '✏️ Edit', onPress: () => { setEditText(comment.text); setEditing(true); } });
+    }
+    options.push({
+      text: '🗑️ Delete', style: 'destructive', onPress: () => {
+        Alert.alert('Delete comment?', 'This cannot be undone.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: async () => {
+            try {
+              await deleteDoc(doc(db, 'comments', comment.id));
+              if (comment.videoId) await updateDoc(doc(db, 'videos', comment.videoId), { commentsCount: increment(-1) });
+              setDeleted(true);
+            } catch (e) {}
+          }},
+        ]);
+      }
+    });
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Comment', isOwn ? '' : 'Report this comment?', options);
+  };
+
+  const handleSaveEdit = async () => {
+    const newText = editText.trim().slice(0, 150);
+    if (!newText) return;
+    try {
+      await updateDoc(doc(db, 'comments', comment.id), { text: newText, edited: true });
+      setEditing(false);
+    } catch (e) {}
+  };
+
+  if (deleted) return null;
+
+  useEffect(() => {
+    setLiked(!!(comment.likedBy || []).includes(currentUserId));
+    setLikeCount(comment.likes || 0);
+  }, [comment.likedBy, comment.likes]);
+
+  const handleLike = async () => {
+    if (!currentUserId) return;
+    const newLiked = !liked;
+    setLiked(newLiked);
+    setLikeCount(c => newLiked ? c + 1 : Math.max(0, c - 1));
+    Animated.sequence([
+      Animated.spring(scaleAnim, { toValue: 1.3, useNativeDriver: true, speed: 60 }),
+      Animated.spring(scaleAnim, { toValue: 1,   useNativeDriver: true, speed: 30 }),
+    ]).start();
+    try {
+      await updateDoc(doc(db, 'comments', comment.id), {
+        likes:   increment(newLiked ? 1 : -1),
+        likedBy: newLiked ? arrayUnion(currentUserId) : arrayRemove(currentUserId),
+      });
+    } catch (e) {
+      setLiked(!newLiked);
+      setLikeCount(c => newLiked ? Math.max(0, c - 1) : c + 1);
+    }
+  };
+
+  const nameColor = comment.accountType === 'gameconic' ? COLORS.red
+    : comment.accountType === 'creator' ? COLORS.blue
+    : comment.plan === 'legendary'      ? COLORS.gold
+    : COLORS.white;
+
+  // Frame styling — same logic as CommentBubble, applied only on top-level comments
+  const cf = commentFrameStyle(comment);
+  const hasBorder = cf && cf.id !== 'none';
+  const borderColor = hasBorder ? cf.color : 'transparent';
+  const isChampionFrame = cf?.id === 'cf_champion';
+
+  // Render text with @mention (blue) and #hashtag (gold) highlights
+  const renderRichText = (text) => {
+    if (!text) return null;
+    const parts = text.split(/(@\w+|#\w+)/g);
+    return (
+      <Text style={sheetS.commentText}>
+        {parts.map((part, i) => {
+          if (part.startsWith('@')) return <Text key={i} style={{ color: COLORS.blue, fontWeight: '700' }}>{part}</Text>;
+          if (part.startsWith('#')) return <Text key={i} style={{ color: COLORS.gold, fontWeight: '700' }}>{part}</Text>;
+          return <Text key={i}>{part}</Text>;
+        })}
+      </Text>
+    );
+  };
+
+  return (
+    <View>
+      {isReply ? (
+        // ── Reply bubble: minimal — indented, smaller text, no avatar/border/frame ──
+        <View style={[sheetS.replyCard, { marginLeft: 52, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: COLORS.gray3 }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 }}>
+            <Text style={{ fontSize: 10, fontWeight: '800', color: nameColor }}>{comment.username}</Text>
+            <Text style={{ fontSize: 9, color: COLORS.gray }}> · {fmtFeedTime(comment.createdAt)}</Text>
+          </View>
+          {/* Limit reply text to 2 lines — tap to open full sheet */}
+          <Text style={{ fontSize: 12, color: COLORS.white, lineHeight: 17 }} numberOfLines={2}>
+            {(comment.text || '').split(/(@\w+|#\w+)/g).map((part, i) => {
+              if (part.startsWith('@')) return <Text key={i} style={{ color: COLORS.blue, fontWeight: '600' }}>{part}</Text>;
+              if (part.startsWith('#')) return <Text key={i} style={{ color: COLORS.gold, fontWeight: '600' }}>{part}</Text>;
+              return <Text key={i}>{part}</Text>;
+            })}
+          </Text>
+          <TouchableOpacity onPress={handleLike} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+            <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+              <Ionicons name={liked ? 'heart' : 'heart-outline'} size={11} color={liked ? COLORS.red : COLORS.gray} />
+            </Animated.View>
+            {likeCount > 0 && <Text style={{ fontSize: 9, color: liked ? COLORS.red : COLORS.gray, marginLeft: 3 }}>{likeCount}</Text>}
+          </TouchableOpacity>
+        </View>
+      ) : (
+      // ── Top-level comment: long press → edit/delete ──────────────────────────
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onLongPress={handleLongPress}
+        delayLongPress={350}
+        style={[
+          sheetS.commentCard,
+          hasBorder && { borderColor, borderWidth: 1.5 },
+          isChampionFrame && { borderColor: '#E8C96B', borderWidth: 2 },
+          hasBorder && cf.glow && { shadowColor: borderColor, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 5 },
+        ]}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          <TouchableOpacity onPress={() => comment.userId && globalNavigate('UserProfile', { userId: comment.userId })} activeOpacity={0.7}>
+            <FramedAvatar user={comment} size={28} />
+          </TouchableOpacity>
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Text style={[sheetS.commentUser, { color: nameColor }]}>{comment.username}</Text>
+              <Text style={sheetS.commentTime}> · {fmtFeedTime(comment.createdAt)}</Text>
+            </View>
+            {editing ? (
+              <View style={{ marginTop: 4 }}>
+                <TextInput
+                  value={editText}
+                  onChangeText={t => setEditText(t.slice(0, 150))}
+                  style={{ backgroundColor: COLORS.dark, borderRadius: 8, padding: 8, color: COLORS.white, fontSize: 13 }}
+                  multiline maxLength={150} autoFocus
+                />
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 6, gap: 8 }}>
+                  <TouchableOpacity onPress={() => setEditing(false)} style={{ paddingHorizontal: 12, paddingVertical: 6 }}>
+                    <Text style={{ color: COLORS.gray, fontSize: 12 }}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleSaveEdit} style={{ paddingHorizontal: 14, paddingVertical: 6, backgroundColor: COLORS.gold, borderRadius: 16 }}>
+                    <Text style={{ color: COLORS.black, fontSize: 12, fontWeight: '800' }}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : renderRichText(comment.text)}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
+              {!isReply && (
+                <TouchableOpacity
+                  onPress={() => onReply({ parentId: comment.id, username: comment.username })}
+                  style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}
+                >
+                  <Ionicons name="chatbubble-outline" size={12} color={COLORS.gray} />
+                  <Text style={{ fontSize: 11, color: COLORS.gray, marginLeft: 4, fontWeight: '600' }}>
+                    Reply{replies.length > 0 ? ` · ${replies.length}` : ''}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={handleLike} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                  <Ionicons name={liked ? 'heart' : 'heart-outline'} size={13} color={liked ? COLORS.red : COLORS.gray} />
+                </Animated.View>
+                {likeCount > 0 && <Text style={{ fontSize: 11, color: liked ? COLORS.red : COLORS.gray, marginLeft: 3 }}>{likeCount}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+      )}
+
+      {/* Expand/collapse replies */}
+      {!isReply && replies.length > 0 && (
+        <TouchableOpacity onPress={() => setShowReplies(v => !v)} style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 44, paddingVertical: 4, marginBottom: 4, gap: 6 }}>
+          <View style={{ width: 20, height: 1, backgroundColor: COLORS.gray3 }} />
+          <Text style={{ fontSize: 11, color: COLORS.blue, fontWeight: '700' }}>
+            {showReplies ? 'Hide replies' : `View ${replies.length} repl${replies.length > 1 ? 'ies' : 'y'}`}
+          </Text>
+          <Ionicons name={showReplies ? 'chevron-up' : 'chevron-down'} size={11} color={COLORS.blue} />
+        </TouchableOpacity>
+      )}
+
+      {/* Inline replies */}
+      {!isReply && showReplies && replies.map(r => (
+        <View key={r.id} style={{ marginBottom: 4 }}>
+          <SheetCommentItem comment={r} replies={[]} onReply={onReply} currentUserId={currentUserId} isReply={true} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const sheetS = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  sheetWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
-  sheet: { backgroundColor: COLORS.dark, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: Platform.OS === 'ios' ? 30 : 10, maxHeight: SH * 0.88 },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.gray2, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
-  tabRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
-  tabText: { fontSize: 13, color: COLORS.gold, fontWeight: '700' },
-  list: { maxHeight: SH * 0.55, paddingHorizontal: 12 },
-  emptyText: { fontSize: 14, color: COLORS.gray, textAlign: 'center', marginTop: 30, marginBottom: 20 },
-  commentCard: { backgroundColor: COLORS.card, borderRadius: 12, padding: 11, marginBottom: 8, borderWidth: 1, borderColor: 'transparent' },
+  backdrop:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  sheetWrap:   { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  sheet:       { backgroundColor: COLORS.dark, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: Platform.OS === 'ios' ? 34 : 12, maxHeight: SH - TAB_BAR_HEIGHT },
+  handle:      { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.gray2, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
+  tabRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  tabText:     { fontSize: 13, color: COLORS.gold, fontWeight: '700' },
+  list:        { maxHeight: SH - TAB_BAR_HEIGHT - 180, paddingHorizontal: 12 }, // 180 = handle + header + input bar
+  emptyText:   { fontSize: 14, color: COLORS.gray, textAlign: 'center', marginTop: 30, marginBottom: 20 },
+  commentCard: { backgroundColor: COLORS.card, borderRadius: 12, padding: 11, marginBottom: 6, borderWidth: 1, borderColor: 'transparent' },
+  replyCard:   { backgroundColor: COLORS.dark, marginBottom: 4 },
   commentUser: { fontSize: 12, fontWeight: '800', color: COLORS.gold },
   commentTime: { fontSize: 10, color: COLORS.gray },
   commentText: { fontSize: 13, color: COLORS.white, lineHeight: 18, marginTop: 3 },
-  replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: COLORS.card, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 },
-  replyBarText: { fontSize: 12, color: COLORS.blue, fontWeight: '600' },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 },
-  input: { backgroundColor: COLORS.card, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: COLORS.white, maxHeight: 80 },
-  sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
+  replyBar:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: COLORS.card, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 },
+  replyBarText:{ fontSize: 12, color: COLORS.blue, fontWeight: '600' },
+  inputRow:    { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 },
+  input:       { backgroundColor: COLORS.card, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: COLORS.white, maxHeight: 80 },
+  sendBtn:     { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
 });
 
 function FilterModal({ visible, onClose, onApply }) {
@@ -590,36 +920,75 @@ function fmtFeedTime(ts) {
 function PreviewComments({ videoId, isActive, onOpenSheet }) {
   const { getVideoComments, fetchComments } = useFeedStore();
   const comments = getVideoComments(videoId);
+  const [loadingPreview, setLoadingPreview] = useState(true);
 
   useEffect(() => {
     if (isActive && videoId) {
+      setLoadingPreview(true);
       const unsub = fetchComments(videoId);
-      return () => unsub && unsub();
+      // Mark loaded after a short delay — fetchComments is a listener, not a promise
+      const t = setTimeout(() => setLoadingPreview(false), 800);
+      return () => { unsub && unsub(); clearTimeout(t); };
     }
   }, [isActive, videoId]);
 
-  const preview = comments.slice(0, 3);
-  if (preview.length === 0) {
+  // Show top 2 top-level comments in preview (replies shown as count only)
+  const topLevel = comments.filter(c => !c.parentId);
+  const replyMap = {};
+  comments.filter(c => c.parentId).forEach(r => {
+    if (!replyMap[r.parentId]) replyMap[r.parentId] = [];
+    replyMap[r.parentId].push(r);
+  });
+
+  // Show spinner while loading
+  if (loadingPreview && comments.length === 0) {
+    return <ActivityIndicator color={COLORS.gold} size="small" style={{ marginTop: 8, alignSelf: 'flex-start' }} />;
+  }
+
+  if (topLevel.length === 0) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center' }}>
-        <Text style={{ fontSize: 12, color: COLORS.gray, textAlign: 'center' }}>No comments yet. Be the first! 👇</Text>
-      </View>
+      <TouchableOpacity onPress={onOpenSheet} style={{ paddingVertical: 4 }}>
+        <Text style={{ fontSize: 11, color: COLORS.gray }}>No comments yet. Be the first 👇</Text>
+      </TouchableOpacity>
     );
   }
 
+  const preview = topLevel.slice(0, 2); // 2 comments max in preview — avoids cutting off
+
   return (
-    <View style={{ flex: 1 }}>
-      <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
-        {preview.map((c) => (
-          <CommentBubble key={c.id} comment={c} onReply={() => onOpenSheet()} compact />
-        ))}
-        {comments.length > 3 && (
-          <TouchableOpacity onPress={onOpenSheet} style={{ paddingVertical: 6, alignItems: 'center' }}>
-            <Text style={{ fontSize: 12, color: COLORS.gold, fontWeight: '700' }}>View all {comments.length} comments</Text>
-          </TouchableOpacity>
-        )}
-      </ScrollView>
-    </View>
+    // Dynamic maxHeight: 25% of available screen height (screen - tab bar - status bar)
+    // This adapts to Pro Max (932px), Pro (852px), standard (844px), SE (667px) etc.
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      nestedScrollEnabled
+      scrollEnabled
+      style={{ maxHeight: Math.min(160, SH * 0.18) }}
+    >
+      {preview.map((c) => {
+        const replyCount = (replyMap[c.id] || []).length;
+        return (
+          <View key={c.id}>
+            <CommentBubble
+              comment={c}
+              onReply={() => onOpenSheet()}
+              compact
+            />
+            {replyCount > 0 && (
+              <TouchableOpacity onPress={onOpenSheet} style={{ paddingLeft: 36, marginTop: -4, marginBottom: 6 }}>
+                <Text style={{ fontSize: 10, color: COLORS.blue, fontWeight: '700' }}>
+                  ↳ {replyCount} repl{replyCount > 1 ? 'ies' : 'y'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        );
+      })}
+      {topLevel.length > 3 && (
+        <TouchableOpacity onPress={onOpenSheet} style={{ paddingVertical: 4, paddingLeft: 4 }}>
+          <Text style={{ fontSize: 11, color: COLORS.gold, fontWeight: '700' }}>View all {comments.length} comments</Text>
+        </TouchableOpacity>
+      )}
+    </ScrollView>
   );
 }
 
@@ -746,11 +1115,25 @@ const isOwnVideo = item.userId === user?.uid;
     } catch (e) {}
   }, [isActive, isPaused]);
 
-  // Compte une vue dès que le clip devient actif (dédoublonné dans le store)
+  // ── 5-second view tracking ──────────────────────────────────────────────────
+  // A clip counts as "viewed" only after 5 continuous seconds active in the feed.
+  // This both increments the Firestore viewCount (deduped per session) AND feeds
+  // the recommendation algorithm (recordView updates genre/game preferences).
+  // Fast scrolling past a clip in <5s does NOT count — keeps the algo accurate.
+  const viewTimerRef = useRef(null);
   useEffect(() => {
+    if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
+
     if (isActive && item?.id) {
-      incrementView(item.id, user?.uid);
+      viewTimerRef.current = setTimeout(async () => {
+        incrementView(item.id, user?.uid);   // Firestore viewCount (session-deduped)
+        await recordView(item);                // Local algo preference update
+      }, 5000);
     }
+
+    return () => {
+      if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
+    };
   }, [isActive, item?.id]);
 
   // Synchronise le mute

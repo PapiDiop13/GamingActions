@@ -1,3 +1,21 @@
+/**
+ * useFanbaseStore.js — Fanbase subscription state (Zustand)
+ *
+ * Manages creator fanbase subscriptions (JOIN / CANCEL).
+ * Currently in test mode: no payment required, marked with isTest:true flag
+ * for easy cleanup when RevenueCat ($4.99/month) is integrated.
+ *
+ * Data model:
+ *   fanbase_subscriptions/{subscriberId}_{creatorId}
+ *   → { subscriberId, creatorId, status: 'active', isTest: true, createdAt }
+ *
+ * Local cache (subscriptions map) enables instant UI updates without a Firestore
+ * read on every render — synced with actual data via checkIsSubscribed() and
+ * loadMySubscriptions() on screen mount.
+ *
+ * Anti-cheat: no GA Points are awarded for fanbase joins (could be exploited
+ * by creating fake subscriber accounts).
+ */
 import { create } from 'zustand';
 import {
   doc, getDoc, setDoc, deleteDoc, updateDoc, increment,
@@ -5,6 +23,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import useAuthStore from './useAuthStore';
+import { logEvent, logError, LOG_CONTEXT } from '../utils/errorLogger';
 
 const useFanbaseStore = create((set, get) => ({
   // Cache local : { [creatorId]: true }
@@ -81,9 +100,11 @@ const useFanbaseStore = create((set, get) => ({
         createdAt: serverTimestamp(),
       });
 
+      await logEvent(LOG_CONTEXT.FANBASE_JOIN, { creatorId }, currentUserId);
       return true;
     } catch (e) {
-      console.log('joinFanbase error:', e.message);
+      // ⚠️ Join failed — optimistic update must be rolled back
+      await logError(LOG_CONTEXT.FANBASE_FAIL, e, currentUserId);
       set(state => ({ subscriptions: { ...state.subscriptions, [creatorId]: false } }));
       return false;
     }
@@ -106,7 +127,8 @@ const useFanbaseStore = create((set, get) => ({
       });
       return true;
     } catch (e) {
-      console.log('cancelFanbase error:', e.message);
+      // ⚠️ Cancel failed — fanbase subscription may be in inconsistent state
+      await logError(LOG_CONTEXT.FANBASE_FAIL, e, currentUserId);
       set(state => ({ subscriptions: { ...state.subscriptions, [creatorId]: true } }));
       return false;
     }

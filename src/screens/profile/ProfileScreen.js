@@ -12,6 +12,7 @@ import useUserStore from '../../store/useUserStore';
 import useFanbaseStore from '../../store/useFanbaseStore';
 import { db } from '../../config/firebase';
 import { awardPoints, POINTS } from '../../utils/points';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { ringColorForUser, glowColorForUser, getFrameById, getVideoFrameById } from '../../constants/frames';
 import { ElectricBanner, ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
@@ -118,7 +119,7 @@ function GAPointsPopup({ visible, onClose, navigation }) {
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
       <TouchableOpacity style={popS.backdrop} onPress={onClose} activeOpacity={1}>
-        <View style={popS.card}>
+        <TouchableOpacity activeOpacity={1} onPress={e => e.stopPropagation()} style={popS.card}>
           <View style={[popS.iconCircle, { backgroundColor: 'rgba(0,212,255,0.12)' }]}>
             <Ionicons name="diamond" size={26} color={COLORS.blue} />
           </View>
@@ -157,7 +158,7 @@ function GAPointsPopup({ visible, onClose, navigation }) {
               </TouchableOpacity>
             </View>
           </ScrollView>
-        </View>
+        </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
   );
@@ -312,8 +313,30 @@ export default function ProfileScreen({ navigation, route }) {
     const [refreshing, setRefreshing] = useState(false);
     const [showStreakInfo, setShowStreakInfo] = useState(false);
   
+    // Stable user object — spread userProfile but guard against momentary null
+    // (can happen when an overlay opens and triggers a re-render mid-Firestore-update).
+    // We keep the last known gaPoints/streakPoints in a ref so they never flash to 0.
+    const stablePointsRef = React.useRef({ gaPoints: 0, streakPoints: 0, streakLevel: 'noob', ggReceived: 0 });
+    if (userProfile?.gaPoints !== undefined) {
+      stablePointsRef.current = {
+        gaPoints:     userProfile.gaPoints,
+        streakPoints: userProfile.streakPoints ?? 0,
+        streakLevel:  userProfile.streakLevel  ?? 'noob',
+        ggReceived:   userProfile.ggReceived   ?? 0,
+      };
+    }
+
     const user = isOwn
-      ? { ...userProfile, uid: authUser?.uid, email: authUser?.email }
+      ? {
+          ...userProfile,
+          uid:          authUser?.uid,
+          email:        authUser?.email,
+          // Use stable values — never flash to 0 on re-render
+          gaPoints:     userProfile?.gaPoints     ?? stablePointsRef.current.gaPoints,
+          streakPoints: userProfile?.streakPoints ?? stablePointsRef.current.streakPoints,
+          streakLevel:  userProfile?.streakLevel  ?? stablePointsRef.current.streakLevel,
+          ggReceived:   userProfile?.ggReceived   ?? stablePointsRef.current.ggReceived,
+        }
       : (externalProfile || null);
   
     const onRefresh = async () => {
@@ -325,7 +348,9 @@ export default function ProfileScreen({ navigation, route }) {
           try {
             const snap = await getDocs(query(collection(db, 'videos'), where('userId', '==', targetId), orderBy('createdAt', 'desc')));
             setUserVideos(snap.docs.map(d => ({ id: d.id, ...d.data(), thumbnailUrl: d.data().thumbnail || d.data().thumbnailUrl || null })));
-          } catch (e) {}
+          } catch (e) {
+            await logError(LOG_CONTEXT.PROFILE_FAIL, e, targetId);
+          }
         }
         setRefreshing(false);
       };
@@ -382,9 +407,14 @@ export default function ProfileScreen({ navigation, route }) {
         return () => unsub();
       }, [authUser?.uid, userId, isOwn]);
 
-  const TABS = isOwn
-    ? (isCreator ? ['Clips', 'Tips', 'Fanbase', 'Infos'] : ['Clips', 'Fanbase', 'Infos'])
-    : (isCreator ? ['Clips', 'Tips', 'Fanbase', 'Infos'] : ['Clips', 'Infos']);
+  // Tabs visible depend on account type:
+  // - gamer      → Clips, Infos (no Fanbase, no Tips)
+  // - creator    → Clips, Tips, Fanbase, Infos
+  // - gameconic  → Clips, Tips, Fanbase, Infos
+  // When viewing someone else's profile, same rules apply based on THEIR accountType
+  const TABS = isCreator
+    ? ['Clips', 'Tips', 'Fanbase', 'Infos']
+    : ['Clips', 'Infos'];
 
   const handleDeleteVideo = async (video) => {
     Alert.alert(
@@ -404,6 +434,7 @@ export default function ProfileScreen({ navigation, route }) {
               if (authUser?.uid) await awardPoints(authUser.uid, -POINTS.POST_CLIP);
               setUserVideos(prev => prev.filter(v => v.id !== video.id));
             } catch (e) {
+              await logError(LOG_CONTEXT.VIDEO_DELETE, e, useAuthStore.getState().user?.uid);
               Alert.alert('Error', 'Could not delete video. Please try again later.');
             }
           },

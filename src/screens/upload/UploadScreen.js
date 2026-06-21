@@ -18,6 +18,7 @@ import { VIDEO_FRAMES, getVideoFrameById } from '../../constants/frames';
 import { setUploadState } from '../feed/FeedScreen';
 import { globalNavigate } from '../../utils/navigationRef';
 import * as StoreReview from 'expo-store-review';
+import { logError, logEvent, LOG_CONTEXT } from '../../utils/errorLogger';
 
 const GREEN = '#00C853';
 
@@ -162,6 +163,7 @@ export default function UploadScreen({ navigation, route }) {
           return ms >= weekAgo;
         }).length;
         if (recentCount >= WEEKLY_UPLOAD_LIMIT) {
+          await logEvent(LOG_CONTEXT.UPLOAD_LIMIT, { recentCount }, user?.uid);
           return Alert.alert(
             'Weekly limit reached',
             `You can upload up to ${WEEKLY_UPLOAD_LIMIT} videos per week. You've hit the limit — please try again in a few days. 🎮`
@@ -174,6 +176,7 @@ export default function UploadScreen({ navigation, route }) {
 
     setUploading(true);
     setUploadState({ isUploading: true, progress: 0 });
+    await logEvent(LOG_CONTEXT.UPLOAD_START, { contentType, game, console: selectedConsole }, user?.uid);
   
     const destTab = contentType === 'clip' ? 'Feed' : 'Tips';
   
@@ -205,12 +208,18 @@ export default function UploadScreen({ navigation, route }) {
         } catch (e) {}
       }
 
+      // Extract hashtags from title + caption for search indexing
+      const allText = (title.trim() + ' ' + caption).toLowerCase();
+      const hashtagMatches = allText.match(/#(\w+)/g) || [];
+      const hashtags = [...new Set(hashtagMatches.map(h => h.slice(1)))];
+
       await addDoc(collection(db, 'videos'), {
         userId: user?.uid,
         username: userProfile?.username || 'PLAYER',
         avatar: userProfile?.avatar || '',
         title: title.trim(),
         caption,
+        hashtags, // indexed array for HashtagScreen queries
         game,
         genre: selectedGenre,
         console: selectedConsole,
@@ -226,11 +235,16 @@ export default function UploadScreen({ navigation, route }) {
         commentsCount: 0,
         viewCount: 0,
         createdAt: serverTimestamp(),
-        randomOrder: Math.floor(Math.random() * 1000000),
+        // randomOrder: timestamp-seeded unique value for feed shuffle.
+        // Using Date.now() as base + random suffix ensures no two videos
+        // ever get the same value, even if uploaded simultaneously.
+        // Cloud Function reshuffles all values every 6h for true feed variety.
+        randomOrder: Date.now() + Math.floor(Math.random() * 100000),
       });
   
       setUploadState({ isUploading: false, progress: 0 });
       if (user?.uid) await awardPoints(user.uid, POINTS.POST_CLIP, 0, 'Posted a clip');
+      await logEvent(LOG_CONTEXT.UPLOAD_SUCCESS, { contentType, game }, user?.uid);
 
       // Store review — Apple gère la fréquence (max 3x/an), on demande à chaque upload
       try {
@@ -252,6 +266,7 @@ export default function UploadScreen({ navigation, route }) {
   
     } catch (e) {
       setUploadState({ isUploading: false, progress: 0 });
+      await logError(LOG_CONTEXT.UPLOAD_FAIL, e, user?.uid);
       Alert.alert('❌ Upload failed', 'Something went wrong. Please try again.');
     } finally {
       setUploading(false);

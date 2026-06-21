@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Platform,
   KeyboardAvoidingView, TextInput, ScrollView, Modal,
@@ -17,6 +17,7 @@ import { db } from '../../config/firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { ringColorForUser, commentFrameStyle } from '../../constants/frames';
 import FramedAvatar from '../../components/FramedAvatar';
+import { recordView } from '../../utils/feedAlgo';
 
 // ─── GG Button animé ─────────────────────────────────────────────────────────
 function GGBtn({ hasGG, count, onPress, disabled }) {
@@ -159,8 +160,33 @@ export default function VideoPlayerScreen({ navigation, route }) {
   const ggCount = liveVideo ? (liveVideo.ggCount ?? video?.ggCount ?? 0) : localGGCount;
   const commentCount = liveVideo ? (liveVideo.commentCount ?? video?.commentCount ?? 0) : localCommentCount;
 
+  // ── 5-second view timer ─────────────────────────────────────────────────────
+  // A clip is only counted as "viewed" after 5 continuous seconds of watch time.
+  // Scrolling past in 1-2 seconds = ignored (avoids polluting preference model).
+  // On confirmed view: increments Firestore viewCount + updates local feed algo prefs.
+  const viewTimerRef = useRef(null);
+  const viewConfirmedRef = useRef(false);
+
   useEffect(() => {
-    if (video?.id) incrementView(video.id, user?.uid);
+    // Clear any previous timer when video changes
+    if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
+    viewConfirmedRef.current = false;
+
+    if (!video?.id) return;
+
+    viewTimerRef.current = setTimeout(async () => {
+      if (!viewConfirmedRef.current) {
+        viewConfirmedRef.current = true;
+        // Increment Firestore viewCount (deduped per session in the store)
+        incrementView(video.id, user?.uid);
+        // Update local preference model for recommendation algo
+        await recordView(video);
+      }
+    }, 5000); // 5 seconds = intentional watch, not a scroll-past
+
+    return () => {
+      if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
+    };
   }, [video?.id]);
 
   const player = useVideoPlayer(video?.videoUrl ? optimizeVideoUrl(video.videoUrl) : null, (p) => {

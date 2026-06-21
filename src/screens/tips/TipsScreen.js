@@ -10,6 +10,7 @@ import { collection, query, where, orderBy, getDocs, limit, startAfter } from 'f
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
 import useAuthStore from '../../store/useAuthStore';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import useFanbaseStore from '../../store/useFanbaseStore';
 import Avatar from '../../components/FramedAvatar';
 

@@ -9,6 +9,8 @@ import useAuthStore from '../../store/useAuthStore';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { db, auth } from '../../config/firebase';
+import { clearPrefs } from '../../utils/feedAlgo';
+import { resetSession } from '../../utils/feedSession';
 
 function SettingsRow({ icon, label, onPress, right, danger = false, color }) {
   return (
@@ -56,6 +58,21 @@ export default function SettingsScreen({ navigation }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: signOut },
     ]);
+  };
+
+  const handleClearHistory = () => {
+    Alert.alert(
+      'Clear Watch History',
+      'Your feed preferences will be reset. The algorithm will start fresh.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: async () => {
+          await clearPrefs();
+          await resetSession(); // Also reset feed session so feed starts fresh
+          Alert.alert('✅ Done', 'Your watch history and feed session have been cleared.');
+        }},
+      ]
+    );
   };
 
   const handleDelete = () => {
@@ -235,6 +252,7 @@ export default function SettingsScreen({ navigation }) {
         <Text style={styles.sectionTitle}>ACCOUNT ACTIONS</Text>
         <View style={styles.section}>
           <SettingsRow icon="log-out-outline" label="Sign Out" onPress={handleLogout} danger />
+          <SettingsRow icon="time-outline" label="Clear Watch History" onPress={handleClearHistory} />
           <SettingsRow icon="trash-outline" label="Deactivate Account" onPress={handleDelete} danger />
         </View>
 

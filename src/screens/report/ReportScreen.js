@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Platform, Alert, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform,
+  TextInput, Alert, ActivityIndicator,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -129,7 +129,10 @@ export default function ReportScreen({ navigation, route }) {
   }
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       <StatusBar style="light" />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -187,7 +190,7 @@ export default function ReportScreen({ navigation, route }) {
         </TouchableOpacity>
 
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

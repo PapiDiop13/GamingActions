@@ -1,3 +1,23 @@
+/**
+ * CommentsScreen.js — Threaded comments with replies, @mentions, and #hashtags
+ *
+ * Features:
+ *  - 1-level reply threads (tap "Reply" → indented under parent comment)
+ *  - @mention auto-fill when replying (typed in input, highlighted in blue)
+ *  - #hashtag detection in comment text (tappable, navigates to HashtagScreen)
+ *  - Comment likes with optimistic update + rollback on failure
+ *  - Live avatar/frame refresh from Firestore (always shows latest frames)
+ *  - Notifications sent to: video owner (on new comment) + mentioned users
+ *
+ * Data model:
+ *   comments/{id}
+ *   → { videoId, userId, username, text, parentId (null or commentId),
+ *       likes, likedBy[], createdAt, mentions[], hashtags[] }
+ *
+ * Reply threading: parentId links a reply to its parent comment.
+ * Replies are rendered inline below their parent (flat list with indent).
+ */
+
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
@@ -8,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc,
   serverTimestamp, updateDoc, doc, increment, getDoc, arrayUnion, arrayRemove,
+  getDocs,
 } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
@@ -15,23 +36,90 @@ import useAuthStore from '../../store/useAuthStore';
 import { commentFrameStyle } from '../../constants/frames';
 import FramedAvatar from '../../components/FramedAvatar';
 import { ElectricBorder } from '../../components/ElectricEffect';
-import { logError } from '../../utils/errorLogger';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { globalNavigate } from '../../utils/navigationRef';
 
-const MAX_CHARS = 100;
+const MAX_CHARS = 150; // Increased from 100 to accommodate @mentions
 
-// Formate le timestamp en "Xm" / "Xh" / "Xd"
+// ─── Time formatter ───────────────────────────────────────────────────────────
 function fmtTime(ts) {
   if (!ts) return 'now';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   const diff = Math.floor((Date.now() - d) / 1000);
-  if (diff < 60) return 'now';
-  if (diff < 3600) return Math.floor(diff / 60) + 'm';
-  if (diff < 86400) return Math.floor(diff / 3600) + 'h';
+  if (diff < 60)    return 'now';
+  if (diff < 3600)  return Math.floor(diff / 60)    + 'm';
+  if (diff < 86400) return Math.floor(diff / 3600)  + 'h';
   return Math.floor(diff / 86400) + 'd';
 }
 
-// Récupère le profil live depuis Firestore — pas de cache pour avoir toujours les frames à jour
+// ─── Extract @mentions from comment text ─────────────────────────────────────
+// Returns array of usernames (without the @ sign)
+function extractMentions(text) {
+  const matches = text.match(/@(\w+)/g) || [];
+  return matches.map(m => m.slice(1));
+}
+
+// ─── Extract #hashtags from comment text ─────────────────────────────────────
+function extractHashtags(text) {
+  const matches = text.match(/#(\w+)/g) || [];
+  return matches.map(h => h.slice(1).toLowerCase());
+}
+
+/**
+ * RichText — renders comment text with @mentions (blue) and #hashtags (gold) highlighted.
+ * Splits the text into segments and applies color per token type.
+ */
+function RichText({ text, style }) {
+  if (!text) return null;
+
+  // Split on @word or #word boundaries, keeping the delimiters
+  const parts = text.split(/(@\w+|#\w+)/g);
+
+  return (
+    <Text style={style}>
+      {parts.map((part, i) => {
+        if (part.startsWith('@')) {
+          const username = part.slice(1).toUpperCase();
+          return (
+            <Text
+              key={i}
+              style={{ color: COLORS.blue, fontWeight: '700' }}
+              onPress={async () => {
+                // Resolve username → userId on tap (lazy lookup — not on render)
+                // Usernames are stored in uppercase in Firestore
+                try {
+                  const { getDocs: gd, query: q2, collection: col, where: w } =
+                    await import('firebase/firestore');
+                  const { db: db2 } = await import('../../config/firebase');
+                  const snap = await gd(q2(col(db2, 'users'), w('username', '==', username)));
+                  if (!snap.empty) {
+                    globalNavigate('UserProfile', { userId: snap.docs[0].id });
+                  }
+                } catch (_) {}
+              }}
+            >
+              {part}
+            </Text>
+          );
+        }
+        if (part.startsWith('#')) {
+          return (
+            <Text
+              key={i}
+              style={{ color: COLORS.gold, fontWeight: '700' }}
+              onPress={() => globalNavigate('Hashtag', { tag: part.slice(1).toLowerCase() })}
+            >
+              {part}
+            </Text>
+          );
+        }
+        return <Text key={i}>{part}</Text>;
+      })}
+    </Text>
+  );
+}
+
+// ─── Live profile loader ──────────────────────────────────────────────────────
 async function getLiveProfile(userId) {
   try {
     const snap = await getDoc(doc(db, 'users', userId));
@@ -40,21 +128,27 @@ async function getLiveProfile(userId) {
   return null;
 }
 
-// Rendu d'une bulle de commentaire avec comment frame
-function CommentItem({ item, onReply, onLike, currentUserId }) {
+/**
+ * CommentItem — renders a single comment bubble with:
+ *  - Comment frame / champion electric border
+ *  - @mention + #hashtag rich text
+ *  - Like button (optimistic update)
+ *  - Reply button (calls onReply with parentId + username)
+ *  - Inline replies (indented, shown when expanded)
+ */
+function CommentItem({ item, replies = [], onReply, currentUserId, isReply = false }) {
   const [liveUser, setLiveUser] = useState(item);
-  // Initialise liked depuis likedBy (persistant entre ouvertures)
   const [liked, setLiked] = useState(!!(item.likedBy || []).includes(currentUserId));
   const [likeCount, setLikeCount] = useState(item.likes || 0);
+  const [showReplies, setShowReplies] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
+  // Fetch live user profile for up-to-date frames/badges
   useEffect(() => {
-    if (item.userId) {
-      getLiveProfile(item.userId).then(p => { if (p) setLiveUser(p); });
-    }
+    if (item.userId) getLiveProfile(item.userId).then(p => { if (p) setLiveUser(p); });
   }, [item.userId]);
 
-  // Re-sync si l'item change (ex: onSnapshot refresh)
+  // Sync like state when real-time snapshot updates the item
   useEffect(() => {
     setLiked(!!(item.likedBy || []).includes(currentUserId));
     setLikeCount(item.likes || 0);
@@ -68,25 +162,25 @@ function CommentItem({ item, onReply, onLike, currentUserId }) {
   const handleLike = async () => {
     if (!currentUserId) return;
     const newLiked = !liked;
+    // Optimistic update — revert on error
     setLiked(newLiked);
     setLikeCount(c => newLiked ? c + 1 : Math.max(0, c - 1));
     Animated.sequence([
       Animated.spring(scaleAnim, { toValue: 1.3, useNativeDriver: true, speed: 60 }),
-      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }),
+      Animated.spring(scaleAnim, { toValue: 1,   useNativeDriver: true, speed: 30 }),
     ]).start();
     try {
       await updateDoc(doc(db, 'comments', item.id), {
-        likes: increment(newLiked ? 1 : -1),
+        likes:   increment(newLiked ? 1 : -1),
         likedBy: newLiked ? arrayUnion(currentUserId) : arrayRemove(currentUserId),
       });
     } catch (e) {
-      // Rollback si erreur
+      // Rollback on Firestore write failure
       setLiked(!newLiked);
       setLikeCount(c => newLiked ? Math.max(0, c - 1) : c + 1);
     }
   };
 
-  // Badges
   const BADGES = {
     gameconic: { label: 'ICON', bg: COLORS.red },
     creator:   { label: 'CR',   bg: COLORS.blue },
@@ -94,127 +188,317 @@ function CommentItem({ item, onReply, onLike, currentUserId }) {
   const badge = BADGES[liveUser?.accountType];
   const nameColor = liveUser?.accountType === 'gameconic' ? COLORS.red
     : liveUser?.accountType === 'creator' ? COLORS.blue
-    : liveUser?.plan === 'legendary' ? COLORS.gold
+    : liveUser?.plan === 'legendary'      ? COLORS.gold
     : COLORS.white;
 
   return (
-    <View style={[
-      styles.commentCard,
-      hasBorder && { borderColor, borderWidth: 1.5 },
-      isChampionFrame && { borderColor: '#E8C96B', borderWidth: 2 },
-    ]}>
-      {isChampionFrame && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <ElectricBorder width="100%" height="100%" radius={12} />
-        </View>
-      )}
-      {hasBorder && !isChampionFrame && cf.glow && (
-        <View style={[StyleSheet.absoluteFill, {
-          borderRadius: 12, borderWidth: 1.5, borderColor,
-          shadowColor: borderColor, shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.6, shadowRadius: 6,
-        }]} pointerEvents="none" />
-      )}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-        <TouchableOpacity onPress={() => { if (item.userId) globalNavigate('UserProfile', { userId: item.userId }); }} activeOpacity={0.7}>
-          <FramedAvatar user={liveUser} size={30} />
-        </TouchableOpacity>
-        <View style={{ flex: 1, marginLeft: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
-            <TouchableOpacity onPress={() => { if (item.userId) globalNavigate('UserProfile', { userId: item.userId }); }} activeOpacity={0.7}>
-              <Text style={[styles.commentName, { color: nameColor }]}>{liveUser?.username || item.username}</Text>
-            </TouchableOpacity>
-            {badge && <View style={[styles.badge, { backgroundColor: badge.bg }]}><Text style={styles.badgeText}>{badge.label}</Text></View>}
-            {liveUser?.plan === 'legendary' && !badge && <View style={[styles.badge, { backgroundColor: COLORS.gold }]}><Text style={[styles.badgeText, { color: COLORS.black }]}>LEG</Text></View>}
-            <Text style={styles.commentTime}> · {fmtTime(item.createdAt)}</Text>
+    <View style={isReply ? styles.replyWrapper : null}>
+      {/* Indent line for replies */}
+      {isReply && <View style={styles.replyLine} />}
+
+      <View style={[
+        styles.commentCard,
+        hasBorder && { borderColor, borderWidth: 1.5 },
+        isChampionFrame && { borderColor: '#E8C96B', borderWidth: 2 },
+        isReply && styles.replyCard,
+      ]}>
+        {isChampionFrame && (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <ElectricBorder width="100%" height="100%" radius={12} />
           </View>
-          <Text style={styles.commentText}>{item.text}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-            <TouchableOpacity onPress={() => onReply(liveUser?.username || item.username)} style={styles.replyBtn}>
-              <Ionicons name="chatbubble-outline" size={12} color={COLORS.gray} />
-              <Text style={styles.replyBtnText}>Reply</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleLike} style={styles.likeBtn} disabled={liked}>
-              <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-                <Ionicons name={liked ? 'heart' : 'heart-outline'} size={14} color={liked ? COLORS.red : COLORS.gray} />
-              </Animated.View>
-              {likeCount > 0 && <Text style={[styles.likeCount, liked && { color: COLORS.red }]}>{likeCount}</Text>}
-            </TouchableOpacity>
+        )}
+        {hasBorder && !isChampionFrame && cf.glow && (
+          <View style={[StyleSheet.absoluteFill, {
+            borderRadius: 12, borderWidth: 1.5, borderColor,
+            shadowColor: borderColor, shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.6, shadowRadius: 6,
+          }]} pointerEvents="none" />
+        )}
+
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          <TouchableOpacity
+            onPress={() => { if (item.userId) globalNavigate('UserProfile', { userId: item.userId }); }}
+            activeOpacity={0.7}
+          >
+            <FramedAvatar user={liveUser} size={isReply ? 26 : 30} />
+          </TouchableOpacity>
+
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            {/* Username + badges + timestamp */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                onPress={() => { if (item.userId) globalNavigate('UserProfile', { userId: item.userId }); }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.commentName, { color: nameColor }]}>
+                  {liveUser?.username || item.username}
+                </Text>
+              </TouchableOpacity>
+              {badge && (
+                <View style={[styles.badge, { backgroundColor: badge.bg }]}>
+                  <Text style={styles.badgeText}>{badge.label}</Text>
+                </View>
+              )}
+              {liveUser?.plan === 'legendary' && !badge && (
+                <View style={[styles.badge, { backgroundColor: COLORS.gold }]}>
+                  <Text style={[styles.badgeText, { color: COLORS.black }]}>LEG</Text>
+                </View>
+              )}
+              <Text style={styles.commentTime}> · {fmtTime(item.createdAt)}</Text>
+            </View>
+
+            {/* Comment text with @mention + #hashtag highlights */}
+            <RichText text={item.text} style={styles.commentText} />
+
+            {/* Action row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
+              {/* Reply button — only on top-level comments (1 level deep) */}
+              {!isReply && (
+                <TouchableOpacity
+                  onPress={() => onReply({ parentId: item.id, username: liveUser?.username || item.username })}
+                  style={styles.replyBtn}
+                >
+                  <Ionicons name="chatbubble-outline" size={12} color={COLORS.gray} />
+                  <Text style={styles.replyBtnText}>Reply</Text>
+                  {replies.length > 0 && (
+                    <Text style={[styles.replyBtnText, { color: COLORS.blue, marginLeft: 4 }]}>
+                      · {replies.length}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              )}
+
+              {/* Like button */}
+              <TouchableOpacity onPress={handleLike} style={styles.likeBtn}>
+                <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                  <Ionicons
+                    name={liked ? 'heart' : 'heart-outline'}
+                    size={14}
+                    color={liked ? COLORS.red : COLORS.gray}
+                  />
+                </Animated.View>
+                {likeCount > 0 && (
+                  <Text style={[styles.likeCount, liked && { color: COLORS.red }]}>
+                    {likeCount}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
+
+      {/* Expand/collapse replies */}
+      {!isReply && replies.length > 0 && (
+        <TouchableOpacity
+          onPress={() => setShowReplies(v => !v)}
+          style={styles.showRepliesBtn}
+        >
+          <View style={styles.showRepliesLine} />
+          <Text style={styles.showRepliesText}>
+            {showReplies ? 'Hide replies' : `View ${replies.length} repl${replies.length > 1 ? 'ies' : 'y'}`}
+          </Text>
+          <Ionicons
+            name={showReplies ? 'chevron-up' : 'chevron-down'}
+            size={12}
+            color={COLORS.blue}
+          />
+        </TouchableOpacity>
+      )}
+
+      {/* Inline replies (1 level) */}
+      {!isReply && showReplies && replies.map(reply => (
+        <CommentItem
+          key={reply.id}
+          item={reply}
+          replies={[]}
+          onReply={onReply}
+          currentUserId={currentUserId}
+          isReply={true}
+        />
+      ))}
     </View>
   );
 }
 
+// ─── Main screen ──────────────────────────────────────────────────────────────
 export default function CommentsScreen({ navigation, route }) {
   const { video } = route?.params || {};
   const { user, userProfile } = useAuthStore();
-  const [comments, setComments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [text, setText] = useState('');
-  const [replyTo, setReplyTo] = useState(null);
 
+  const [comments, setComments] = useState([]);     // top-level comments only
+  const [replies, setReplies]   = useState({});     // { [parentId]: [reply, ...] }
+  const [loading, setLoading]   = useState(true);
+  const [text, setText]         = useState('');
+  const [replyTarget, setReplyTarget] = useState(null); // { parentId, username }
+  // Use a ref in addition to state so the value is never stale inside handleSend
+  // (iOS keyboard opening can cause re-renders that lose state in closures)
+  const replyTargetRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // ── Real-time comment listener ────────────────────────────────────────────
   useEffect(() => {
     if (!video?.id) { setLoading(false); return; }
+
     const q = query(
       collection(db, 'comments'),
       where('videoId', '==', video.id),
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'asc') // oldest first so threads read naturally
     );
+
     const unsub = onSnapshot(q, (snap) => {
-      setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Separate top-level comments from replies
+      const topLevel  = all.filter(c => !c.parentId);
+      const replyMap  = {};
+      all.filter(c => c.parentId).forEach(r => {
+        if (!replyMap[r.parentId]) replyMap[r.parentId] = [];
+        replyMap[r.parentId].push(r);
+      });
+
+      // Sort top-level by newest first for display (replies stay chronological)
+      setComments(topLevel.reverse());
+      setReplies(replyMap);
       setLoading(false);
     }, () => setLoading(false));
+
     return () => unsub();
   }, [video?.id]);
 
+  // ── Send comment or reply ─────────────────────────────────────────────────
   const handleSend = async () => {
-    const body = (replyTo ? '@' + replyTo + ' ' : '') + text.trim();
+    const body = text.trim();
     if (!body || !user?.uid || !video?.id) return;
+
     setText('');
-    setReplyTo(null);
+    // Read from ref (not state) to guarantee the value even if re-renders happened
+    const currentReplyTarget = replyTargetRef.current;
+    replyTargetRef.current = null;
+    setReplyTarget(null);
+
+    // Extract metadata from text for indexing
+    const mentions  = extractMentions(body);
+    const hashtags  = extractHashtags(body);
+
     try {
-      await addDoc(collection(db, 'comments'), {
-        videoId: video.id,
-        userId: user.uid,
-        username: userProfile?.username || 'Player',
-        avatar: userProfile?.avatar || '',
-        accountType: userProfile?.accountType || 'gamer',
-        plan: userProfile?.plan || 'free',
-        equippedFrame: userProfile?.equippedFrame || 'none',
-        equippedCommentFrame: userProfile?.equippedCommentFrame || 'none',
-        isChampion: userProfile?.isChampion || false,
-        isCurrentLeader: userProfile?.isCurrentLeader || false,
-        streakLevel: userProfile?.streakLevel || 'noob',
-        text: body,
-        likes: 0,
-        createdAt: serverTimestamp(),
+      const commentData = {
+        videoId:             video.id,
+        userId:              user.uid,
+        username:            userProfile?.username || 'Player',
+        avatar:              userProfile?.avatar || '',
+        accountType:         userProfile?.accountType || 'gamer',
+        plan:                userProfile?.plan || 'free',
+        equippedFrame:       userProfile?.equippedFrame || 'none',
+        equippedCommentFrame:userProfile?.equippedCommentFrame || 'none',
+        isChampion:          userProfile?.isChampion || false,
+        isCurrentLeader:     userProfile?.isCurrentLeader || false,
+        streakLevel:         userProfile?.streakLevel || 'noob',
+        text:                body,
+        likes:               0,
+        likedBy:             [],
+        mentions,   // ['username1', 'username2'] — used to send notifications
+        hashtags,   // ['fifa', 'clutch'] — indexed for hashtag search
+        parentId:            currentReplyTarget?.parentId || null,
+        createdAt:           serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'comments'), commentData);
+
+      // Increment comment count on the video document
+      await updateDoc(doc(db, 'videos', video.id), {
+        commentsCount: increment(1),
       });
-      await updateDoc(doc(db, 'videos', video.id), { commentsCount: increment(1) });
-      if (video.userId && video.userId !== user.uid) {
+
+      // Notify the video owner (skip if replying to their own content)
+      if (!currentReplyTarget && video.userId && video.userId !== user.uid) {
         await addDoc(collection(db, 'notifications'), {
-          userId: video.userId, type: 'comment', fromUserId: user.uid,
+          userId:       video.userId,
+          type:         'comment',
+          fromUserId:   user.uid,
           fromUsername: userProfile?.username || 'Someone',
-          text: 'commented: "' + body.slice(0, 50) + '"',
-          videoId: video.id, read: false, createdAt: serverTimestamp(),
+          text:         'commented: "' + body.slice(0, 50) + '"',
+          videoId:      video.id,
+          read:         false,
+          createdAt:    serverTimestamp(),
         });
       }
+
+      // Notify the parent comment author when replying
+      if (currentReplyTarget?.parentId) {
+        const parentSnap = await getDoc(doc(db, 'comments', currentReplyTarget.parentId));
+        if (parentSnap.exists()) {
+          const parentOwnerId = parentSnap.data().userId;
+          if (parentOwnerId && parentOwnerId !== user.uid) {
+            await addDoc(collection(db, 'notifications'), {
+              userId:       parentOwnerId,
+              type:         'reply',
+              fromUserId:   user.uid,
+              fromUsername: userProfile?.username || 'Someone',
+              text:         'replied to your comment: "' + body.slice(0, 40) + '"',
+              videoId:      video.id,
+              read:         false,
+              createdAt:    serverTimestamp(),
+            });
+          }
+        }
+      }
+
+      // Notify all @mentioned users (skip the sender)
+      if (mentions.length > 0) {
+        for (const username of mentions) {
+          try {
+            const mentionSnap = await getDocs(
+              query(collection(db, 'users'), where('username', '==', username.toUpperCase()))
+            );
+            if (!mentionSnap.empty) {
+              const mentionedUserId = mentionSnap.docs[0].id;
+              if (mentionedUserId !== user.uid) {
+                await addDoc(collection(db, 'notifications'), {
+                  userId:       mentionedUserId,
+                  type:         'mention',
+                  fromUserId:   user.uid,
+                  fromUsername: userProfile?.username || 'Someone',
+                  text:         'mentioned you in a comment: "' + body.slice(0, 40) + '"',
+                  videoId:      video.id,
+                  read:         false,
+                  createdAt:    serverTimestamp(),
+                });
+              }
+            }
+          } catch (e) {} // Don't block the send if mention lookup fails
+        }
+      }
+
     } catch (e) {
-      await logError('CommentsScreen_send', e, user?.uid);
+      await logError(LOG_CONTEXT.COMMENT_FAIL, e, user?.uid);
     }
   };
 
+  const handleReply = ({ parentId, username }) => {
+    const target = { parentId, username };
+    replyTargetRef.current = target;   // ref is always up-to-date, immune to re-render
+    setReplyTarget(target);            // state drives the UI indicator bar
+    setText('@' + username + ' ');
+    inputRef.current?.focus();
+  };
+
   const remaining = MAX_CHARS - text.length;
+  const totalCount = comments.length + Object.values(replies).reduce((s, r) => s + r.length, 0);
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <StatusBar style="light" />
+
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="close" size={24} color={COLORS.white} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{comments.length} Comments</Text>
+        <Text style={styles.headerTitle}>{totalCount} Comments</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -229,7 +513,8 @@ export default function CommentsScreen({ navigation, route }) {
           renderItem={({ item }) => (
             <CommentItem
               item={item}
-              onReply={setReplyTo}
+              replies={replies[item.id] || []}
+              onReply={handleReply}
               currentUserId={user?.uid}
             />
           )}
@@ -241,30 +526,36 @@ export default function CommentsScreen({ navigation, route }) {
         />
       )}
 
-      {replyTo && (
+      {/* Reply indicator bar */}
+      {replyTarget && (
         <View style={styles.replyBar}>
           <Ionicons name="return-down-forward" size={14} color={COLORS.blue} />
-          <Text style={styles.replyText}> Replying to @{replyTo}</Text>
-          <TouchableOpacity onPress={() => setReplyTo(null)} style={{ marginLeft: 'auto' }}>
+          <Text style={styles.replyBarText}> Replying to @{replyTarget.username}</Text>
+          <TouchableOpacity
+            onPress={() => { replyTargetRef.current = null; setReplyTarget(null); setText(''); }}
+            style={{ marginLeft: 'auto' }}
+          >
             <Ionicons name="close-circle" size={18} color={COLORS.gray} />
           </TouchableOpacity>
         </View>
       )}
 
+      {/* Input bar */}
       <View style={styles.inputBar}>
         <FramedAvatar user={userProfile} size={28} />
         <View style={{ flex: 1, marginLeft: 10 }}>
           <TextInput
+            ref={inputRef}
             value={text}
             onChangeText={t => setText(t.slice(0, MAX_CHARS))}
-            placeholder={replyTo ? `Reply to @${replyTo}...` : 'Add a comment...'}
+            placeholder={replyTarget ? `Reply to @${replyTarget.username}...` : 'Add a comment... Use @ and #'}
             placeholderTextColor={COLORS.gray}
             style={styles.input}
             multiline
             maxLength={MAX_CHARS}
           />
-          {text.length > 70 && (
-            <Text style={[styles.charCount, remaining < 15 && { color: COLORS.red }]}>
+          {text.length > 100 && (
+            <Text style={[styles.charCount, remaining < 20 && { color: COLORS.red }]}>
               {remaining}
             </Text>
           )}
@@ -283,31 +574,57 @@ export default function CommentsScreen({ navigation, route }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.black },
+
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 54 : 30,
     paddingBottom: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3,
   },
   headerTitle: { fontSize: 16, fontWeight: '800', color: COLORS.white },
+
   empty: { color: COLORS.gray, textAlign: 'center', marginTop: 50, fontSize: 14 },
+
+  // ── Comment card ────────────────────────────────────────────────────────────
   commentCard: {
     backgroundColor: COLORS.card, borderRadius: 12, padding: 12,
-    marginBottom: 10, borderWidth: 1, borderColor: 'transparent', overflow: 'hidden',
+    marginBottom: 8, borderWidth: 1, borderColor: 'transparent', overflow: 'hidden',
   },
   commentName: { fontSize: 12, fontWeight: '800' },
   commentTime: { fontSize: 10, color: COLORS.gray },
   commentText: { fontSize: 13, color: COLORS.white, marginTop: 4, lineHeight: 18 },
+
   badge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3, marginLeft: 5 },
   badgeText: { fontSize: 8, fontWeight: '900', color: COLORS.white },
+
+  // ── Reply system ────────────────────────────────────────────────────────────
+  replyWrapper: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4 },
+  replyLine: {
+    width: 2, backgroundColor: COLORS.gray3, borderRadius: 1,
+    marginLeft: 16, marginRight: 8, minHeight: 40,
+  },
+  replyCard: { flex: 1, marginBottom: 4 },
+
+  showRepliesBtn: {
+    flexDirection: 'row', alignItems: 'center', paddingLeft: 52,
+    paddingVertical: 6, marginBottom: 8, gap: 6,
+  },
+  showRepliesLine: { width: 20, height: 1, backgroundColor: COLORS.gray3 },
+  showRepliesText: { fontSize: 11, color: COLORS.blue, fontWeight: '700' },
+
+  // ── Action buttons ──────────────────────────────────────────────────────────
   replyBtn: { flexDirection: 'row', alignItems: 'center', marginRight: 14 },
   replyBtnText: { fontSize: 11, color: COLORS.gray, marginLeft: 4, fontWeight: '600' },
   likeBtn: { flexDirection: 'row', alignItems: 'center' },
   likeCount: { fontSize: 11, color: COLORS.gray, marginLeft: 4, fontWeight: '600' },
+
+  // ── Reply indicator bar ──────────────────────────────────────────────────────
   replyBar: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8,
     backgroundColor: COLORS.card, borderTopWidth: 0.5, borderTopColor: COLORS.gray3,
   },
-  replyText: { fontSize: 12, color: COLORS.blue, fontWeight: '600' },
+  replyBarText: { fontSize: 12, color: COLORS.blue, fontWeight: '600' },
+
+  // ── Input bar ───────────────────────────────────────────────────────────────
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingVertical: 10,
     borderTopWidth: 0.5, borderTopColor: COLORS.gray3, backgroundColor: COLORS.dark,

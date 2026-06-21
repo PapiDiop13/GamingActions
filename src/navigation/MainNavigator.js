@@ -43,6 +43,7 @@ import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 import ReportScreen from '../screens/report/ReportScreen';
 import SubscriptionScreen from '../screens/subscription/SubscriptionScreen';
 import SearchScreen from '../screens/search/SearchScreen';
+import HashtagScreen from '../screens/search/HashtagScreen';
 import MyFanbaseScreen from '../screens/fanbase/MyFanbaseScreen';
 import FanBoxScreen from '../screens/fanbase/FanBoxScreen';
 import FanbaseManageScreen from '../screens/fanbase/FanbaseManageScreen';
@@ -96,6 +97,7 @@ function FeedStack() {
       <Stack.Screen name="FanbaseManage" component={FanbaseManageScreen} />
       <Stack.Screen name="Shop" component={ShopScreen} />
       <Stack.Screen name="Search" component={SearchScreen} />
+      <Stack.Screen name="Hashtag" component={HashtagScreen} />
       <Stack.Screen name="MyFanbase" component={MyFanbaseScreen} />
       <Stack.Screen name="FanBox" component={FanBoxScreen} />
       <Stack.Screen name="TipDetail" component={TipDetailScreen} />

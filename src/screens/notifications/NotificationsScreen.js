@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, RefreshControl, Text, StyleSheet, FlatList, ScrollView, TouchableOpacity, Platform, Image, ActivityIndicator } from 'react-native';
+import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, query, where, orderBy, onSnapshot, updateDoc, doc, writeBatch, getDoc } from 'firebase/firestore';
@@ -119,7 +120,7 @@ export default function NotificationsScreen({ navigation }) {
         {isSystem ? (
           // Notif système → logo Gaming Actions
           <View style={[styles.iconWrap, { backgroundColor: COLORS.gold + '18', overflow: 'hidden' }]}>
-            <Image source={require('../../../assets/icon.png')} style={{ width: 44, height: 44 }} resizeMode="cover" />
+            <Image source={{ uri: 'https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg' }} style={{ width: 44, height: 44 }} resizeMode="cover" />
           </View>
         ) : item.fromAvatar ? (
           // Notif d'un user avec avatar

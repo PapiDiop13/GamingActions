@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
+import { logError, logEvent, LOG_CONTEXT } from '../../utils/errorLogger';
 import { db } from '../../config/firebase';
 import { uploadAvatarToCloudinary, uploadBannerToCloudinary } from '../../config/cloudinary';
 import { GAMES } from '../../constants/games';
@@ -78,6 +79,7 @@ export default function EditProfileScreen({ navigation }) {
         const url = await uploadAvatarToCloudinary(result.assets[0].uri);
         setAvatar(url);
       } catch (e) {
+        await logError(LOG_CONTEXT.AVATAR_FAIL, e, user?.uid);
         Alert.alert('Error', 'Could not upload the photo.');
       } finally {
         setLoading(false);
@@ -143,10 +145,12 @@ export default function EditProfileScreen({ navigation }) {
         } catch (e) {}
       }
 
+      await logEvent(LOG_CONTEXT.PROFILE_UPDATE, { usernameChanged: username.trim().toUpperCase() !== (userProfile?.username||'').toUpperCase() }, user?.uid);
       Alert.alert('✅ Profile updated', '', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (e) {
+      await logError(LOG_CONTEXT.PROFILE_FAIL, e, user?.uid);
       Alert.alert('Error', 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);

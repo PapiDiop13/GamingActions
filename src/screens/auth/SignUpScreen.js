@@ -34,7 +34,21 @@ export default function SignUpScreen({ navigation }) {
       );
     } catch (e) {
       await logError('SignUp', e);
-      setError(friendlyError(e));
+      // ── Migrated user: already exists in Firestore but tries to create a new account ──
+      // Direct them to reset their password instead of showing a generic error.
+      if (e.code === 'auth/email-already-in-use') {
+        Alert.alert(
+          '⚠️ Account already exists',
+          'This email is already registered. Would you like to reset your password to access your account?',
+          [
+            { text: 'Reset Password', onPress: () => navigation.navigate('Forgot') },
+            { text: 'Sign In Instead', onPress: () => navigation.replace('Login') },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+      } else {
+        setError(friendlyError(e));
+      }
     } finally {
       setLoading(false);
     }

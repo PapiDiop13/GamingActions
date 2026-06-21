@@ -165,6 +165,14 @@ export default function LoginScreen({ navigation }) {
             <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color={COLORS.gray} />
           </TouchableOpacity>
         </View>
+        {/* Forgot password — also useful for migrated users setting their password */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Forgot')}
+          style={{ alignSelf: 'flex-end', marginBottom: 12, marginTop: -4 }}
+        >
+          <Text style={{ fontSize: 12, color: COLORS.gold, fontWeight: '600' }}>Forgot password?</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity onPress={handleLogin} style={styles.signInBtn}>
           <Text style={styles.signInText}>SIGN IN</Text>
         </TouchableOpacity>

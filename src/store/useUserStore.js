@@ -1,3 +1,21 @@
+/**
+ * useUserStore.js — Follow/Unfollow social graph state (Zustand)
+ *
+ * Manages the following relationship between users.
+ *
+ * Data model:
+ *   follows/{followerId}_{followingId}
+ *   → { followerId, followingId, createdAt }
+ *
+ * Counters (users.followers / users.following) use Firestore increment()
+ * for atomic updates — prevents count drift from concurrent writes.
+ *
+ * Optimistic updates: UI reflects the action immediately, then Firestore
+ * write happens in background. On failure, state is rolled back to original.
+ *
+ * Anti-cheat: following gives the target +1 GA Point, but unfollowing removes
+ * it (-1) — prevents farming points by mass-following and unfollowing.
+ */
 import { create } from 'zustand';
 import {
   doc, getDoc, setDoc, deleteDoc, updateDoc, increment,
@@ -6,6 +24,7 @@ import {
 import { db } from '../config/firebase';
 import useAuthStore from './useAuthStore';
 import { awardPoints, POINTS } from '../utils/points';
+import { logEvent, logError, LOG_CONTEXT } from '../utils/errorLogger';
 
 const useUserStore = create((set, get) => ({
   following: {},
@@ -66,6 +85,7 @@ const useUserStore = create((set, get) => ({
           read: false,
           createdAt: serverTimestamp(),
         });
+        await logEvent(LOG_CONTEXT.FOLLOW, { targetUserId }, currentUserId);
       } else {
         await deleteDoc(followRef);
         await updateDoc(doc(db, 'users', currentUserId), { following: increment(-1) });
@@ -81,7 +101,8 @@ const useUserStore = create((set, get) => ({
       }
 
     } catch (e) {
-      console.log('toggleFollow error:', e.message);
+      // ⚠️ Follow/unfollow failed — counters and optimistic UI are out of sync
+      await logError(LOG_CONTEXT.FOLLOW_FAIL, e, currentUserId);
       // Rollback
       set(state => ({
         following: { ...state.following, [targetUserId]: isCurrentlyFollowing },
