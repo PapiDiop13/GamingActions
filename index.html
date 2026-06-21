@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gaming Actions — Rize to the GG ⚡</title>
+<meta name="description" content="The first social platform built exclusively for gamers. Share clips, earn GGs, rise to Champion.">
+<meta property="og:title" content="Gaming Actions — Rize to the GG ⚡">
+<meta property="og:description" content="Share clips, earn GGs, rise to Champion.">
+<meta property="og:image" content="https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --black: #0A0A0F;
+    --dark: #12121A;
+    --card: #1A1A26;
+    --gold: #C9A84C;
+    --gold2: #E8C96B;
+    --white: #FFFFFF;
+    --gray: #888899;
+    --gray2: #444455;
+    --blue: #00D4FF;
+    --red: #FF2D55;
+    --green: #00C853;
+  }
+  html { scroll-behavior: smooth; }
+  body { background: var(--black); color: var(--white); font-family: -apple-system, 'SF Pro Display', 'Inter', sans-serif; overflow-x: hidden; }
+
+  /* NAV */
+  nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10,10,15,0.92); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(201,168,76,0.15); padding: 16px 40px; display: flex; justify-content: space-between; align-items: center; }
+  .nav-logo { display: flex; align-items: center; gap: 12px; }
+  .nav-logo-badge { width: 38px; height: 38px; border-radius: 10px; border: 2px solid var(--gold); background: rgba(201,168,76,0.12); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 14px; color: var(--gold); }
+  .nav-logo-text { font-size: 18px; font-weight: 900; letter-spacing: 1px; }
+  .nav-logo-text span { color: var(--gold); }
+  .nav-tagline { font-size: 13px; color: var(--gray); font-weight: 500; }
+
+  /* HERO */
+  .hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 120px 24px 80px; position: relative; overflow: hidden; }
+  .hero::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse 80% 60% at 50% 30%, rgba(201,168,76,0.08) 0%, transparent 70%); pointer-events: none; }
+  .hero-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(201,168,76,0.12); border: 1px solid rgba(201,168,76,0.3); border-radius: 50px; padding: 8px 20px; font-size: 13px; font-weight: 700; color: var(--gold); margin-bottom: 32px; letter-spacing: 0.5px; }
+  .logo-img { width: 120px; height: 120px; border-radius: 28px; margin-bottom: 32px; box-shadow: 0 0 60px rgba(201,168,76,0.3); }
+  .hero h1 { font-size: clamp(40px, 7vw, 80px); font-weight: 900; line-height: 1.05; letter-spacing: -2px; margin-bottom: 24px; }
+  .hero h1 .gold { color: var(--gold); }
+  .hero p { font-size: clamp(16px, 2.5vw, 22px); color: var(--gray); max-width: 560px; line-height: 1.6; margin-bottom: 48px; font-weight: 400; }
+  .store-btns { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-bottom: 64px; }
+  .store-btn { display: flex; align-items: center; gap: 14px; background: var(--card); border: 1.5px solid rgba(201,168,76,0.3); border-radius: 16px; padding: 14px 28px; text-decoration: none; transition: all 0.2s; }
+  .store-btn:hover { border-color: var(--gold); background: rgba(201,168,76,0.08); transform: translateY(-2px); }
+  .store-btn-icon { font-size: 32px; }
+  .store-btn-text { text-align: left; }
+  .store-btn-sub { font-size: 11px; color: var(--gray); font-weight: 500; display: block; }
+  .store-btn-name { font-size: 17px; font-weight: 800; color: var(--white); display: block; }
+  .scroll-hint { font-size: 13px; color: var(--gray2); animation: bounce 2s infinite; }
+  @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(6px)} }
+
+  /* FEATURES */
+  .section { padding: 100px 24px; max-width: 1100px; margin: 0 auto; }
+  .section-label { font-size: 12px; font-weight: 700; color: var(--gold); letter-spacing: 3px; text-align: center; margin-bottom: 16px; }
+  .section-title { font-size: clamp(28px, 4vw, 48px); font-weight: 900; text-align: center; margin-bottom: 16px; letter-spacing: -1px; }
+  .section-sub { font-size: 17px; color: var(--gray); text-align: center; max-width: 500px; margin: 0 auto 64px; line-height: 1.6; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .feature { background: var(--card); border: 1px solid rgba(255,255,255,0.06); border-radius: 20px; padding: 32px; transition: border-color 0.2s, transform 0.2s; }
+  .feature:hover { border-color: rgba(201,168,76,0.3); transform: translateY(-4px); }
+  .feature-icon { font-size: 36px; margin-bottom: 16px; }
+  .feature h3 { font-size: 20px; font-weight: 800; margin-bottom: 10px; }
+  .feature p { font-size: 14px; color: var(--gray); line-height: 1.6; }
+
+  /* STATS */
+  .stats-section { background: var(--dark); border-top: 1px solid rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.05); padding: 80px 24px; }
+  .stats { display: flex; justify-content: center; flex-wrap: wrap; gap: 60px; max-width: 800px; margin: 0 auto; }
+  .stat { text-align: center; }
+  .stat-num { font-size: 48px; font-weight: 900; color: var(--gold); display: block; }
+  .stat-label { font-size: 13px; color: var(--gray); font-weight: 600; letter-spacing: 1px; margin-top: 4px; }
+
+  /* HOW IT WORKS */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 32px; margin-top: 0; }
+  .step { text-align: center; }
+  .step-num { width: 56px; height: 56px; border-radius: 50%; background: rgba(201,168,76,0.12); border: 2px solid var(--gold); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; color: var(--gold); margin: 0 auto 20px; }
+  .step h3 { font-size: 18px; font-weight: 800; margin-bottom: 8px; }
+  .step p { font-size: 14px; color: var(--gray); line-height: 1.6; }
+
+  /* CTA */
+  .cta { text-align: center; padding: 100px 24px; background: radial-gradient(ellipse 80% 80% at 50% 50%, rgba(201,168,76,0.06) 0%, transparent 70%); }
+  .cta h2 { font-size: clamp(32px, 5vw, 56px); font-weight: 900; margin-bottom: 20px; letter-spacing: -1px; }
+  .cta p { font-size: 18px; color: var(--gray); margin-bottom: 48px; }
+
+  /* FOOTER */
+  footer { border-top: 1px solid rgba(255,255,255,0.05); padding: 40px 24px; text-align: center; }
+  .footer-logo { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; }
+  .footer-links { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+  .footer-links a { color: var(--gray); text-decoration: none; font-size: 13px; font-weight: 500; transition: color 0.2s; }
+  .footer-links a:hover { color: var(--gold); }
+  .footer-copy { font-size: 12px; color: var(--gray2); }
+
+  @media (max-width: 600px) {
+    nav { padding: 14px 20px; }
+    .nav-tagline { display: none; }
+    .store-btns { flex-direction: column; align-items: center; }
+    .store-btn { width: 100%; max-width: 280px; }
+    .stats { gap: 36px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">
+    <div class="nav-logo-badge">GA</div>
+    <div class="nav-logo-text">GAMING <span>ACTIONS</span></div>
+  </div>
+  <div class="nav-tagline">Rize to the GG ⚡</div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">🎮 Now Available on iOS & Android</div>
+  <img class="logo-img" src="https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg" alt="Gaming Actions Logo" />
+  <h1>The Social Platform<br>Built for <span class="gold">Gamers ⚡</span></h1>
+  <p>Share your best clips, earn GG votes, compete in monthly rankings, and rise to become Champion.</p>
+  <div class="store-btns">
+    <a href="https://apps.apple.com/app/gaming-actions/id6780596082" class="store-btn" target="_blank">
+      <div class="store-btn-icon">🍎</div>
+      <div class="store-btn-text">
+        <span class="store-btn-sub">Download on the</span>
+        <span class="store-btn-name">App Store</span>
+      </div>
+    </a>
+    <a href="https://play.google.com/store/apps/details?id=com.gamingactions.app" class="store-btn" target="_blank">
+      <div class="store-btn-icon">▶</div>
+      <div class="store-btn-text">
+        <span class="store-btn-sub">Get it on</span>
+        <span class="store-btn-name">Google Play</span>
+      </div>
+    </a>
+  </div>
+  <div class="scroll-hint">↓ Discover more</div>
+</section>
+
+<!-- FEATURES -->
+<div style="background: var(--dark); border-top: 1px solid rgba(255,255,255,0.05);">
+<section class="section">
+  <div class="section-label">FEATURES</div>
+  <h2 class="section-title">Everything a gamer needs</h2>
+  <p class="section-sub">Built from the ground up for the gaming community.</p>
+  <div class="features">
+    <div class="feature">
+      <div class="feature-icon">🎮</div>
+      <h3>Share Your Clips</h3>
+      <p>Upload your best 10–60 second gaming moments and let the community judge your skills.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">⭐</div>
+      <h3>GG Voting System</h3>
+      <p>Rate the best plays with GG votes. Every GG you give and receive earns points for both sides.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">👑</div>
+      <h3>Monthly Champion</h3>
+      <p>Compete every month for the top spot. The #1 gamer earns the exclusive Champion crown and rewards.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">💎</div>
+      <h3>GA Points Economy</h3>
+      <p>Every action earns GA Points. Post clips, receive GGs, log in daily — spend them in the Shop.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">📈</div>
+      <h3>Streak Levels</h3>
+      <p>Climb from NOOB to GOAT 🐐 by accumulating Streak Points. Higher levels = bigger daily bonuses.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🔒</div>
+      <h3>Fanbase</h3>
+      <p>Creators lock exclusive clips for subscribers. Build your audience and monetize your gaming content.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">💡</div>
+      <h3>GameTips</h3>
+      <p>Share tricks, tutorials and strategies with the community. Help other gamers level up.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🛒</div>
+      <h3>Frame Shop</h3>
+      <p>Customize your avatar and video borders with premium frames earned through activity.</p>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">📲</div>
+      <h3>Smart Notifications</h3>
+      <p>Weekly alerts tell you exactly how many GGs you need to beat the player above you.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- HOW IT WORKS -->
+<section class="section">
+  <div class="section-label">HOW IT WORKS</div>
+  <h2 class="section-title">Simple. Competitive. Fun.</h2>
+  <p class="section-sub">Get started in minutes and start climbing the ranks.</p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h3>Create your profile</h3>
+      <p>Sign up, choose your game, set your avatar frame and bio.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h3>Upload your clips</h3>
+      <p>Share your best gaming moments — tag your game, console and genre.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h3>Earn GGs & Points</h3>
+      <p>Get GG votes from the community. Every vote builds your ranking and GA Points balance.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <h3>Rise to Champion 👑</h3>
+      <p>Climb the monthly leaderboard. The top gamer earns the Champion crown every month.</p>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats-section">
+  <div class="stats">
+    <div class="stat"><span class="stat-num">50</span><span class="stat-label">CLIPS PER WEEK</span></div>
+    <div class="stat"><span class="stat-num">5</span><span class="stat-label">STREAK LEVELS</span></div>
+    <div class="stat"><span class="stat-num">∞</span><span class="stat-label">GG VOTES</span></div>
+    <div class="stat"><span class="stat-num">1</span><span class="stat-label">CHAMPION PER MONTH</span></div>
+  </div>
+</div>
+
+<!-- CTA -->
+<section class="cta">
+  <h2>Ready to <span style="color:var(--gold)">Rize to the GG?</span></h2>
+  <p>Download Gaming Actions now. It's free.</p>
+  <div class="store-btns">
+    <a href="https://apps.apple.com/app/gaming-actions/id6780596082" class="store-btn" target="_blank">
+      <div class="store-btn-icon">🍎</div>
+      <div class="store-btn-text">
+        <span class="store-btn-sub">Download on the</span>
+        <span class="store-btn-name">App Store</span>
+      </div>
+    </a>
+    <a href="https://play.google.com/store/apps/details?id=com.gamingactions.app" class="store-btn" target="_blank">
+      <div class="store-btn-icon">▶</div>
+      <div class="store-btn-text">
+        <span class="store-btn-sub">Get it on</span>
+        <span class="store-btn-name">Google Play</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">
+    <div class="nav-logo-badge">GA</div>
+    <div class="nav-logo-text">GAMING <span style="color:var(--gold)">ACTIONS</span></div>
+  </div>
+  <div class="footer-links">
+    <a href="https://docs.google.com/document/d/e/2PACX-1vSPONZctAzkh0GYqkxbtInAqvSeYVPCvKamRmr-gmbvBG9toVla7RQPhRttuonl3e8XkWF6IQlIvJdy/pub" target="_blank">Privacy Policy</a>
+    <a href="mailto:contact@gamingactions.app">Contact</a>
+    <a href="https://apps.apple.com/app/gaming-actions/id6780596082" target="_blank">App Store</a>
+    <a href="https://play.google.com/store/apps/details?id=com.gamingactions.app" target="_blank">Google Play</a>
+  </div>
+  <div class="footer-copy">© 2026 Gaming Actions Inc. All rights reserved.</div>
+</footer>
+
+</body>
+</html>
