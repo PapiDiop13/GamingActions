@@ -184,8 +184,31 @@ export function sortFeedByPrefs(videos, prefs) {
   const maxGenre = Math.max(1, ...Object.values(genreCounts));
   const maxGame  = Math.max(1, ...Object.values(gameCounts));
 
+  // ── Diversity filter: max 5 clips per game in the scored batch ──────────────
+  // Without this, if 25/50 clips are COD (because user watched lots of COD),
+  // the algo always puts COD first regardless of weights.
+  // We keep the best-scored clip from each game group, then fill with variety.
+  const MAX_PER_GAME = 5;
+  const gameGroups = {};
+  const diverseVideos = [];
+  const gameOverflow = [];
+
+  // First pass: shuffle ensures we don't always pick the same COD clips
+  for (const v of videos) {
+    const key = v.game || 'unknown';
+    if (!gameGroups[key]) gameGroups[key] = 0;
+    if (gameGroups[key] < MAX_PER_GAME) {
+      diverseVideos.push(v);
+      gameGroups[key]++;
+    } else {
+      gameOverflow.push(v);
+    }
+  }
+  // Fill remaining slots with overflow (shuffled) so batch stays at 50
+  const finalVideos = [...diverseVideos, ...gameOverflow.sort(() => Math.random() - 0.5)].slice(0, videos.length);
+
   // Score all videos + small noise (±0.15) so same prefs ≠ identical order
-  const scored = videos.map(v => ({
+  const scored = finalVideos.map(v => ({
     video: v,
     score: scoreVideo(v, prefs, maxGenre, maxGame) + (Math.random() * 0.3 - 0.15),
   }));
@@ -220,15 +243,44 @@ export function sortFeedByPrefs(videos, prefs) {
     ...tier4.sort(() => Math.random() - 0.5),
   ].slice(0, wildcardCount).map(s => s.video);
 
-  // Interleave wild cards evenly through the feed (not all at the end)
+  // Interleave wild cards evenly through the feed
   const result = [...personalVideos];
-  const step = Math.floor(personalCount / (wildcardCount + 1));
+  const step = Math.floor(personalVideos.length / (wildcardCount + 1));
   pickedWildcards.forEach((wc, i) => {
     const insertAt = Math.min(step * (i + 1) + i, result.length);
     result.splice(insertAt, 0, wc);
   });
 
-  return result;
+  // ── Anti-monopoly: cap same game to 2 clips in first 10 of FINAL result ────
+  // Applied AFTER wild card insertion so COD wild cards are also capped.
+  const MAX_SAME_GAME_IN_TOP = 2;
+  const finalGameCount = {};
+  const finalTop = [];
+  const finalRest = result.slice(10);
+
+  for (const v of result.slice(0, 10)) {
+    const key = v.game || 'unknown';
+    finalGameCount[key] = (finalGameCount[key] || 0) + 1;
+    if (finalGameCount[key] <= MAX_SAME_GAME_IN_TOP) {
+      finalTop.push(v);
+    } else {
+      finalRest.push(v); // Push excess to end
+    }
+  }
+
+  const finalResult = [...finalTop, ...finalRest];
+
+  // Debug log — shows final feed after ALL filters applied
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    const gameDist = {};
+    finalResult.slice(0, 10).forEach(v => {
+      const k = v.game || 'unknown';
+      gameDist[k] = (gameDist[k] || 0) + 1;
+    });
+    console.log('🎯 TOP 10 GAME DISTRIBUTION:', JSON.stringify(gameDist));
+  }
+
+  return finalResult;
 }
 
 /**

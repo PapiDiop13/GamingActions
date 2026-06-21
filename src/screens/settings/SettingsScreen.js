@@ -10,7 +10,7 @@ import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { db, auth } from '../../config/firebase';
 import { clearPrefs } from '../../utils/feedAlgo';
-import { resetSession } from '../../utils/feedSession';
+import { resetPlaylist } from '../../utils/feedSession';
 
 function SettingsRow({ icon, label, onPress, right, danger = false, color }) {
   return (
@@ -68,7 +68,7 @@ export default function SettingsScreen({ navigation }) {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear', style: 'destructive', onPress: async () => {
           await clearPrefs();
-          await resetSession(); // Also reset feed session so feed starts fresh
+          await resetPlaylist(); // Also reset feed session so feed starts fresh
           Alert.alert('✅ Done', 'Your watch history and feed session have been cleared.');
         }},
       ]

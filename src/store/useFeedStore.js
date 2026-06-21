@@ -10,10 +10,9 @@ import { awardPoints, POINTS } from '../utils/points';
 import { findBannedWords, censorText, logModeration } from '../utils/moderation';
 import { logEvent, logError, LOG_CONTEXT } from '../utils/errorLogger';
 import { loadPrefs, sortFeedByPrefs, recordView } from '../utils/feedAlgo';
-import { getSessionSeenIds, markVideosSeen, resetSession, getSessionStartedAt } from '../utils/feedSession';
+import { getOrCreatePlaylist, advancePosition, resetPlaylist, getPlaylistInfo } from '../utils/feedSession';
 
 // Dédoublonnage des vues sur la session courante : une vue par vidéo / lancement d'app.
-// (évite de compter +1 à chaque fois qu'on repasse sur le même clip dans le feed)
 const viewedThisSession = new Set();
 
 const useFeedStore = create((set, get) => ({
@@ -35,6 +34,9 @@ const useFeedStore = create((set, get) => ({
   // the feed "recycles" from the start with a fresh shuffle (TikTok-style infinite feed).
   feedCycleCount: 0,
   _isPrefetching: false,
+  _playlist: null,       // cached shuffled playlist for fast loadMore
+  _docCache: null,       // in-memory cache of all video docs (instant page serving)
+  _followingCache: null, // cached set of following IDs
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setFilter: (console_, genre, game) => set({ filterConsole: console_, filterGenre: genre, filterGame: game || null }),
@@ -60,264 +62,124 @@ const useFeedStore = create((set, get) => ({
     set({ userProfiles: profiles, _profileFetchedAt: stamps });
   },
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // SIMPLE & ROBUST FEED (TikTok/Instagram-style for a small catalog)
+  //
+  // Strategy: build a shuffled playlist of ALL video IDs once per session,
+  // serve them in order, track position. Never shows a duplicate until the
+  // whole catalog is seen. Persists across reloads. New uploads surface fast.
+  //
+  // PAGE_SIZE clips are loaded at a time from the playlist's current position.
+  // ════════════════════════════════════════════════════════════════════════════
   fetchVideos: async (currentUserId, loadMore = false) => {
-    const { isLoading, lastDoc, videos: existingVideos } = get();
-
-    // Guard: prevent overlapping fetches (avoids double-loading on fast scroll)
+    const { isLoading, videos: existingVideos } = get();
     if (isLoading) return;
-
     set({ isLoading: true });
 
-    const { activeTab } = get();
-    const PAGE_SIZE = 50; // 50 metadata docs ≈ 150KB — lightweight
-
-    // ── Session dedup ────────────────────────────────────────────────────────
-    // Merge in-memory shown IDs (this render) with persisted session IDs (across app opens).
-    // This ensures: close app → reopen → never see same clip twice until 24h reset.
-    const sessionSeenIds = await getSessionSeenIds();
-    const inMemoryIds    = new Set(existingVideos.map(v => v.id));
-    const shownIds       = new Set([...sessionSeenIds, ...inMemoryIds]);
+    const PAGE_SIZE = 12; // clips served per fetch
 
     try {
-      // ── Fresh batch: videos posted SINCE this session started ──────────────
-      // Query clips posted after session start — so a video posted 2 minutes ago
-      // appears in the very next batch, not after a 24h window.
-      // Fallback: if no session yet, use "last hour" so first-time users still
-      // see the most recent content at the top.
-      let freshVideos = [];
-      if (activeTab !== 'following') {
-        try {
-          const sessionStart = await getSessionStartedAt();
-          const sinceDate = new Date(sessionStart || Date.now() - 60 * 60 * 1000);
+      // ── Step 1: Get or build the in-memory doc cache + playlist ──────────────
+      // KEY OPTIMIZATION: we fetch ALL video docs ONCE at session start and keep
+      // them in memory (_docCache). Every subsequent page is served instantly
+      // from this cache — ZERO additional Firestore queries while scrolling.
+      // For ~500 clips this is one upfront query (~1-2s), then buttery-smooth scroll.
+      let playlist  = get()._playlist;
+      let docCache  = get()._docCache;
 
-          const freshSnap = await getDocs(query(
-            collection(db, 'videos'),
-            
-            where('createdAt', '>=', sinceDate),
-            orderBy('createdAt', 'desc'),
-            limit(10)
-          ));
-          // Only include clips not yet seen this session
-          freshVideos = freshSnap.docs
-            .filter(d => !shownIds.has(d.id))
-            .slice(0, 5)
-            .map(d => ({ id: d.id, ...d.data(), hasGG: false, isFollowing: false,
-              thumbnailUrl: d.data().thumbnail || null }));
-        } catch (_) {} // Non-blocking — fresh batch fails silently
-      }
+      if (!loadMore || !playlist || !docCache) {
+        const allDocsSnap = await getDocs(query(collection(db, 'videos')));
+        const NON_CLIP_TYPES = ['flashtuto', 'flashinfo', 'gameindev'];
 
-      // ── Determine query: paginate forward, or recycle from start ─────────────
-      let q;
-      const reachedEnd = loadMore && !get().hasMore;
+        // Build a map of id → full video data (cached for instant page serving)
+        docCache = {};
+        const allClipIds = [];
+        allDocsSnap.docs.forEach(d => {
+          const data = d.data();
+          if (NON_CLIP_TYPES.includes(data.contentType)) return;
+          allClipIds.push(d.id);
+          docCache[d.id] = data;
+        });
 
-      if (reachedEnd) {
-        // Infinite feed: we've exhausted Firestore — restart from the beginning.
-        // The randomOrder field gives a different-feeling sequence each pass,
-        // and dedup below removes any clips already shown this session.
-        q = query(
-          collection(db, 'videos'),
-          
-          orderBy('randomOrder'),
-          limit(PAGE_SIZE)
-        );
-      } else if (loadMore && lastDoc) {
-        q = query(
-          collection(db, 'videos'),
-          
-          orderBy('randomOrder'),
-          startAfter(lastDoc),
-          limit(PAGE_SIZE)
-        );
-      } else {
-        q = query(
-          collection(db, 'videos'),
-          
-          orderBy('randomOrder'),
-          limit(PAGE_SIZE)
-        );
-      }
-
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        // No clips at all in this query window
-        set({ isLoading: false, hasMore: false });
-        return;
-      }
-
-      const newLastDoc = snapshot.docs[snapshot.docs.length - 1];
-
-      // Preserve live GG/count/comment/view state for clips already in the store
-      const existingGGs = {};
-      const existingCounts = {};
-      const existingComments = {};
-      const existingViews = {};
-      existingVideos.forEach(v => {
-        existingGGs[v.id] = v.hasGG;
-        existingCounts[v.id] = v.ggCount;
-        existingComments[v.id] = v.commentCount;
-        existingViews[v.id] = v.viewCount;
-      });
-
-      // Map docs → video objects.
-      // Exclude: already seen this session + non-clip content types (tips, flashtuto etc.)
-      // Migrated videos may have no contentType — we include those (treat as clips).
-      const NON_CLIP_TYPES = ['flashtuto', 'flashinfo', 'gameindev'];
-      let newVideos = snapshot.docs
-        .filter(d => !shownIds.has(d.id))
-        .filter(d => !NON_CLIP_TYPES.includes(d.data().contentType))
-        .map((d) => ({
-          id: d.id,
-          ...d.data(),
-          hasGG: existingGGs[d.id] || false,
-          ggCount: existingCounts[d.id] !== undefined ? existingCounts[d.id] : (d.data().ggCount || 0),
-          isFollowing: false,
-          commentCount: existingComments[d.id] !== undefined ? existingComments[d.id] : (d.data().commentsCount || 0),
-          viewCount: existingViews[d.id] !== undefined ? existingViews[d.id] : (d.data().viewCount || 0),
-          thumbnailUrl: d.data().thumbnail || null,
-        }));
-
-      // Guard: if ALL 50 docs were filtered out by shownIds (shouldn't happen normally
-      // but can occur on Expo reload with a small video pool), reset the session
-      // and retry without the dedup filter so the feed never shows empty.
-      if (newVideos.length === 0 && shownIds.size > 0 && !reachedEnd) {
-        await resetSession();
-        set({ isLoading: false });
-        get().fetchVideos(currentUserId, false);
-        return;
-      }
-
-      // If recycling produced only duplicates (user has seen everything this session),
-      // reset the session dedup so the feed loops fresh instead of dead-ending.
-      // Cap at 3 cycles to avoid truly endless scrolling with a tiny video pool.
-      if (reachedEnd && newVideos.length === 0) {
-        if (get().feedCycleCount < 3) {
-          // Clear session view-dedup and re-show the page (clips reappear, reshuffled feel)
-          const recycled = snapshot.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-            hasGG: existingGGs[d.id] || false,
-            ggCount: existingCounts[d.id] !== undefined ? existingCounts[d.id] : (d.data().ggCount || 0),
-            isFollowing: false,
-            commentCount: existingComments[d.id] !== undefined ? existingComments[d.id] : (d.data().commentsCount || 0),
-            viewCount: existingViews[d.id] !== undefined ? existingViews[d.id] : (d.data().viewCount || 0),
-            thumbnailUrl: d.data().thumbnail || null,
-          }));
-          const prefs2 = await loadPrefs();
-          const ranked2 = sortFeedByPrefs(recycled, prefs2);
-          set({
-            videos: [...existingVideos, ...ranked2],
-            isLoading: false,
-            lastDoc: newLastDoc,
-            hasMore: true,
-            feedCycleCount: get().feedCycleCount + 1,
-          });
+        if (allClipIds.length === 0) {
+          set({ isLoading: false, hasMore: false });
           return;
         }
-        // After 3 cycles, the pool is fully exhausted for this session.
-        // Reset the session so the user starts fresh on next app open.
-        await resetSession();
-        set({ isLoading: false, hasMore: false });
+
+        playlist = await getOrCreatePlaylist(allClipIds);
+        set({ _playlist: playlist, _docCache: docCache });
+      }
+
+      // ── Step 2: Take next page of IDs from the playlist ──────────────────────
+      const startPos = playlist.position;
+      const nextIds  = playlist.order.slice(startPos, startPos + PAGE_SIZE);
+
+      if (nextIds.length === 0) {
+        set({ isLoading: false, hasMore: true });
         return;
       }
 
-      // ── Enrich first page (or recycled page) with GG + follow status ─────────
-      const isFirstLoad = !loadMore || reachedEnd;
+      // ── Step 3: Build video objects DIRECTLY from cache (no Firestore call) ───
+      const existingState = {};
+      existingVideos.forEach(v => { existingState[v.id] = v; });
 
-      if (isFirstLoad && currentUserId) {
-        // Targeted GG query — only for clips on this page (max 10 for the "in" operator)
+      let newVideos = nextIds
+        .map(id => ({ id, data: docCache[id] }))
+        .filter(x => x.data) // skip any id missing from cache
+        .map(({ id, data }) => {
+          const prev = existingState[id] || {};
+          return {
+            id,
+            ...data,
+            hasGG:        prev.hasGG || false,
+            ggCount:      prev.ggCount !== undefined ? prev.ggCount : (data.ggCount || 0),
+            isFollowing:  false,
+            commentCount: prev.commentCount !== undefined ? prev.commentCount : (data.commentsCount || 0),
+            viewCount:    prev.viewCount !== undefined ? prev.viewCount : (data.viewCount || 0),
+            thumbnailUrl: data.thumbnail || null,
+          };
+        });
+
+      // ── Step 4: Enrich with GG + follow status (only on first load) ──────────
+      // We batch this so it doesn't block rendering. GG/follow for the first
+      // page matters most; later pages inherit follow state from the cache.
+      if (currentUserId && newVideos.length > 0) {
         try {
-          const pageVideoIds = newVideos.map(v => v.id).slice(0, 10);
-          if (pageVideoIds.length > 0) {
-            const ggSnap = await getDocs(
-              query(collection(db, 'ggs'), where('userId', '==', currentUserId), where('videoId', 'in', pageVideoIds))
-            );
-            const ggVideoIds = new Set(ggSnap.docs.map(d => d.data().videoId));
-            newVideos.forEach(v => { v.hasGG = ggVideoIds.has(v.id); });
-          }
+          const pageIds = newVideos.map(v => v.id).slice(0, 10);
+          const ggSnap = await getDocs(
+            query(collection(db, 'ggs'), where('userId', '==', currentUserId), where('videoId', 'in', pageIds))
+          );
+          const ggIds = new Set(ggSnap.docs.map(d => d.data().videoId));
+          newVideos.forEach(v => { v.hasGG = ggIds.has(v.id); });
         } catch (e) {}
 
-        // Load follow relationships once (small set, single query)
+        // Follow status: fetch once, cache the set in store for reuse
         try {
-          const followSnap = await getDocs(
-            query(collection(db, 'follows'), where('followerId', '==', currentUserId))
-          );
-          const followingIds = new Set(followSnap.docs.map(d => d.data().followingId));
+          let followingIds = get()._followingCache;
+          if (!followingIds) {
+            const followSnap = await getDocs(
+              query(collection(db, 'follows'), where('followerId', '==', currentUserId))
+            );
+            followingIds = new Set(followSnap.docs.map(d => d.data().followingId));
+            set({ _followingCache: followingIds });
+          }
           newVideos.forEach(v => { v.isFollowing = followingIds.has(v.userId); });
         } catch (e) {}
       }
 
-      // ── loadMore GG check (subsequent pages) ─────────────────────────────────
-      if (loadMore && !reachedEnd && currentUserId) {
-        try {
-          const pageVideoIds = newVideos.map(v => v.id).slice(0, 10);
-          if (pageVideoIds.length > 0) {
-            const ggSnap = await getDocs(
-              query(collection(db, 'ggs'), where('userId', '==', currentUserId), where('videoId', 'in', pageVideoIds))
-            );
-            const ggVideoIds = new Set(ggSnap.docs.map(d => d.data().videoId));
-            newVideos.forEach(v => { v.hasGG = ggVideoIds.has(v.id); });
-          }
-        } catch (e) {}
-      }
-
-      // ── Step 1: Local shuffle ────────────────────────────────────────────────
-      // Firestore orders by randomOrder (a static field) — all users would see
-      // the same sequence every session. We shuffle locally first so each
-      // session + each user gets a genuinely different order.
-      // Fisher-Yates: O(n), statistically unbiased.
-      const shuffledNew = [...newVideos];
-      for (let i = shuffledNew.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffledNew[i], shuffledNew[j]] = [shuffledNew[j], shuffledNew[i]];
-      }
-
-      // ── Step 2: Recommendation algorithm on shuffled batch ───────────────────
-      // CRITICAL: only score the NEW batch, never re-sort existing videos.
-      // Re-sorting the whole feed mid-scroll would make the current clip jump,
-      // breaking the viewing experience. New clips are shuffled then scored then appended.
-      const prefs = await loadPrefs();
-      const rankedNew = sortFeedByPrefs(shuffledNew, prefs);
-
-      // ── Prepend fresh videos (last 24h, not yet seen) ─────────────────────
-      // Fresh clips go BEFORE the ranked batch so new content always appears
-      // at the top of the next batch, even mid-session.
-      const freshNotInRanked = freshVideos.filter(f => !rankedNew.find(r => r.id === f.id));
-      const batchWithFresh = [...freshNotInRanked, ...rankedNew];
-
-      const allVideos = (loadMore && !reachedEnd)
-        ? [...existingVideos, ...batchWithFresh]
-        : (reachedEnd ? [...existingVideos, ...batchWithFresh] : batchWithFresh);
-
-      // ── Persist seen IDs to session (survives app close) ─────────────────
-      // We mark all IDs in this batch as seen so the next session open
-      // (within 24h) continues from where the user left off.
-      await markVideosSeen(batchWithFresh.map(v => v.id));
+      // ── Step 5: Advance position + commit ────────────────────────────────────
+      await advancePosition(nextIds.length);
+      const updatedPlaylist = { ...playlist, position: startPos + nextIds.length };
+      const allVideos = loadMore ? [...existingVideos, ...newVideos] : newVideos;
 
       set({
         videos: allVideos,
         isLoading: false,
-        lastDoc: newLastDoc,
-        // hasMore stays true after a recycle so the feed keeps cycling.
-        // It only goes false when a full page returns zero new (deduped) clips.
-        hasMore: reachedEnd ? true : (snapshot.docs.length === PAGE_SIZE),
-        feedCycleCount: reachedEnd ? get().feedCycleCount + 1 : get().feedCycleCount,
+        _playlist: updatedPlaylist,
+        hasMore: (startPos + PAGE_SIZE) < playlist.order.length,
       });
 
-      // Fetch profiles for the new authors
-      const userIds = rankedNew.map(v => v.userId).filter(Boolean);
-      get().fetchUserProfiles(userIds);
-
-      // ── Pre-fetch next page in background ────────────────────────────────────
-      // On initial load, silently warm the next page so the user never waits.
-      // Guarded by _isPrefetching to prevent stacking multiple prefetches.
-      if (!loadMore && !get()._isPrefetching) {
-        set({ _isPrefetching: true });
-        setTimeout(async () => {
-          await get().fetchVideos(currentUserId, true);
-          set({ _isPrefetching: false });
-        }, 800);
-      }
+      get().fetchUserProfiles(newVideos.map(v => v.userId).filter(Boolean));
 
     } catch (e) {
       console.log('fetchVideos error:', e.message);

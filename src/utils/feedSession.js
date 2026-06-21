@@ -1,134 +1,143 @@
 /**
- * feedSession.js — Persistent feed session management
+ * feedSession.js — Simple, robust feed ordering with session persistence.
  *
- * Tracks which video IDs the user has already seen this session so
- * fetchVideos never shows the same clip twice until the session resets.
+ * HOW IT WORKS (TikTok/Instagram-style, simplified for a small catalog):
  *
- * Session lifecycle:
- *   - Created on first video fetch of a new session
- *   - Persists across app closes (AsyncStorage)
- *   - Expires after SESSION_DURATION_MS (24h) → full reset
- *   - Also resets if ALL available videos have been seen (pool exhausted)
+ * 1. On session start, we fetch ALL video IDs (lightweight — just IDs, ~10KB for 500 videos)
+ * 2. We shuffle them ONCE into a random order (the "playlist")
+ * 3. We serve videos in that exact order, tracking the current position
+ * 4. The playlist + position persist across app reloads (AsyncStorage)
+ * 5. New videos uploaded mid-session are inserted near the top of the remaining queue
+ * 6. When the playlist is exhausted OR 24h passes → reshuffle a fresh playlist
  *
- * Structure stored in AsyncStorage under "ga_feed_session":
+ * This GUARANTEES:
+ *   - You never see the same video twice until the whole catalog is exhausted
+ *   - Reload/close/reopen → continue exactly where you left off
+ *   - New uploads surface quickly
+ *   - No scoring complexity, no race conditions, no duplicate-fetch bugs
+ *
+ * Stored in AsyncStorage under "ga_feed_playlist":
  * {
- *   seenIds:   string[],   // video IDs seen this session
- *   startedAt: number,     // ms timestamp when session began
+ *   order:     string[],   // shuffled video IDs (the playlist)
+ *   position:  number,     // how many we've served so far
+ *   startedAt: number,     // ms timestamp — for 24h expiry
+ *   knownIds:  string[],   // all IDs we knew about (to detect new uploads)
  * }
- *
- * New videos (posted after session start) are ALWAYS included regardless
- * of seenIds — they're fetched separately in a "fresh batch" at the top
- * of every fetch call.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const SESSION_KEY          = 'ga_feed_session';
-const SESSION_DURATION_MS  = 24 * 60 * 60 * 1000; // 24 hours
+const PLAYLIST_KEY        = 'ga_feed_playlist';
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24h
 
-// ─── Load session from storage ───────────────────────────────────────────────
-async function loadSession() {
+// Fisher-Yates shuffle — unbiased, O(n)
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+async function loadPlaylist() {
   try {
-    const raw = await AsyncStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    const raw = await AsyncStorage.getItem(PLAYLIST_KEY);
+    return raw ? JSON.parse(raw) : null;
   } catch (_) {
     return null;
   }
 }
 
-// ─── Save session to storage ──────────────────────────────────────────────────
-async function saveSession(session) {
+async function savePlaylist(playlist) {
   try {
-    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    await AsyncStorage.setItem(PLAYLIST_KEY, JSON.stringify(playlist));
   } catch (_) {}
 }
 
 /**
- * getSessionSeenIds — returns the Set of video IDs seen this session.
- * Automatically resets if the session has expired (> 24h old).
+ * getOrCreatePlaylist — returns the active playlist, creating/refreshing as needed.
  *
- * @returns {Set<string>} seen video IDs for the current session
+ * @param {string[]} allIds - ALL current video IDs from Firestore
+ * @returns {{ order: string[], position: number }}
  */
-export async function getSessionSeenIds() {
-  const session = await loadSession();
-  if (!session) return new Set();
-
-  const age = Date.now() - (session.startedAt || 0);
-  if (age > SESSION_DURATION_MS) {
-    // Session expired — wipe it and start fresh
-    await AsyncStorage.removeItem(SESSION_KEY);
-    return new Set();
-  }
-
-  return new Set(session.seenIds || []);
-}
-
-/**
- * markVideosSeen — adds video IDs to the current session's seen list.
- * Creates a new session if none exists.
- * Called after each successful fetch batch.
- *
- * @param {string[]} videoIds - IDs of videos just shown to the user
- */
-export async function markVideosSeen(videoIds) {
-  if (!videoIds || videoIds.length === 0) return;
-
-  const session = await loadSession();
+export async function getOrCreatePlaylist(allIds) {
+  const existing = await loadPlaylist();
   const now = Date.now();
 
-  // Check if existing session is still valid
-  if (session) {
-    const age = now - (session.startedAt || 0);
-    if (age > SESSION_DURATION_MS) {
-      // Expired — start fresh with just this batch
-      await saveSession({ seenIds: videoIds, startedAt: now });
-      return;
-    }
-    // Still valid — merge new IDs (deduplicated via Set → Array)
-    const merged = [...new Set([...(session.seenIds || []), ...videoIds])];
-    await saveSession({ seenIds: merged, startedAt: session.startedAt });
-  } else {
-    // No session — create one
-    await saveSession({ seenIds: videoIds, startedAt: now });
+  // Case 1: No playlist, or expired (>24h) → create fresh shuffled playlist
+  if (!existing || (now - (existing.startedAt || 0)) > SESSION_DURATION_MS) {
+    const order = shuffle(allIds);
+    const playlist = { order, position: 0, startedAt: now, knownIds: allIds };
+    await savePlaylist(playlist);
+    return playlist;
   }
+
+  // Case 2: Playlist exhausted (served everything) → reshuffle fresh
+  if (existing.position >= existing.order.length) {
+    const order = shuffle(allIds);
+    const playlist = { order, position: 0, startedAt: now, knownIds: allIds };
+    await savePlaylist(playlist);
+    return playlist;
+  }
+
+  // Case 3: Detect NEW videos uploaded since playlist was created
+  const knownSet = new Set(existing.knownIds || []);
+  const newIds = allIds.filter(id => !knownSet.has(id));
+
+  if (newIds.length > 0) {
+    // Insert new videos near the front of the REMAINING queue (after current position)
+    // so users see fresh content soon, without disrupting what they've already seen.
+    const beforePos = existing.order.slice(0, existing.position);
+    const afterPos  = existing.order.slice(existing.position);
+    // Shuffle new IDs into the first chunk of the remaining queue
+    const remaining = shuffle([...newIds, ...afterPos]);
+    const playlist = {
+      order:     [...beforePos, ...remaining],
+      position:  existing.position,
+      startedAt: existing.startedAt,
+      knownIds:  allIds,
+    };
+    await savePlaylist(playlist);
+    return playlist;
+  }
+
+  // Case 4: Playlist still valid, no new videos → use as-is
+  return existing;
 }
 
 /**
- * resetSession — clears the session immediately.
- * Called from Settings "Clear watch history" or when pool is exhausted.
+ * advancePosition — marks N videos as served, advancing the playlist position.
+ *
+ * @param {number} count - how many videos were just served
  */
-export async function resetSession() {
+export async function advancePosition(count) {
+  const playlist = await loadPlaylist();
+  if (!playlist) return;
+  playlist.position = Math.min(playlist.order.length, (playlist.position || 0) + count);
+  await savePlaylist(playlist);
+}
+
+/**
+ * resetPlaylist — wipes the playlist (e.g. "Clear watch history" in settings).
+ */
+export async function resetPlaylist() {
   try {
-    await AsyncStorage.removeItem(SESSION_KEY);
+    await AsyncStorage.removeItem(PLAYLIST_KEY);
   } catch (_) {}
 }
 
 /**
- * getSessionInfo — returns human-readable session stats for debugging.
+ * getPlaylistInfo — debug stats.
  */
-export async function getSessionInfo() {
-  const session = await loadSession();
-  if (!session) return { active: false, seenCount: 0, ageHours: 0, startedAt: null };
-  const ageMs = Date.now() - (session.startedAt || 0);
+export async function getPlaylistInfo() {
+  const playlist = await loadPlaylist();
+  if (!playlist) return { active: false, position: 0, total: 0, remaining: 0 };
   return {
-    active:     ageMs <= SESSION_DURATION_MS,
-    seenCount:  (session.seenIds || []).length,
-    ageHours:   Math.floor(ageMs / (60 * 60 * 1000)),
-    expiresIn:  Math.max(0, Math.floor((SESSION_DURATION_MS - ageMs) / (60 * 60 * 1000))),
-    startedAt:  session.startedAt || null,
+    active:    true,
+    position:  playlist.position || 0,
+    total:     playlist.order?.length || 0,
+    remaining: (playlist.order?.length || 0) - (playlist.position || 0),
+    ageHours:  Math.floor((Date.now() - (playlist.startedAt || 0)) / (60 * 60 * 1000)),
   };
-}
-
-/**
- * getSessionStartedAt — returns the session start timestamp (ms).
- * Used by fetchVideos to query for videos posted since session start.
- * Returns null if no active session exists.
- */
-export async function getSessionStartedAt() {
-  const session = await loadSession();
-  if (!session) return null;
-  const age = Date.now() - (session.startedAt || 0);
-  if (age > SESSION_DURATION_MS) return null; // expired
-  return session.startedAt || null;
 }

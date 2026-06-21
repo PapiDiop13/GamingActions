@@ -15,6 +15,8 @@ export const CLOUDINARY_FOLDERS = {
 export const optimizeVideoUrl = (url) => {
   if (!url || typeof url !== 'string') return url;
   if (url.includes('/upload/q_auto')) return url;
+  // q_auto only — automatic quality without forcing a format re-transform.
+  // We avoid f_auto to not generate extra Cloudinary transformations (quota-saving).
   return url.replace('/upload/', '/upload/q_auto/');
 };
 

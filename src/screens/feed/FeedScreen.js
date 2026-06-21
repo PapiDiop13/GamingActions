@@ -383,10 +383,6 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
           const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt?.seconds || 0) * 1000;
           return ta - tb; // ascending — oldest first
         });
-      // Debug: log parentId values to verify Firestore write
-      if (__DEV__) {
-        all.forEach(c => console.log('[CommentsSheet] comment:', c.id, 'parentId:', c.parentId, 'text:', c.text?.slice(0,20)));
-      }
       // A reply has parentId = string (comment ID). Top-level has parentId = null or undefined.
       const topLevel = all.filter(c => !c.parentId).reverse();
       const replyMap = {};
@@ -416,7 +412,6 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
     const capturedState = replyTarget;                // state value at call time
     const capturedRef   = replyTargetRef.current;     // ref value at call time
     const currentReplyTarget = capturedState || capturedRef;
-    if (__DEV__) console.log('[CommentsSheet] handleSend — replyTarget:', currentReplyTarget);
     replyTargetRef.current = null;
     setReplyTarget(null);
     setCommentText('');
@@ -953,17 +948,16 @@ function PreviewComments({ videoId, isActive, onOpenSheet }) {
     );
   }
 
-  const preview = topLevel.slice(0, 2); // 2 comments max in preview — avoids cutting off
+  // Sort by likes (most liked first), take top 2 for the preview.
+  const preview = [...topLevel]
+    .sort((a, b) => (b.likes || 0) - (a.likes || 0))
+    .slice(0, 2);
 
   return (
-    // Dynamic maxHeight: 25% of available screen height (screen - tab bar - status bar)
-    // This adapts to Pro Max (932px), Pro (852px), standard (844px), SE (667px) etc.
-    <ScrollView
-      showsVerticalScrollIndicator={false}
-      nestedScrollEnabled
-      scrollEnabled
-      style={{ maxHeight: Math.min(160, SH * 0.18) }}
-    >
+    <View>
+      <Text style={{ fontSize: 10, color: COLORS.gray2, fontWeight: '700', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>
+        Most liked
+      </Text>
       {preview.map((c) => {
         const replyCount = (replyMap[c.id] || []).length;
         return (
@@ -983,16 +977,11 @@ function PreviewComments({ videoId, isActive, onOpenSheet }) {
           </View>
         );
       })}
-      {topLevel.length > 3 && (
-        <TouchableOpacity onPress={onOpenSheet} style={{ paddingVertical: 4, paddingLeft: 4 }}>
-          <Text style={{ fontSize: 11, color: COLORS.gold, fontWeight: '700' }}>View all {comments.length} comments</Text>
-        </TouchableOpacity>
-      )}
-    </ScrollView>
+    </View>
   );
 }
 
-function VideoCard({ item, onNavigateProfile, navigation, userProfile, isActive }) {
+function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isActive, shouldLoad = true }) {
   const { toggleGG, incrementView } = useFeedStore();
   const { user } = useAuthStore();
   const { toggleFollow, isFollowing } = useUserStore();
@@ -1084,10 +1073,14 @@ const isOwnVideo = item.userId === user?.uid;
   const liveViewCount = useFeedStore(s => s.videos.find(v => v.id === item.id)?.viewCount ?? item.viewCount ?? 0);
 
   // Player expo-video (en boucle ; lecture pilotée par isActive/isPaused plus bas)
-  const player = useVideoPlayer(item.videoUrl ? optimizeVideoUrl(item.videoUrl) : null, (p) => {
-    p.loop = true;
-    p.muted = false;
-  });
+  // shouldLoad gates the source — far-off clips get null (thumbnail only) to save memory.
+  const player = useVideoPlayer(
+    (shouldLoad && item.videoUrl) ? optimizeVideoUrl(item.videoUrl) : null,
+    (p) => {
+      p.loop = true;
+      p.muted = false;
+    }
+  );
 
   // firstFrame = true dès que le premier frame est rendu → cache l'overlay ET l'icône native
   const [firstFrame, setFirstFrame] = useState(false);
@@ -1199,9 +1192,12 @@ const isOwnVideo = item.userId === user?.uid;
             {videoLoading && (
               <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: '#060610' }}>
                 {(item.thumbnail || item.thumbnailUrl) ? (
-                  <Image source={{ uri: item.thumbnail || item.thumbnailUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" blurRadius={3} />
+                  // Sharp thumbnail (no blur) — looks like the video is already there.
+                  // The transition to video is seamless when the first frame renders.
+                  <Image source={{ uri: item.thumbnail || item.thumbnailUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                 ) : null}
-                <ActivityIndicator size="large" color={COLORS.gold} />
+                {/* Spinner only shows when this clip is the active one being watched */}
+                {isActive && <ActivityIndicator size="large" color={COLORS.gold} />}
               </View>
             )}
           </>
@@ -1278,29 +1274,30 @@ const isOwnVideo = item.userId === user?.uid;
         )}
       </View>
 
-      {/* COMMENTS PREVIEW — commentaires en haut, input fixe en bas */}
+      {/* COMMENTS PREVIEW — gros bouton Comments en haut, 2 most-liked en dessous */}
       <View style={{ height: PREVIEW_H, backgroundColor: COLORS.dark, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 }}>
-        {/* Stats + commentaires preview */}
-        <View style={{ flex: 1, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4 }}>
-          <TouchableOpacity onPress={() => setShowComments(true)} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }} activeOpacity={0.7}>
-            <Ionicons name="chatbubble-outline" size={12} color={COLORS.gray} />
-            <Text style={{ fontSize: 11, color: COLORS.gray, fontWeight: '600', marginLeft: 4 }}>{liveCommentCount} Comments</Text>
-            <Text style={{ fontSize: 11, color: COLORS.gray2, marginLeft: 8 }}>· ⭐ {item.ggCount >= 1000 ? `${(item.ggCount / 1000).toFixed(1)}K` : item.ggCount || 0}</Text>
-            <Ionicons name="eye-outline" size={11} color={COLORS.gray2} style={{ marginLeft: 8 }} />
-            <Text style={{ fontSize: 11, color: COLORS.gray2, marginLeft: 3 }}>{liveViewCount >= 1000 ? `${(liveViewCount / 1000).toFixed(1)}K` : liveViewCount}</Text>
-          </TouchableOpacity>
-          <PreviewComments videoId={item.id} isActive={isActive} onOpenSheet={() => setShowComments(true)} />
-        </View>
-        {/* Barre input TOUJOURS visible en bas */}
+        {/* Gros bouton Comments — ouvre l'overlay, bien visible et touchable */}
         <TouchableOpacity
           onPress={() => setShowComments(true)}
-          style={{ flexDirection: 'row', alignItems: 'center', borderTopWidth: 0.5, borderTopColor: COLORS.gray3, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.dark }}
-          activeOpacity={0.85}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }}
+          activeOpacity={0.7}
         >
-          <FramedAvatar user={userProfile} size={22} />
-          <Text style={{ flex: 1, fontSize: 12, color: COLORS.gray, marginLeft: 8 }}>Add a comment...</Text>
-          <Ionicons name="chevron-up" size={14} color={COLORS.gray2} />
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="chatbubble-ellipses" size={18} color={COLORS.gold} />
+            <Text style={{ fontSize: 14, color: COLORS.white, fontWeight: '800', marginLeft: 8 }}>{liveCommentCount} Comments</Text>
+            <Text style={{ fontSize: 11, color: COLORS.gray2, marginLeft: 10 }}>⭐ {item.ggCount >= 1000 ? `${(item.ggCount / 1000).toFixed(1)}K` : item.ggCount || 0}</Text>
+            <Ionicons name="eye-outline" size={12} color={COLORS.gray2} style={{ marginLeft: 8 }} />
+            <Text style={{ fontSize: 11, color: COLORS.gray2, marginLeft: 3 }}>{liveViewCount >= 1000 ? `${(liveViewCount / 1000).toFixed(1)}K` : liveViewCount}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.gold, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}>
+            <Text style={{ fontSize: 12, color: COLORS.black, fontWeight: '800' }}>Open</Text>
+            <Ionicons name="chevron-up" size={13} color={COLORS.black} style={{ marginLeft: 3 }} />
+          </View>
         </TouchableOpacity>
+        {/* 2 most-liked comments — tap opens overlay */}
+        <View style={{ flex: 1, paddingHorizontal: 14, paddingTop: 8 }}>
+          <PreviewComments videoId={item.id} isActive={isActive} onOpenSheet={() => setShowComments(true)} />
+        </View>
       </View>
 
       <CommentsSheet visible={showComments} video={item} onClose={() => setShowComments(false)} userProfile={userProfile} />
@@ -1308,6 +1305,19 @@ const isOwnVideo = item.userId === user?.uid;
     </View>
   );
 }
+
+// Memoize VideoCard — only re-render when its own active/load state or item changes.
+// Without this, changing activeIndex re-renders EVERY card in the feed (laggy scroll).
+const VideoCard = React.memo(VideoCardInner, (prev, next) => {
+  return prev.item.id === next.item.id
+    && prev.isActive === next.isActive
+    && prev.shouldLoad === next.shouldLoad
+    && prev.item.ggCount === next.item.ggCount
+    && prev.item.hasGG === next.item.hasGG
+    && prev.item.commentCount === next.item.commentCount
+    && prev.item.viewCount === next.item.viewCount
+    && prev.userProfile?.uid === next.userProfile?.uid;
+});
 
 const cardS = StyleSheet.create({
   controlBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
@@ -1362,8 +1372,8 @@ export default function FeedScreen({ navigation }) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    useFeedStore.setState({ videos: [], lastDoc: null, hasMore: true });
-    setDisplayVideos([]);
+    // Force playlist refresh — picks up newly uploaded videos and re-checks position
+    useFeedStore.setState({ lastDoc: null, hasMore: true, _playlist: null, _docCache: null, _followingCache: null });
     await fetchVideos(user?.uid, false);
     setRefreshing(false);
   }, [user?.uid]);
@@ -1381,6 +1391,9 @@ export default function FeedScreen({ navigation }) {
 
   useFocusEffect(
     useCallback(() => {
+      // On every focus: fetch fresh videos.
+      // fetchVideos reads sessionSeenIds from AsyncStorage internally,
+      // so even after Expo reload, the session IDs exclude already-seen clips.
       fetchVideos(user?.uid, false);
       if (user?.uid) fetchFollowing(user.uid);
       return () => { setActiveIndex(-1); };
@@ -1388,7 +1401,7 @@ export default function FeedScreen({ navigation }) {
   );
 
   useEffect(() => {
-    fetchVideos(user?.uid, false);
+    // cleanup only — fetchVideos is handled by useFocusEffect to avoid duplicate calls
     return () => cleanup();
   }, [user?.uid]);
 
@@ -1415,7 +1428,9 @@ export default function FeedScreen({ navigation }) {
       const currentIndex = viewableItems[0].index;
       setActiveIndex(currentIndex);
       const { hasMore, isLoading } = useFeedStore.getState();
-      if (currentIndex >= displayVideos.length - 2 && hasMore && !isLoading) {
+      // With the in-memory doc cache, loadMore is near-instant (no Firestore wait),
+      // so triggering 3 clips early keeps the feed seamless without over-fetching.
+      if (currentIndex >= displayVideos.length - 3 && hasMore && !isLoading) {
         fetchVideos(user?.uid, true);
       }
     }
@@ -1429,6 +1444,11 @@ export default function FeedScreen({ navigation }) {
       navigation={navigation}
       userProfile={userProfile}
       isActive={index === activeIndex}
+      // Preload window: current clip + next 2 (forward) + previous 1 (back).
+      // Forward bias because users scroll down — the next clips are ready instantly.
+      // Keeping previous 1 means scrolling back up is also instant.
+      // This is the TikTok pattern: aggressive forward preload for seamless feel.
+      shouldLoad={index >= activeIndex - 1 && index <= activeIndex + 2}
       onNavigateProfile={() => navigation.navigate('UserProfile', { userId: item.userId })}
     />
   ), [userProfile, activeIndex]);
@@ -1566,6 +1586,8 @@ export default function FeedScreen({ navigation }) {
           removeClippedSubviews
           maxToRenderPerBatch={2}
           windowSize={3}
+          initialNumToRender={2}
+          updateCellsBatchingPeriod={50}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           getItemLayout={(_, index) => ({ length: CARD_HEIGHT, offset: CARD_HEIGHT * index, index })}
