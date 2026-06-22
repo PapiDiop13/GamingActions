@@ -362,8 +362,73 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
   const [commentText, setCommentText] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
   const [loading, setLoading]         = useState(true);
+  // ── @mention autocomplete ──────────────────────────────────────────────────
+  const [mentionQuery, setMentionQuery]   = useState(null); // null = not mentioning
+  const [mentionUsers, setMentionUsers]   = useState([]);   // followers + following
+  const [mentionResults, setMentionResults] = useState([]); // filtered list
   const replyTargetRef = useRef(null);
+  const inputRef = useRef(null);
   const MAX = 150;
+
+  // Load followers + following once when the sheet opens (for @mention suggestions)
+  useEffect(() => {
+    if (!visible || !user?.uid) return;
+    (async () => {
+      try {
+        const [followersSnap, followingSnap] = await Promise.all([
+          getDocs(query(collection(db, 'follows'), where('followingId', '==', user.uid))),
+          getDocs(query(collection(db, 'follows'), where('followerId', '==', user.uid))),
+        ]);
+        // Collect unique user IDs from both directions
+        const ids = new Set();
+        followersSnap.docs.forEach(d => ids.add(d.data().followerId));
+        followingSnap.docs.forEach(d => ids.add(d.data().followingId));
+        ids.delete(user.uid);
+
+        // Fetch their profiles (username + avatar)
+        const profiles = await Promise.all(
+          [...ids].slice(0, 50).map(async (uid) => {
+            try {
+              const snap = await getDoc(doc(db, 'users', uid));
+              if (snap.exists()) {
+                const d = snap.data();
+                return { uid, username: d.username || 'Player', avatar: d.avatar || '', accountType: d.accountType, plan: d.plan };
+              }
+            } catch (_) {}
+            return null;
+          })
+        );
+        setMentionUsers(profiles.filter(Boolean));
+      } catch (_) {}
+    })();
+  }, [visible, user?.uid]);
+
+  // Detect when user is typing @something and filter the suggestion list
+  const handleTextChange = (text) => {
+    setCommentText(text.slice(0, MAX));
+    // Find an @mention being typed at the cursor (last @ not followed by a space)
+    const match = text.match(/@(\w*)$/);
+    if (match) {
+      const q = match[1].toLowerCase();
+      setMentionQuery(q);
+      const filtered = mentionUsers
+        .filter(u => u.username.toLowerCase().includes(q))
+        .slice(0, 6);
+      setMentionResults(filtered);
+    } else {
+      setMentionQuery(null);
+      setMentionResults([]);
+    }
+  };
+
+  // When a suggestion is tapped, replace the partial @query with the full @username
+  const handleSelectMention = (username) => {
+    const newText = commentText.replace(/@(\w*)$/, '@' + username + ' ');
+    setCommentText(newText);
+    setMentionQuery(null);
+    setMentionResults([]);
+    inputRef.current?.focus();
+  };
 
   // Real-time listener — separated into top-level + reply map
   useEffect(() => {
@@ -469,6 +534,35 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
           }
         } catch (e) {}
       }
+
+      // ── Notify mentioned users (@username) ──────────────────────────────────
+      // For each @mention, find the user (from our followers/following cache first,
+      // fall back to a username lookup) and send them a notification.
+      if (mentions.length > 0) {
+        for (const mentionedName of [...new Set(mentions)]) {
+          try {
+            // Try the cached followers/following list first (fast, no query)
+            let target = mentionUsers.find(u => u.username.toLowerCase() === mentionedName.toLowerCase());
+            // Fall back to a username lookup if not in cache
+            if (!target) {
+              const lookupSnap = await getDocs(
+                query(collection(db, 'users'), where('username', '==', mentionedName))
+              );
+              if (!lookupSnap.empty) {
+                target = { uid: lookupSnap.docs[0].id };
+              }
+            }
+            if (target?.uid && target.uid !== user.uid) {
+              await addDoc(collection(db, 'notifications'), {
+                userId: target.uid, type: 'mention',
+                fromUserId: user.uid, fromUsername: userProfile?.username || 'Someone',
+                text: 'mentioned you in a comment: "' + body.slice(0, 40) + '"',
+                videoId: video.id, read: false, createdAt: serverTimestamp(),
+              });
+            }
+          } catch (e) {}
+        }
+      }
     } catch (e) {
       await logError(LOG_CONTEXT.COMMENT_FAIL, e, user?.uid);
     }
@@ -506,6 +600,25 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
               />
             ))}
           </ScrollView>
+          {/* @mention autocomplete dropdown — followers + following */}
+          {mentionQuery !== null && mentionResults.length > 0 && (
+            <View style={{ maxHeight: 180, backgroundColor: COLORS.card, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 }}>
+              <ScrollView keyboardShouldPersistTaps="handled">
+                {mentionResults.map((u) => (
+                  <TouchableOpacity
+                    key={u.uid}
+                    onPress={() => handleSelectMention(u.username)}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }}
+                  >
+                    <FramedAvatar user={u} size={28} />
+                    <Text style={{ fontSize: 13, color: COLORS.white, fontWeight: '700', marginLeft: 10 }}>{u.username}</Text>
+                    {u.accountType === 'gameconic' && <Text style={{ fontSize: 9, color: COLORS.red, marginLeft: 6, fontWeight: '800' }}>GAMECONIC</Text>}
+                    {u.accountType === 'creator' && <Text style={{ fontSize: 9, color: COLORS.blue, marginLeft: 6, fontWeight: '800' }}>CREATOR</Text>}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
           {replyTarget && (
             <View style={sheetS.replyBar}>
               <Ionicons name="return-down-forward" size={14} color={COLORS.blue} />
@@ -519,8 +632,9 @@ function CommentsSheet({ visible, video, onClose, userProfile }) {
             <FramedAvatar user={userProfile} size={28} />
             <View style={{ flex: 1, marginHorizontal: 10 }}>
               <TextInput
+                ref={inputRef}
                 value={commentText}
-                onChangeText={t => setCommentText(t.slice(0, MAX))}
+                onChangeText={handleTextChange}
                 placeholder={replyTarget ? `Reply to @${replyTarget.username}...` : 'Add a comment... Use @ and #'}
                 placeholderTextColor={COLORS.gray}
                 style={sheetS.input}
@@ -556,7 +670,20 @@ function SheetCommentItem({ comment, replies = [], onReply, currentUserId, isRep
   const [editing, setEditing]     = useState(false);
   const [editText, setEditText]   = useState(comment.text || '');
   const [deleted, setDeleted]     = useState(false);
+  // liveUser fetches the commenter's CURRENT profile (live frame, plan, etc.)
+  // so equipped frames update in real-time, not frozen at comment-creation time.
+  const [liveUser, setLiveUser]   = useState(comment);
   const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    let alive = true;
+    if (comment.userId) {
+      getDoc(doc(db, 'users', comment.userId)).then(snap => {
+        if (alive && snap.exists()) setLiveUser({ uid: comment.userId, ...snap.data() });
+      }).catch(() => {});
+    }
+    return () => { alive = false; };
+  }, [comment.userId]);
 
   const isOwn   = comment.userId === currentUserId;
   const ADMINS  = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
@@ -620,13 +747,13 @@ function SheetCommentItem({ comment, replies = [], onReply, currentUserId, isRep
     }
   };
 
-  const nameColor = comment.accountType === 'gameconic' ? COLORS.red
-    : comment.accountType === 'creator' ? COLORS.blue
-    : comment.plan === 'legendary'      ? COLORS.gold
+  const nameColor = liveUser?.accountType === 'gameconic' ? COLORS.red
+    : liveUser?.accountType === 'creator' ? COLORS.blue
+    : liveUser?.plan === 'legendary'      ? COLORS.gold
     : COLORS.white;
 
-  // Frame styling — same logic as CommentBubble, applied only on top-level comments
-  const cf = commentFrameStyle(comment);
+  // Frame styling — uses liveUser so equipped frames show in real-time
+  const cf = commentFrameStyle(liveUser);
   const hasBorder = cf && cf.id !== 'none';
   const borderColor = hasBorder ? cf.color : 'transparent';
   const isChampionFrame = cf?.id === 'cf_champion';
@@ -685,11 +812,11 @@ function SheetCommentItem({ comment, replies = [], onReply, currentUserId, isRep
       >
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
           <TouchableOpacity onPress={() => comment.userId && globalNavigate('UserProfile', { userId: comment.userId })} activeOpacity={0.7}>
-            <FramedAvatar user={comment} size={28} />
+            <FramedAvatar user={liveUser} size={28} />
           </TouchableOpacity>
           <View style={{ flex: 1, marginLeft: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
-              <Text style={[sheetS.commentUser, { color: nameColor }]}>{comment.username}</Text>
+              <Text style={[sheetS.commentUser, { color: nameColor }]}>{liveUser?.username || comment.username}</Text>
               <Text style={sheetS.commentTime}> · {fmtFeedTime(comment.createdAt)}</Text>
             </View>
             {editing ? (
