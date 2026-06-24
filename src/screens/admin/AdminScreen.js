@@ -532,14 +532,34 @@ export default function AdminScreen({ navigation, route }) {
   const [notifTitle, setNotifTitle] = useState('');
   const [notifBody, setNotifBody] = useState('');
   const sendBroadcast = async () => {
-    if(!notifTitle.trim()||!notifBody.trim()) return Alert.alert('Erreur','Titre et message requis');
-    const uSnap = await getDocs(collection(db,'users'));
-    const ops = uSnap.docs.map(d=>addDoc(collection(db,'notifications'),{
-      userId:d.id,type:'system',fromUserId:'SYSTEM',fromUsername:'Gaming Actions',
-      text:notifTitle+': '+notifBody,read:false,createdAt:serverTimestamp(),
-    }));
-    await Promise.all(ops);
-    Alert.alert('Envoye','Notif envoyee a '+uSnap.size+' users'); setNotifTitle('');setNotifBody('');
+    if (!notifTitle.trim() || !notifBody.trim()) return Alert.alert('Erreur', 'Titre et message requis');
+    try {
+      // 1. Créer les notifs Firestore pour toutes les notifications in-app
+      const uSnap = await getDocs(collection(db, 'users'));
+      const ops = uSnap.docs.map(d => addDoc(collection(db, 'notifications'), {
+        userId: d.id, type: 'system', fromUserId: 'SYSTEM', fromUsername: 'Gaming Actions',
+        text: notifTitle + ': ' + notifBody, read: false, createdAt: serverTimestamp(),
+      }));
+      await Promise.all(ops);
+
+      // 2. Envoyer les vrais push via Cloud Function
+      const pushRes = await fetch(
+        'https://us-central1-gamingactions-app.cloudfunctions.net/broadcastPush?key=ga_cleanup_2026',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: notifTitle, body: notifBody, screen: 'Feed' }),
+        }
+      );
+      const pushData = await pushRes.json();
+      Alert.alert(
+        '✅ Broadcast envoyé',
+        `${uSnap.size} notifs in-app\n${pushData.sent || 0} push envoyés`
+      );
+      setNotifTitle(''); setNotifBody('');
+    } catch (e) {
+      Alert.alert('Erreur', 'Broadcast partiel: ' + e.message);
+    }
   };
 
   // ACCESS

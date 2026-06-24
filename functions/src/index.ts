@@ -131,6 +131,26 @@ export const onFollowWritten = onDocumentWritten(
     await db.collection("users").doc(followingId).update({ followers: realFollowers });
     await db.collection("users").doc(followerId).update({ following: realFollowing });
 
+    // Push notification au user suivi (seulement sur follow, pas unfollow)
+    if (after) {
+      try {
+        const [targetSnap, senderSnap] = await Promise.all([
+          db.collection("users").doc(followingId).get(),
+          db.collection("users").doc(followerId).get(),
+        ]);
+        const targetToken = targetSnap.data()?.fcmToken;
+        const senderName = senderSnap.data()?.username || "Someone";
+        if (targetToken && followerId !== followingId) {
+          await sendPushNotif(
+            targetToken,
+            "👥 New follower!",
+            `${senderName} started following you!`,
+            { screen: "UserProfile", userId: followerId }
+          );
+        }
+      } catch (e) { logger.warn("follow push failed:", e); }
+    }
+
     logger.info(`onFollowWritten: ${followerId} following=${realFollowing} | ${followingId} followers=${realFollowers}`);
   }
 );
@@ -191,6 +211,66 @@ export const onVideoDeleted = onDocumentDeleted(
     }
 
     logger.info(`onVideoDeleted: vidéo ${videoId} — ${ggsSnap.size} GGs nettoyés, créateur ${creatorId} ggReceived=${totalGGReceived}`);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRIGGER 4 — onCommentCreated
+// Push notification au créateur de la vidéo quand quelqu'un commente.
+// Push également à l'auteur du commentaire parent sur une réponse.
+// ─────────────────────────────────────────────────────────────────────────────
+export const onCommentCreated = onDocumentWritten(
+  "comments/{commentId}",
+  async (event) => {
+    const after  = event.data?.after?.data();
+    const before = event.data?.before?.data();
+    // Only on creation (not edit/delete)
+    if (!after || before) return;
+
+    const { videoId, userId: commenterId, username: commenterName, parentId, text } = after;
+    if (!videoId || !commenterId) return;
+
+    const preview = (text || "").slice(0, 40);
+
+    try {
+      // 1. Notify video owner
+      const videoSnap = await db.collection("videos").doc(videoId).get();
+      if (videoSnap.exists) {
+        const videoOwnerId = videoSnap.data()!.userId;
+        if (videoOwnerId && videoOwnerId !== commenterId) {
+          const ownerSnap = await db.collection("users").doc(videoOwnerId).get();
+          const ownerToken = ownerSnap.data()?.fcmToken;
+          if (ownerToken) {
+            await sendPushNotif(
+              ownerToken,
+              `💬 ${commenterName || "Someone"} commented`,
+              preview || "on your clip",
+              { screen: "Feed", videoId }
+            );
+          }
+        }
+      }
+
+      // 2. Notify parent comment author on reply
+      if (parentId) {
+        const parentSnap = await db.collection("comments").doc(parentId).get();
+        if (parentSnap.exists) {
+          const parentAuthorId = parentSnap.data()!.userId;
+          if (parentAuthorId && parentAuthorId !== commenterId) {
+            const parentAuthorSnap = await db.collection("users").doc(parentAuthorId).get();
+            const parentToken = parentAuthorSnap.data()?.fcmToken;
+            if (parentToken) {
+              await sendPushNotif(
+                parentToken,
+                `↩️ ${commenterName || "Someone"} replied`,
+                preview || "to your comment",
+                { screen: "Feed", videoId }
+              );
+            }
+          }
+        }
+      }
+    } catch (e) { logger.warn("onCommentCreated push failed:", e); }
   }
 );
 
@@ -465,7 +545,7 @@ export const notifInactiveUsers = onSchedule(
 // Cible : users avec au moins 1 clip déjà publié, mais aucun cette semaine
 // ─────────────────────────────────────────────────────────────────────────────
 export const notifUploadNudge = onSchedule(
-  { schedule: "0 19 * * 3", region: "us-central1", timeoutSeconds: 300 },
+  { schedule: "0 19 * * 3,5", region: "us-central1", timeoutSeconds: 300 }, // mercredi + vendredi
   async () => {
     logger.info("notifUploadNudge: start");
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -1409,5 +1489,200 @@ export const migrateCloudinaryToMux = onRequest(
         ? "Dry run — aucune modification. Relance sans dry_run=true pour migrer."
         : "Migration lancée. Le webhook Mux remplira muxPlaybackId pour chaque vidéo transcodée (quelques minutes par vidéo).",
     });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIF 5 — Ton rang dans le classement (lundi et jeudi à 17h UTC)
+// Cible : tous les users avec un token, message personnalisé avec leur rang
+// ─────────────────────────────────────────────────────────────────────────────
+export const notifYourRank = onSchedule(
+  { schedule: "0 17 * * 1,4", region: "us-central1", timeoutSeconds: 300 },
+  async () => {
+    logger.info("notifYourRank: start");
+
+    // Récupère tous les users triés par ggReceived
+    const usersSnap = await db.collection("users")
+      .orderBy("ggReceived", "desc")
+      .where("fcmToken", "!=", "")
+      .limit(500)
+      .get();
+
+    const ranked = usersSnap.docs.map((d, i) => ({
+      id: d.id,
+      rank: i + 1,
+      ...(d.data() as Record<string, any>),
+    })) as Array<{ id: string; rank: number; fcmToken: string; ggReceived: number; username: string; [key: string]: any }>;
+
+    let sent = 0;
+    for (let i = 0; i < ranked.length; i++) {
+      const user = ranked[i];
+      if (!user.fcmToken) continue;
+      if (await isThrottled(user.id, "your_rank")) continue;
+
+      const rank = user.rank;
+      const gg   = user.ggReceived || 0;
+      let title = "🏆 Your ranking";
+      let body  = "";
+
+      if (rank === 1) {
+        const r1msgs = [
+          `👑 You're #1 with ${gg} GGs! Defend your throne this week!`,
+          `🔥 Still #1! ${gg} GGs and counting — nobody can touch you yet!`,
+          `⚡ Leader status confirmed! ${gg} GGs. Stay sharp, challengers are coming!`,
+        ];
+        body = r1msgs[Math.floor(Math.random() * r1msgs.length)];
+      } else {
+        const above = ranked[i - 1];
+        const gap   = (above.ggReceived || 0) - gg;
+        if (gap <= 3) {
+          const closemsgs = [
+            `🔥 You're #${rank} — only ${gap} GG${gap > 1 ? "s" : ""} from #${rank - 1}! Push now!`,
+            `⚡ SO CLOSE! ${gap} GG${gap > 1 ? "s" : ""} and you pass ${above.username}!`,
+            `💥 Almost there! ${gap} GG${gap > 1 ? "s" : ""} to grab #${rank - 1}!`,
+          ];
+          body = closemsgs[Math.floor(Math.random() * closemsgs.length)];
+        } else {
+          const farmsgs = [
+            `📊 You're #${rank} with ${gg} GGs. Keep posting to climb higher!`,
+            `🎮 Rank #${rank} — drop more clips and earn those GGs!`,
+            `🏆 #${rank} this week. ${gg} GGs in the bag — more to come!`,
+          ];
+          body = farmsgs[Math.floor(Math.random() * farmsgs.length)];
+        }
+      }
+
+      const ok = await sendPushNotif(user.fcmToken, title, body, { screen: "Rankings" });
+      if (ok) { await setThrottle(user.id, "your_rank"); sent++; }
+    }
+    logger.info(`notifYourRank: sent ${sent}`);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRIGGER — onVideoCreated
+// Push aux followers quand un user qu'ils suivent uploade un nouveau clip
+// ─────────────────────────────────────────────────────────────────────────────
+export const onVideoCreated = onDocumentWritten(
+  "videos/{videoId}",
+  async (event) => {
+    const after  = event.data?.after?.data();
+    const before = event.data?.before?.data();
+    // Seulement sur création (pas update)
+    if (!after || before) return;
+
+    const creatorId = after.userId;
+    const title     = after.title || "New clip";
+    if (!creatorId) return;
+
+    try {
+      // Récupère le nom du créateur
+      const creatorSnap = await db.collection("users").doc(creatorId).get();
+      const creatorName = creatorSnap.data()?.username || "Someone";
+
+      // Récupère tous les followers du créateur
+      const followersSnap = await db.collection("follows")
+        .where("followingId", "==", creatorId)
+        .get();
+
+      let sent = 0;
+      for (const followDoc of followersSnap.docs) {
+        const followerId = followDoc.data().followerId;
+        if (!followerId || followerId === creatorId) continue;
+
+        const followerSnap = await db.collection("users").doc(followerId).get();
+        const token = followerSnap.data()?.fcmToken;
+        if (!token) continue;
+        if (await isThrottled(followerId, `new_clip_${creatorId}`)) continue;
+
+        const ok = await sendPushNotif(
+          token,
+          `🎮 ${creatorName} just posted!`,
+          `"${title}" — Come watch and give a GG!`,
+          { screen: "Feed", videoId: event.params.videoId }
+        );
+        if (ok) {
+          await setThrottle(followerId, `new_clip_${creatorId}`);
+          sent++;
+        }
+      }
+      logger.info(`onVideoCreated: ${creatorName} → ${sent} followers notified`);
+    } catch (e) { logger.warn("onVideoCreated push failed:", e); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRIGGER — onMentionCreated (mention dans un commentaire)
+// Push à la personne mentionnée via @username
+// ─────────────────────────────────────────────────────────────────────────────
+export const onMentionNotif = onDocumentWritten(
+  "notifications/{notifId}",
+  async (event) => {
+    const after = event.data?.after?.data();
+    const before = event.data?.before?.data();
+    if (!after || before) return; // création seulement
+    // Types gérés : mention, comment_like, system
+    if (!["mention", "comment_like"].includes(after.type)) return;
+
+    const { userId, fromUsername, text, videoId, type } = after;
+    if (!userId) return;
+
+    try {
+      const userSnap = await db.collection("users").doc(userId).get();
+      const token = userSnap.data()?.fcmToken;
+      if (!token) return;
+
+      let title = "";
+      let body  = text || "";
+
+      if (type === "mention") {
+        title = `👋 ${fromUsername || "Someone"} mentioned you`;
+      } else if (type === "comment_like") {
+        title = `❤️ ${fromUsername || "Someone"} liked your comment`;
+        body  = text || "Check it out!";
+      }
+
+      if (title) {
+        await sendPushNotif(token, title, body, { screen: "Feed", videoId });
+      }
+    } catch (e) { logger.warn("onMentionNotif push failed:", e); }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP — broadcastPush
+// Envoie un push à TOUS les users avec un fcmToken.
+// Appelé depuis l'app admin après avoir créé les notifs Firestore.
+// POST body: { title: string, body: string, screen?: string }
+// Protégé par la même clé que adminCleanup.
+// ─────────────────────────────────────────────────────────────────────────────
+export const broadcastPush = onRequest(
+  { region: "us-central1", timeoutSeconds: 300, cors: true },
+  async (req, res) => {
+    if (req.query.key !== "ga_cleanup_2026") { res.status(403).send("Forbidden"); return; }
+    if (req.method !== "POST") { res.status(405).send("POST only"); return; }
+
+    const { title, body, screen } = req.body || {};
+    if (!title || !body) { res.status(400).json({ error: "title and body required" }); return; }
+
+    const usersSnap = await db.collection("users")
+      .where("fcmToken", "!=", "")
+      .get();
+
+    let sent = 0, failed = 0;
+    // Send in batches of 100 (Expo Push limit)
+    const docs = usersSnap.docs;
+    for (let i = 0; i < docs.length; i += 100) {
+      const batch = docs.slice(i, i + 100);
+      await Promise.all(batch.map(async (d) => {
+        const token = d.data().fcmToken;
+        if (!token) return;
+        const ok = await sendPushNotif(token, title, body, { screen: screen || "Feed" });
+        if (ok) sent++; else failed++;
+      }));
+    }
+
+    logger.info(`broadcastPush: sent=${sent} failed=${failed} title="${title}"`);
+    res.status(200).json({ ok: true, sent, failed, total: docs.length });
   }
 );

@@ -503,7 +503,7 @@ export default function RankingsScreen({ navigation }) {
         {/* ───────────── TOP VIDEO ───────────── */}
         {activeTab === 'topvideo' && (
           <>
-            <Text style={s.sectionNote}>🏆 The most GG-ed videos of the month</Text>
+            <Text style={s.sectionNote}>🏆 Top 5 most GG-ed clips of all time</Text>
             {topVideos.length === 0 ? (
               <Text style={s.empty}>No video yet🎮</Text>
             ) : (
@@ -515,7 +515,9 @@ export default function RankingsScreen({ navigation }) {
         {/* ───────────── VIDEO OF DAY ───────────── */}
         {activeTab === 'videoday' && (
           <>
-            <Text style={s.sectionNote}>🌟 The best music videos of the last 24 hours</Text>
+            <Text style={s.sectionNote}>
+              {videosOfDay.length > 0 ? '🌟 Clips uploaded in the last 24 hours' : '🌟 Most recent clips'}
+            </Text>
             {videosOfDay.length === 0 ? (
               <Text style={s.empty}>No clips in the last 24 hours🎮</Text>
             ) : (
