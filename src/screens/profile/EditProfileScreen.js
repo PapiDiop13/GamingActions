@@ -11,7 +11,7 @@ import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import { logError, logEvent, LOG_CONTEXT } from '../../utils/errorLogger';
 import { db } from '../../config/firebase';
-import { uploadAvatarToCloudinary, uploadBannerToCloudinary } from '../../config/cloudinary';
+import { uploadAvatar, uploadBanner } from '../../config/storage';
 import { GAMES } from '../../constants/games';
 import { COUNTRIES, getCountryByName } from '../../constants/countries';
 
@@ -76,7 +76,7 @@ export default function EditProfileScreen({ navigation }) {
     if (!result.canceled) {
       setLoading(true);
       try {
-        const url = await uploadAvatarToCloudinary(result.assets[0].uri);
+        const url = await uploadAvatar(result.assets[0].uri, user.uid);
         setAvatar(url);
       } catch (e) {
         await logError(LOG_CONTEXT.AVATAR_FAIL, e, user?.uid);
@@ -99,7 +99,7 @@ export default function EditProfileScreen({ navigation }) {
     if (!result.canceled) {
       setLoading(true);
       try {
-        const url = await uploadBannerToCloudinary(result.assets[0].uri);
+        const url = await uploadBanner(result.assets[0].uri, user.uid);
         setBanner(url);
       } catch (e) {
         Alert.alert('Error', 'Could not upload the banner.');

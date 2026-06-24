@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { COLORS } from '../../constants/colors';
 
 const { width, height } = Dimensions.get('window');
-const LOGO_URI = 'https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg';
+const LOGO_URI = require('../../../assets/logo.png');
 
 export default function SplashScreen({ navigation }) {
   const logoScale   = useRef(new Animated.Value(0.3)).current;
@@ -27,7 +27,7 @@ export default function SplashScreen({ navigation }) {
       <StatusBar style="light" />
       <Animated.View style={[styles.logoWrap, { transform: [{ scale: logoScale }], opacity: logoOpacity }]}>
         {/* Logo image */}
-        <Image source={{ uri: LOGO_URI }} style={styles.logoImg} resizeMode="contain" />
+        <Image source={LOGO_URI} style={styles.logoImg} resizeMode="contain" />
         {/* Nom sous le logo */}
         <View style={styles.nameRow}>
           <Text style={styles.logoGA}>GAMING</Text>

@@ -150,6 +150,36 @@ export default function AdminScreen({ navigation, route }) {
     loadReports();
   };
 
+  const deleteVideo = async (report) => {
+    const videoId = report.targetId;
+    const title = report.targetData?.title || videoId;
+    Alert.alert(
+      'Supprimer cette vidéo ?',
+      `"${title}" sera définitivement supprimée ainsi que ses GG et commentaires. Irréversible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Supprimer', style: 'destructive', onPress: async () => {
+          try {
+            // Supprimer les GG liés
+            const ggSnap = await getDocs(query(collection(db,'ggs'), where('videoId','==',videoId)));
+            for (const g of ggSnap.docs) await deleteDoc(g.ref);
+            // Supprimer les commentaires liés
+            const cSnap = await getDocs(query(collection(db,'comments'), where('videoId','==',videoId)));
+            for (const c of cSnap.docs) await deleteDoc(c.ref);
+            // Supprimer la vidéo
+            await deleteDoc(doc(db,'videos',videoId));
+            // Marquer le report comme résolu
+            await updateDoc(doc(db,'reports',report.id),{status:'resolved',resolvedAction:'deleted',resolvedAt:serverTimestamp()});
+            setReports(prev => prev.map(r => r.id===report.id ? {...r,status:'resolved'} : r));
+            Alert.alert('✅ Vidéo supprimée');
+          } catch (e) {
+            Alert.alert('Erreur', e.message);
+          }
+        }},
+      ]
+    );
+  };
+
   const banFromReport = async (report) => {
     const userId = report.targetType === 'video' ? report.targetData?.userId : report.targetId;
     if (!userId) return Alert.alert('Erreur','User ID introuvable');
@@ -710,6 +740,12 @@ export default function AdminScreen({ navigation, route }) {
                         <TouchableOpacity onPress={()=>unrestrictVideo(r.targetId)} style={[st.actionSmall,{borderColor:COLORS.green}]}>
                           <Ionicons name="eye" size={14} color={COLORS.green}/>
                           <Text style={[st.actionSmallText,{color:COLORS.green}]}> Restore</Text>
+                        </TouchableOpacity>
+                      )}
+                      {isVideo&&(
+                        <TouchableOpacity onPress={()=>deleteVideo(r)} style={[st.actionSmall,{borderColor:'#FF2222',backgroundColor:'#FF222222'}]}>
+                          <Ionicons name="trash" size={14} color="#FF2222"/>
+                          <Text style={[st.actionSmallText,{color:'#FF2222'}]}> Delete</Text>
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity onPress={()=>banFromReport(r)} style={[st.actionSmall,{borderColor:COLORS.red}]}>

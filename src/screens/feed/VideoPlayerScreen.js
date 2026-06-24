@@ -10,13 +10,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '../../constants/colors';
-import { optimizeVideoUrl } from '../../config/cloudinary';
+import { getVideoUrl, getThumbnailUrl } from '../../config/mux';
 import useFeedStore from '../../store/useFeedStore';
 import useAuthStore from '../../store/useAuthStore';
 import { db } from '../../config/firebase';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { ringColorForUser, commentFrameStyle } from '../../constants/frames';
 import FramedAvatar from '../../components/FramedAvatar';
+import CommentsSheet from '../../components/CommentsSheet';
 import { recordView } from '../../utils/feedAlgo';
 
 // ─── GG Button animé ─────────────────────────────────────────────────────────
@@ -42,89 +43,12 @@ function GGBtn({ hasGG, count, onPress, disabled }) {
 }
 
 // ─── Comments Sheet ───────────────────────────────────────────────────────────
-function CommentsSheet({ visible, onClose, video, userProfile, onCommentAdded }) {
-  const { getVideoComments, fetchComments, addComment } = useFeedStore();
-  const [text, setText] = useState('');
-  const comments = getVideoComments(video?.id);
-
-  useEffect(() => {
-    if (visible && video?.id) {
-      const unsub = fetchComments(video.id);
-      return () => unsub?.();
-    }
-  }, [visible, video?.id]);
-
-  const send = () => {
-    if (!text.trim() || !userProfile?.uid) return;
-    addComment(video.id, text.trim(), userProfile);
-    setText('');
-    onCommentAdded?.();
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} />
-      </TouchableWithoutFeedback>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.sheetWrap}>
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-          <View style={styles.sheetHeader}>
-            <Ionicons name="chatbubble-outline" size={14} color={COLORS.gold} />
-            <Text style={styles.sheetHeaderText}> {comments.length} Comments</Text>
-          </View>
-          <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {comments.length === 0
-              ? <Text style={styles.emptyComments}>No comments yet. Be the first! 👇</Text>
-              : comments.map(c => {
-                const cf = commentFrameStyle(c);
-                const hasBorder = cf && cf.id !== 'none';
-                return (
-                  <View key={c.id} style={[
-                    styles.commentRow,
-                    hasBorder && { borderWidth: 1.5, borderColor: cf.color, borderRadius: 10, padding: 8 },
-                  ]}>
-                    <FramedAvatar user={c} size={26} />
-                    <View style={{ flex: 1, marginLeft: 8 }}>
-                      <Text style={styles.commentUser}>{c.username}</Text>
-                      <Text style={styles.commentText}>
-                        {(c.text || '').split(/(@\w+)/g).map((part, i) =>
-                          part.startsWith('@')
-                            ? <Text key={i} style={{ color: COLORS.blue, fontWeight: '700' }}>{part}</Text>
-                            : <Text key={i}>{part}</Text>
-                        )}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })
-            }
-          </ScrollView>
-          <View style={styles.inputRow}>
-            <FramedAvatar user={userProfile} size={26} />
-            <TextInput
-              value={text}
-              onChangeText={setText}
-              placeholder="Add a comment..."
-              placeholderTextColor={COLORS.gray}
-              style={styles.input}
-              autoFocus
-            />
-            <TouchableOpacity onPress={send} disabled={!text.trim()} style={[styles.sendBtn, !text.trim() && { opacity: 0.4 }]}>
-              <Ionicons name="send" size={14} color={COLORS.black} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function VideoPlayerScreen({ navigation, route }) {
   const { video } = route?.params || {};
   const { user, userProfile } = useAuthStore();
-  const { toggleGG, incrementView } = useFeedStore();
+  const { toggleGG, toggleGGDirect, incrementView } = useFeedStore();
 
   const [isMuted, setIsMuted] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
@@ -137,18 +61,29 @@ export default function VideoPlayerScreen({ navigation, route }) {
   // Si la vidéo vient du profil (pas dans le store), charger GG + counts depuis Firestore
   const [localHasGG, setLocalHasGG] = useState(false);
   const [localGGCount, setLocalGGCount] = useState(video?.ggCount ?? 0);
-  const [localCommentCount, setLocalCommentCount] = useState(video?.commentCount ?? 0);
+  // Live comment count — counts the REAL comments in Firestore, not a stale
+  // stored field (fixes the "0 comments" bug from commentCount/commentsCount mismatch).
+  const [liveCommentCount, setLiveCommentCount] = useState(video?.commentCount ?? video?.commentsCount ?? 0);
+
+  // Real-time listener on the comments collection for accurate count
+  useEffect(() => {
+    if (!video?.id) return;
+    const { collection: col, query: q2, where: w2, onSnapshot: sub } = require('firebase/firestore');
+    const unsub = sub(
+      q2(col(db, 'comments'), w2('videoId', '==', video.id)),
+      (snap) => setLiveCommentCount(snap.size),
+      () => {}
+    );
+    return () => unsub();
+  }, [video?.id]);
 
   useEffect(() => {
     if (!video?.id || liveVideo) return; // si dans le store, pas besoin
-    // Charger le doc vidéo pour avoir les counts à jour
     getDoc(doc(db, 'videos', video.id)).then(snap => {
       if (snap.exists()) {
         setLocalGGCount(snap.data().ggCount || 0);
-        setLocalCommentCount(snap.data().commentCount || 0);
       }
     }).catch(() => {});
-    // Vérifier si l'user a déjà GG cette vidéo
     if (user?.uid) {
       getDoc(doc(db, 'ggs', `${user.uid}_${video.id}`)).then(snap => {
         setLocalHasGG(snap.exists());
@@ -158,7 +93,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
 
   const hasGG = liveVideo ? (liveVideo.hasGG ?? false) : localHasGG;
   const ggCount = liveVideo ? (liveVideo.ggCount ?? video?.ggCount ?? 0) : localGGCount;
-  const commentCount = liveVideo ? (liveVideo.commentCount ?? video?.commentCount ?? 0) : localCommentCount;
+  const commentCount = liveCommentCount;
 
   // ── 5-second view timer ─────────────────────────────────────────────────────
   // A clip is only counted as "viewed" after 5 continuous seconds of watch time.
@@ -189,7 +124,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
     };
   }, [video?.id]);
 
-  const player = useVideoPlayer(video?.videoUrl ? optimizeVideoUrl(video.videoUrl) : null, (p) => {
+  const player = useVideoPlayer(video?.videoUrl ? getVideoUrl(video) : null, (p) => {
     p.loop = true;
     p.muted = false;
     p.timeUpdateEventInterval = 0.5;
@@ -288,14 +223,27 @@ export default function VideoPlayerScreen({ navigation, route }) {
                 <GGBtn
                   hasGG={hasGG}
                   count={ggCount}
-                  onPress={() => {
-                    toggleGG(video?.id, user?.uid);
-                    // Si hors store, mettre à jour l'état local aussi
-                    if (!liveVideo) {
-                      setLocalHasGG(prev => {
-                        setLocalGGCount(c => prev ? c - 1 : c + 1);
-                        return !prev;
-                      });
+                  onPress={async () => {
+                    if (liveVideo) {
+                      // Video is in the feed store — use the store toggle
+                      toggleGG(video?.id, user?.uid);
+                    } else {
+                      // Video from profile/search — optimistic update + direct write
+                      const prevHasGG = localHasGG;
+                      const prevCount = localGGCount;
+                      setLocalHasGG(!prevHasGG);
+                      setLocalGGCount(prevHasGG ? Math.max(0, prevCount - 1) : prevCount + 1);
+                      const result = await toggleGGDirect(
+                        video?.id, video?.userId, user?.uid, prevHasGG, prevCount
+                      );
+                      if (result) {
+                        setLocalHasGG(result.hasGG);
+                        setLocalGGCount(result.ggCount);
+                      } else {
+                        // Revert on failure
+                        setLocalHasGG(prevHasGG);
+                        setLocalGGCount(prevCount);
+                      }
                     }
                   }}
                   disabled={isOwnVideo}
@@ -326,6 +274,11 @@ export default function VideoPlayerScreen({ navigation, route }) {
                   <Ionicons name="game-controller-outline" size={12} color={COLORS.gold} />
                   <Text style={{ color: COLORS.gold, fontSize: 11, marginLeft: 4 }}>{video.game} · {video.console}</Text>
                 </View>
+              )}
+              {!isLandscape && (video?.caption || video?.description) && (
+                <Text numberOfLines={2} style={{ color: COLORS.white, fontSize: 11, marginTop: 4, opacity: 0.85, lineHeight: 15 }}>
+                  {video.caption || video.description}
+                </Text>
               )}
             </View>
           </>

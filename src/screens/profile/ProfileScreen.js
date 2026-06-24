@@ -13,7 +13,7 @@ import useFanbaseStore from '../../store/useFanbaseStore';
 import { db } from '../../config/firebase';
 import { awardPoints, POINTS } from '../../utils/points';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
-import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc, serverTimestamp, limit } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { ringColorForUser, glowColorForUser, getFrameById, getVideoFrameById } from '../../constants/frames';
 import { ElectricBanner, ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
 import FramedAvatar from '../../components/FramedAvatar';
@@ -394,8 +394,7 @@ export default function ProfileScreen({ navigation, route }) {
         const q = query(
           collection(db, 'videos'),
           where('userId', '==', targetId),
-          orderBy('createdAt', 'desc'),
-          limit(24)
+          orderBy('createdAt', 'desc')
         );
         const unsub = onSnapshot(q, (snap) => {
           setUserVideos(snap.docs.map(d => ({

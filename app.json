@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.gamingactions.app",
-      "buildNumber": "17",
+      "buildNumber": "38",
       "infoPlist": {
         "NSCameraUsageDescription": "Gaming Actions needs access to your camera to record gameplay clips and take profile pictures.",
         "NSPhotoLibraryUsageDescription": "Gaming Actions needs access to your photo library to upload gameplay clips and set your profile picture.",
@@ -29,7 +29,8 @@
       },
       "associatedDomains": [
         "applinks:gamingactions.app"
-      ]
+      ],
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "adaptiveIcon": {
@@ -38,7 +39,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.gamingactions.app",
-      "versionCode": 7,
+      "versionCode": 28,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -121,6 +122,12 @@
         "expo-tracking-transparency",
         {
           "userTrackingPermission": "Gaming Actions uses this data to provide personalized content and improve your experience."
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.878199468974-57kfnd5o91gatnl3lv079v49gdvhkt2t"
         }
       ]
     ],

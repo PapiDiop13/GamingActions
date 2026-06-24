@@ -9,7 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
-import { uploadToCloudinary, CLOUDINARY_FOLDERS } from '../../config/cloudinary';
+import { getMuxThumbnailUrl, getMuxPlaybackUrl } from '../../config/mux';
 import { db } from '../../config/firebase';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import ConsoleIcon from '../../components/ConsoleIcon';
@@ -182,15 +182,37 @@ export default function UploadScreen({ navigation, route }) {
   
     // L'upload continue en arrière-plan
     try {
-      const folder = isFanbaseExclusive
-        ? CLOUDINARY_FOLDERS.exclusives
-        : contentType === 'flashtuto'
-        ? CLOUDINARY_FOLDERS.flashtutos
-        : contentType === 'flashinfo'
-        ? CLOUDINARY_FOLDERS.flashinfos
-        : CLOUDINARY_FOLDERS.clips;
-  
-      const uploaded = await uploadToCloudinary(videoUri, folder, null, isLegendaryUser);
+      // ── Upload vers Mux (remplace Cloudinary) ─────────────────────────────
+      // 1. Demander une URL d'upload temporaire à notre Cloud Function
+      const urlResponse = await fetch(
+        'https://us-central1-gamingactions-app.cloudfunctions.net/muxGetUploadUrl',
+        { method: 'POST' }
+      );
+      if (!urlResponse.ok) throw new Error("Impossible d'obtenir l'URL d'upload Mux");
+      const { uploadUrl, uploadId } = await urlResponse.json();
+
+      // 2. Uploader directement depuis l'app vers Mux (Direct Upload)
+      const videoFile = { uri: videoUri, type: 'video/mp4', name: `clip_${Date.now()}.mp4` };
+      const formData = new FormData();
+      formData.append('file', videoFile);
+      const muxResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'video/mp4' },
+        body: { uri: videoUri, type: 'video/mp4', name: `clip_${Date.now()}.mp4` },
+      });
+      if (!muxResponse.ok) throw new Error("Echec de l'upload vers Mux");
+
+      // 3. Créer un objet "uploaded" compatible avec le reste du code
+      // muxPlaybackId sera rempli par le webhook quand Mux finit le transcodage.
+      // La vidéo affiche un placeholder pendant le processing (~30-60 sec).
+      const uploaded = {
+        url: null,           // sera rempli par le webhook
+        publicId: uploadId,  // muxUploadId — permet au webhook de trouver ce doc
+        thumbnail: null,     // sera rempli par le webhook
+        duration: 0,         // sera rempli par le webhook
+        muxUploadId: uploadId,
+        muxStatus: 'processing',
+      };
 
       // Si l'utilisateur a saisi un jeu custom, l'ajouter à la liste partagée (s'il n'existe pas déjà)
       if (showCustomGame && customGame.trim()) {
@@ -227,9 +249,12 @@ export default function UploadScreen({ navigation, route }) {
         videoFrame,
         isLegendaryFrame: videoFrame !== 'none',
         isFanbaseExclusive,
-        videoUrl: uploaded.url,
-        thumbnail: uploaded.thumbnail,
-        publicId: uploaded.publicId,
+        videoUrl: uploaded.url,              // null → rempli par webhook Mux
+        thumbnail: uploaded.thumbnail,         // null → rempli par webhook Mux
+        publicId: uploaded.publicId,           // muxUploadId pour le webhook
+        muxUploadId: uploaded.muxUploadId,     // ID de l'upload Mux
+        muxPlaybackId: null,                   // rempli par webhook quand prêt
+        muxStatus: uploaded.muxStatus,         // 'processing' → 'ready'
         duration: uploaded.duration || 0,
         ggCount: 0,
         commentsCount: 0,

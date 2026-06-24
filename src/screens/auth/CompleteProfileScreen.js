@@ -11,7 +11,7 @@ import useAuthStore from '../../store/useAuthStore';
 import { db } from '../../config/firebase';
 
 const ACCOUNT_TYPES = ['gamer', 'creator', 'developer'];
-const LOGO_URI = 'https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg';
+const LOGO_URI = require('../../../assets/logo.png');
 
 export default function CompleteProfileScreen({ navigation }) {
   const [username, setUsername] = useState('');
@@ -67,7 +67,7 @@ export default function CompleteProfileScreen({ navigation }) {
       )}
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={{ alignItems: 'center', marginBottom: 24 }}>
-          <Image source={{ uri: LOGO_URI }} style={{ width: 70, height: 70, borderRadius: 16, marginBottom: 14 }} resizeMode="cover" />
+          <Image source={LOGO_URI} style={{ width: 70, height: 70, borderRadius: 16, marginBottom: 14 }} resizeMode="cover" />
           <Text style={styles.title}>Complete your profile</Text>
           <Text style={styles.subtitle}>Let the world know who you are</Text>
         </View>

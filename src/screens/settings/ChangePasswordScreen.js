@@ -53,8 +53,14 @@ export default function ChangePasswordScreen({ navigation }) {
         { text: 'OK', onPress: () => signOut() }
       ]);
     } catch (e) {
-      if (e.code === 'auth/wrong-password') {
+      if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
+          || (e.message || '').includes('invalid-credential')
+          || (e.message || '').includes('INVALID_LOGIN_CREDENTIALS')) {
         Alert.alert('Error', 'Current password is incorrect.');
+      } else if (e.code === 'auth/requires-recent-login') {
+        Alert.alert('Session expired', 'Please sign out and sign in again, then change your password.');
+      } else if (e.code === 'auth/weak-password') {
+        Alert.alert('Error', 'New password is too weak. Use at least 8 characters.');
       } else {
         Alert.alert('Error', 'Something went wrong. Please try again.');
       }

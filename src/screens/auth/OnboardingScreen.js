@@ -12,7 +12,7 @@ try {
 } catch (_) {}
 
 const { width } = Dimensions.get('window');
-const LOGO_URI = 'https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg';
+const LOGO_URI = require('../../../assets/logo.png');
 
 const SLIDES = [
   {
@@ -83,7 +83,7 @@ export default function OnboardingScreen({ navigation }) {
 
       {/* Logo header */}
       <View style={styles.logoRow}>
-        <Image source={{ uri: LOGO_URI }} style={styles.logoImg} resizeMode="contain" />
+        <Image source={LOGO_URI} style={styles.logoImg} resizeMode="contain" />
         <View style={styles.logoTextWrap}>
           <Text style={styles.logoGA}>GAMING</Text>
           <Text style={styles.logoActions}>ACTIONS</Text>

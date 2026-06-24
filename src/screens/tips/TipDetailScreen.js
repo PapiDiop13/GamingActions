@@ -14,7 +14,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
-import { optimizeVideoUrl } from '../../config/cloudinary';
+import { getVideoUrl, getThumbnailUrl } from '../../config/mux';
 import useAuthStore from '../../store/useAuthStore';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import Avatar from '../../components/FramedAvatar';
@@ -242,7 +242,7 @@ const sheetS = StyleSheet.create({
 export default function TipDetailScreen({ navigation, route }) {
   const { tip } = route.params;
   const { user: authUser, userProfile, saveProfile } = useAuthStore();
-  const player = useVideoPlayer(tip.videoUrl ? optimizeVideoUrl(tip.videoUrl) : null, (p) => {
+  const player = useVideoPlayer(tip.videoUrl ? getVideoUrl(tip.videoUrl) : null, (p) => {
     p.loop = false;
   });
 

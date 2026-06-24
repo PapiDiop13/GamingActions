@@ -32,6 +32,9 @@ export function friendlyError(e) {
   if (code === 'auth/weak-password'           || msg.includes('weak-password'))           return 'Password must be at least 6 characters.';
   if (code === 'auth/wrong-password'          || msg.includes('wrong-password'))          return 'Incorrect password. Please try again.';
   if (code === 'auth/user-not-found'          || msg.includes('user-not-found'))          return 'No account found with this email.';
+  // Modern Firebase (since late 2023) returns a single 'invalid-credential' for both
+  // wrong password AND non-existent account (anti-enumeration). Handle it explicitly.
+  if (code === 'auth/invalid-credential'      || msg.includes('invalid-credential') || msg.includes('INVALID_LOGIN_CREDENTIALS')) return 'Incorrect email or password. Please try again.';
   if (code === 'auth/too-many-requests'       || msg.includes('too-many-requests'))       return 'Too many attempts. Please wait a few minutes and try again.';
   if (code === 'auth/network-request-failed'  || msg.includes('network'))                 return 'Connection error. Check your internet and try again.';
   if (code === 'auth/user-disabled')                                                       return 'This account has been disabled. Contact support.';

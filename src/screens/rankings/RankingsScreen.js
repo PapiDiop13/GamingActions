@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
   Platform, Image, Animated, Dimensions, ActivityIndicator,
+  LayoutAnimation, UIManager,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, getDoc, doc, updateDoc, onSnapshot, where } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { db } from '../../config/firebase';
@@ -14,6 +15,11 @@ import Avatar from '../../components/FramedAvatar';
 import { ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
 
 const { width: SW } = Dimensions.get('window');
+
+// Enable LayoutAnimation on Android (iOS has it by default)
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const TIERS = {
   noob: { label: 'NOOB', color: '#555566' },
@@ -64,6 +70,18 @@ function HeroPodium({ data, navigation }) {
 
   const glow = useRef(new Animated.Value(0)).current;
   const bob = useRef(new Animated.Value(0)).current;
+  // Pop animation when the #1 spot changes hands
+  const firstPop = useRef(new Animated.Value(1)).current;
+  const prevFirstRef = useRef(first?.uid);
+
+  useEffect(() => {
+    if (first?.uid && prevFirstRef.current && prevFirstRef.current !== first.uid) {
+      // New leader — celebratory pop
+      firstPop.setValue(0.6);
+      Animated.spring(firstPop, { toValue: 1, useNativeDriver: true, speed: 8, bounciness: 14 }).start();
+    }
+    prevFirstRef.current = first?.uid;
+  }, [first?.uid]);
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
@@ -97,12 +115,12 @@ function HeroPodium({ data, navigation }) {
         )}
 
         {/* Avatar with animated glow for #1 */}
-        <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View style={{ alignItems: 'center', justifyContent: 'center', transform: isFirst ? [{ scale: firstPop }] : [] }}>
           {isFirst && (
             <Animated.View style={[pod.glow, { opacity: glowOpacity, transform: [{ scale: glowScale }] }]} />
           )}
           <Avatar user={user} size={avSize} glow={!isFirst} />
-        </View>
+        </Animated.View>
 
         <Text style={[pod.name, isFirst && { color: COLORS.gold, fontSize: 14 }]} numberOfLines={1}>{user.username}</Text>
         <View style={[pod.ggChip, { borderColor: accent + '60', backgroundColor: accent + '14' }]}>
@@ -193,7 +211,33 @@ function YourRankCard({ myRank, userProfile, topUsers }) {
 function PlayerRow({ user, maxGG, navigation }) {
   const tier = getTier(user);
   const pct = Math.max(streakPct(user), 2);
+
+  // Animate when this player's rank changes (live leaderboard movement).
+  const prevRankRef = useRef(user.rank);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const glowAnim  = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (prevRankRef.current !== user.rank) {
+      const movedUp = user.rank < prevRankRef.current;
+      prevRankRef.current = user.rank;
+      // Slide in from the direction they moved + a gold glow pulse
+      slideAnim.setValue(movedUp ? -20 : 20);
+      glowAnim.setValue(1);
+      Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, speed: 12, bounciness: 8 }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
+      ]).start();
+    }
+  }, [user.rank]);
+
+  const glowBg = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(201,168,76,0)', 'rgba(201,168,76,0.18)'],
+  });
+
   return (
+    <Animated.View style={{ transform: [{ translateY: slideAnim }], backgroundColor: glowBg, borderRadius: 12 }}>
     <TouchableOpacity onPress={() => navigation.navigate('UserProfile', { userId: user.uid })} style={s.pRow} activeOpacity={0.85}>
       <Text style={[s.pRank, { color: tier.color }]}>{user.rank}</Text>
       <Avatar user={user} size={38} />
@@ -213,6 +257,7 @@ function PlayerRow({ user, maxGG, navigation }) {
         <Text style={s.pGGLabel}>GG</Text>
       </View>
     </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -255,33 +300,47 @@ export default function RankingsScreen({ navigation }) {
   const [videosOfDay, setVideosOfDay] = useState([]);
   const [myRank, setMyRank] = useState(null);
   const [loading, setLoading] = useState(true);
+  const lastLeaderRef = useRef(null); // tracks last synced leader to avoid redundant writes
 
   useEffect(() => {
     const timer = setInterval(() => setNow2(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => { fetchRankings(); }, []);
+  // ── Real-time leaderboard ──────────────────────────────────────────────────
+  // Listen to ALL videos live. Whenever a GG changes (ggCount updates), the
+  // leaderboard recomputes and re-renders automatically — no refresh needed.
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'videos'),
+      (snap) => {
+        const allVideos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        processRankings(allVideos);
+      },
+      (err) => { console.log('rankings listener error:', err.message); setLoading(false); }
+    );
+    return () => unsub();
+  }, [user?.uid]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchRankings();
-    setRefreshing(false);
+    // Listener auto-updates; this just gives visual feedback
+    setTimeout(() => setRefreshing(false), 600);
   };
 
-  const fetchRankings = async () => {
+  // processRankings — builds the leaderboard from an array of all video docs.
+  // Called by the real-time listener whenever GG counts change.
+  const processRankings = async (allVideos) => {
     try {
-      // Top vidéos — charger les 50 meilleures pour avoir assez de diversité
-      const videosSnap = await getDocs(
-        query(collection(db, 'videos'), orderBy('ggCount', 'desc'), limit(50))
-      );
-      const videos = videosSnap.docs.map((d, i) => ({ rank: i + 1, id: d.id, ...d.data() }));
-      // Top 5 vidéos avec au moins 1 GG
-      setTopVideos(videos.filter(v => (v.ggCount || 0) > 0).slice(0, 5));
+      // Top vidéos par ggCount
+      const topVids = [...allVideos]
+        .sort((a, b) => (b.ggCount || 0) - (a.ggCount || 0))
+        .map((v, i) => ({ rank: i + 1, ...v }));
+      setTopVideos(topVids.filter(v => (v.ggCount || 0) > 0).slice(0, 5));
 
-      // Agrège les GG par joueur depuis toutes les vidéos chargées
+      // Agrège les GG par joueur depuis TOUTES les vidéos
       const userGGs = {};
-      videos.forEach((v) => {
+      allVideos.forEach((v) => {
         if (!v.userId || !(v.ggCount > 0)) return;
         if (!userGGs[v.userId]) {
           userGGs[v.userId] = { uid: v.userId, username: v.username, avatar: v.avatar || '', plan: v.plan || 'free', streakLevel: v.streakLevel, ggCount: 0 };
@@ -298,7 +357,6 @@ export default function RankingsScreen({ navigation }) {
       const enrichedUsers = await Promise.all(
         usersList.map(async (u) => {
           try {
-            const { getDoc, doc } = await import('firebase/firestore');
             const snap = await getDoc(doc(db, 'users', u.uid));
             if (snap.exists()) {
               const p = snap.data();
@@ -308,6 +366,13 @@ export default function RankingsScreen({ navigation }) {
           return u;
         })
       );
+      // Animate position changes — items smoothly slide to their new rank
+      // when GG counts change the order (live leaderboard effect).
+      if (Platform.OS === 'ios' || Platform.OS === 'android') {
+        LayoutAnimation.configureNext(LayoutAnimation.create(
+          400, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity
+        ));
+      }
       setTopUsers(enrichedUsers);
 
       // Mon rang
@@ -318,11 +383,38 @@ export default function RankingsScreen({ navigation }) {
           const myPos = sorted.findIndex((u) => u.uid === user.uid) + 1;
           setMyRank({ rank: myPos, ggCount: myEntry.ggCount });
         }
+
+        // ── Real-time leader sync ────────────────────────────────────────────
+        // The true #1 (most GG) should be the ONLY one with isCurrentLeader.
+        // Guarded by a ref so we only write when the leader actually changes,
+        // not on every snapshot (avoids unnecessary Firestore writes).
+        const trueLeaderId = sorted[0]?.uid;
+        const trueLeaderGG = sorted[0]?.ggCount || 0;
+        if (trueLeaderId && trueLeaderGG > 0 && lastLeaderRef.current !== trueLeaderId) {
+          lastLeaderRef.current = trueLeaderId;
+          try {
+            // Find ALL users currently flagged as leader
+            const flaggedSnap = await getDocs(
+              query(collection(db, 'users'), where('isCurrentLeader', '==', true))
+            );
+            // Remove the badge from anyone who is NOT the true #1
+            for (const d of flaggedSnap.docs) {
+              if (d.id !== trueLeaderId) {
+                await updateDoc(doc(db, 'users', d.id), { isCurrentLeader: false });
+              }
+            }
+            // Make sure the true leader HAS the badge
+            const leaderHasBadge = flaggedSnap.docs.some(d => d.id === trueLeaderId);
+            if (!leaderHasBadge) {
+              await updateDoc(doc(db, 'users', trueLeaderId), { isCurrentLeader: true });
+            }
+          } catch (e) {}
+        }
       }
 
       // Vidéos du jour (24h)
       const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const todayVideos = videos.filter((v) => {
+      const todayVideos = allVideos.filter((v) => {
         const created = v.createdAt?.toDate ? v.createdAt.toDate() : new Date(v.createdAt);
         return created > dayAgo;
       });

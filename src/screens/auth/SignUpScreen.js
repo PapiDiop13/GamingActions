@@ -58,8 +58,11 @@ export default function SignUpScreen({ navigation }) {
     try {
       setLoading(true);
       const { GoogleSignin, statusCodes } = require('@react-native-google-signin/google-signin');
-      GoogleSignin.configure({ webClientId: '878199468974-3b55nbhu4473q4l6huu7tqner349gtmn.apps.googleusercontent.com' });
-      await GoogleSignin.hasPlayServices();
+      GoogleSignin.configure({ webClientId: '878199468974-3b55nbhu4473q4l6huu7tqner349gtmn.apps.googleusercontent.com', iosClientId: '878199468974-57kfnd5o91gatnl3lv079v49gdvhkt2t.apps.googleusercontent.com' });
+      // hasPlayServices() is Android-only — it throws on iOS (no Play Services on iPhone).
+      if (Platform.OS === 'android') {
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      }
       const userInfo = await GoogleSignin.signIn();
       const { idToken } = userInfo.data || userInfo;
       const { GoogleAuthProvider, signInWithCredential: swc } = await import('firebase/auth');
@@ -71,15 +74,17 @@ export default function SignUpScreen({ navigation }) {
         await setDoc(docRef, { uid: user.uid, email: user.email || '', username: (user.displayName || 'PLAYER').toUpperCase().slice(0, 20), avatar: user.photoURL || '', accountType: 'gamer', plan: 'free', followers: 0, following: 0, gaPoints: 0, createdAt: serverTimestamp() });
       }
     } catch (e) {
-      if (e.message?.includes('RNGoogleSignin')) {
-        Alert.alert('Google Sign-In', 'Available in the full app build.');
-        return;
-      }
+      // User cancelled — silent, no error popup
       try {
         const { statusCodes } = require('@react-native-google-signin/google-signin');
         if (e.code === statusCodes.SIGN_IN_CANCELLED) return;
         if (e.code === statusCodes.IN_PROGRESS) return;
       } catch (_) {}
+      // Native module genuinely missing (only happens in Expo Go, never in a real build)
+      if (e.message?.includes('RNGoogleSignin') || e.message?.includes('null is not an object')) {
+        Alert.alert('Google Sign-In', 'Please use email or Apple sign-in for now.');
+        return;
+      }
       await logError('SignUp_Google', e);
       Alert.alert('Sign-In Error', 'Could not sign in. Please try again.');
     } finally {
@@ -137,7 +142,7 @@ export default function SignUpScreen({ navigation }) {
         </TouchableOpacity>
         <View style={{ alignItems: 'center', marginBottom: 24 }}>
           <Image
-            source={{ uri: 'https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg' }}
+            source={require('../../../assets/logo.png')}
             style={{ width: 90, height: 90, borderRadius: 22, marginBottom: 14 }}
             resizeMode="cover"
           />

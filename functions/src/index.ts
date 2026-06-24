@@ -4,6 +4,7 @@ import {
   onDocumentDeleted,
 } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onRequest } from "firebase-functions/v2/https";
 import { logger } from "firebase-functions/v2";
 import { Expo } from "expo-server-sdk";
 
@@ -738,7 +739,7 @@ export const assignMonthlyChampion = onSchedule(
 // Trouve le 1er du ranking en cours et met isCurrentLeader=true
 // ─────────────────────────────────────────────────────────────────────────────
 export const updateCurrentLeader = onSchedule(
-  { schedule: "0 * * * *", region: "us-central1", timeoutSeconds: 60 },
+  { schedule: "*/15 * * * *", region: "us-central1", timeoutSeconds: 60 },
   async () => {
     const topSnap = await db.collection("users")
       .orderBy("ggReceived", "desc")
@@ -747,17 +748,20 @@ export const updateCurrentLeader = onSchedule(
     if (topSnap.empty) return;
 
     const leaderId = topSnap.docs[0].id;
+    const leaderGG = topSnap.docs[0].data().ggReceived || 0;
     const batch = db.batch();
 
-    // Retire le badge à l'ancien leader
+    // Retire le badge à tous les anciens leaders qui ne sont plus #1
     const oldLeaderSnap = await db.collection("users").where("isCurrentLeader", "==", true).get();
     for (const d of oldLeaderSnap.docs) {
       if (d.id !== leaderId) batch.update(d.ref, { isCurrentLeader: false });
     }
-    // Attribue au nouveau
-    batch.update(topSnap.docs[0].ref, { isCurrentLeader: true });
+    // Attribue au nouveau (seulement s'il a au moins 1 GG)
+    if (leaderGG > 0) {
+      batch.update(topSnap.docs[0].ref, { isCurrentLeader: true });
+    }
     await batch.commit();
-    logger.info(`updateCurrentLeader: leader is ${topSnap.docs[0].data().username}`);
+    logger.info(`updateCurrentLeader: leader is ${topSnap.docs[0].data().username} (${leaderGG} GG)`);
   }
 );
 
@@ -882,5 +886,528 @@ export const reshuffleFeedOrder = onSchedule(
     }
 
     logger.info(`reshuffleFeedOrder: ${count} videos reshuffled in ${batchCount} batch(es)`);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP — adminCleanup
+// Réconciliation MANUELLE à la demande : recompte tous les ggCount des vidéos,
+// les ggReceived des users, les commentsCount, et met à jour le leader.
+// Appel : https://us-central1-gamingactions-app.cloudfunctions.net/adminCleanup?key=SECRET
+// ─────────────────────────────────────────────────────────────────────────────
+export const adminCleanup = onRequest(
+  { region: "us-central1", timeoutSeconds: 540 },
+  async (req, res) => {
+    // Protection simple par clé (change SECRET pour ta propre valeur)
+    const SECRET = "ga_cleanup_2026";
+    if (req.query.key !== SECRET) {
+      res.status(403).send("Forbidden");
+      return;
+    }
+
+    let ggFixed = 0, commentsFixed = 0, ggReceivedFixed = 0;
+
+    // 1. Recompte ggCount + commentsCount de chaque vidéo
+    const videosSnap = await db.collection("videos").get();
+    const creatorTotals: Record<string, number> = {};
+
+    for (const vDoc of videosSnap.docs) {
+      const vData = vDoc.data();
+      const updates: Record<string, number> = {};
+
+      // GG réels
+      const ggSnap = await db.collection("ggs").where("videoId", "==", vDoc.id).get();
+      const realGG = ggSnap.size;
+      if (realGG !== (vData.ggCount || 0)) {
+        updates.ggCount = realGG;
+        ggFixed++;
+      }
+
+      // Commentaires réels
+      const cSnap = await db.collection("comments").where("videoId", "==", vDoc.id).get();
+      const realComments = cSnap.size;
+      if (realComments !== (vData.commentsCount || 0)) {
+        updates.commentsCount = realComments;
+        commentsFixed++;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await vDoc.ref.update(updates);
+      }
+
+      // Cumul ggReceived par créateur
+      if (vData.userId) {
+        creatorTotals[vData.userId] = (creatorTotals[vData.userId] || 0) + realGG;
+      }
+    }
+
+    // 2. Recompte ggReceived de chaque user
+    const usersSnap = await db.collection("users").get();
+    for (const uDoc of usersSnap.docs) {
+      const realReceived = creatorTotals[uDoc.id] || 0;
+      if (realReceived !== (uDoc.data().ggReceived || 0)) {
+        await uDoc.ref.update({ ggReceived: realReceived });
+        ggReceivedFixed++;
+      }
+    }
+
+    // 3. Met à jour le leader (le vrai #1)
+    const topSnap = await db.collection("users").orderBy("ggReceived", "desc").limit(1).get();
+    let leaderName = "none";
+    if (!topSnap.empty) {
+      const leaderId = topSnap.docs[0].id;
+      const leaderGG = topSnap.docs[0].data().ggReceived || 0;
+      const batch = db.batch();
+      const oldLeaders = await db.collection("users").where("isCurrentLeader", "==", true).get();
+      for (const d of oldLeaders.docs) {
+        if (d.id !== leaderId) batch.update(d.ref, { isCurrentLeader: false });
+      }
+      if (leaderGG > 0) {
+        batch.update(topSnap.docs[0].ref, { isCurrentLeader: true });
+        leaderName = topSnap.docs[0].data().username || leaderId;
+      }
+      await batch.commit();
+    }
+
+    const result = {
+      ok: true,
+      ggCountFixed: ggFixed,
+      commentsCountFixed: commentsFixed,
+      ggReceivedFixed,
+      newLeader: leaderName,
+    };
+    logger.info("adminCleanup done", result);
+    res.status(200).json(result);
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// DATA MANAGEMENT — export/import jeux, genres et vidéos pour révision manuelle
+// ═════════════════════════════════════════════════════════════════════════════
+const CLEANUP_KEY = "ga_cleanup_2026";
+
+// Échappe une valeur pour CSV (guillemets, virgules, retours ligne)
+function csvCell(val: any): string {
+  if (val === null || val === undefined) return "";
+  const s = String(val);
+  if (s.includes('"') || s.includes(",") || s.includes("\n")) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+// ── EXPORT 1 : jeux + genres uniques utilisés dans les vidéos ─────────────────
+// CSV: game, genre_actuel, nb_videos, genre_corrige (vide à remplir), nouveau_nom (vide)
+export const exportGamesGenres = onRequest(
+  { region: "us-central1", timeoutSeconds: 300 },
+  async (req, res) => {
+    if (req.query.key !== CLEANUP_KEY) { res.status(403).send("Forbidden"); return; }
+
+    const videosSnap = await db.collection("videos").get();
+    // Compte par (game|genre)
+    const combos: Record<string, { game: string; genre: string; count: number }> = {};
+    videosSnap.docs.forEach((d) => {
+      const v = d.data();
+      const game = v.game || "(vide)";
+      const genre = v.genre || "(vide)";
+      const key = `${game}|||${genre}`;
+      if (!combos[key]) combos[key] = { game, genre, count: 0 };
+      combos[key].count++;
+    });
+
+    const rows = Object.values(combos).sort((a, b) => b.count - a.count);
+    let csv = "game,genre_actuel,nb_videos,genre_corrige,nouveau_nom_jeu\n";
+    for (const r of rows) {
+      csv += [csvCell(r.game), csvCell(r.genre), r.count, "", ""].join(",") + "\n";
+    }
+
+    res.set("Content-Type", "text/csv; charset=utf-8");
+    res.set("Content-Disposition", 'attachment; filename="games_genres.csv"');
+    res.status(200).send(csv);
+  }
+);
+
+// ── EXPORT 2 : toutes les vidéos avec colonnes éditables ──────────────────────
+// CSV: id, title, game, genre, console, contentType, username, ggCount,
+//      commentsCount, createdAt, delete(vide), game_corrige(vide), genre_corrige(vide)
+export const exportVideos = onRequest(
+  { region: "us-central1", timeoutSeconds: 300 },
+  async (req, res) => {
+    if (req.query.key !== CLEANUP_KEY) { res.status(403).send("Forbidden"); return; }
+
+    const videosSnap = await db.collection("videos").orderBy("createdAt", "desc").get();
+    let csv = "id,title,game,genre,console,contentType,username,ggCount,commentsCount,createdAt,videoUrl,delete,game_corrige,genre_corrige\n";
+    videosSnap.docs.forEach((d) => {
+      const v = d.data();
+      const created = v.createdAt?.toDate ? v.createdAt.toDate().toISOString() : "";
+      csv += [
+        csvCell(d.id),
+        csvCell(v.title),
+        csvCell(v.game),
+        csvCell(v.genre),
+        csvCell(v.console),
+        csvCell(v.contentType),
+        csvCell(v.username),
+        v.ggCount || 0,
+        v.commentsCount || 0,
+        csvCell(created),
+        csvCell(v.videoUrl),
+        "",  // delete
+        "",  // game_corrige
+        "",  // genre_corrige
+      ].join(",") + "\n";
+    });
+
+    res.set("Content-Type", "text/csv; charset=utf-8");
+    res.set("Content-Disposition", 'attachment; filename="videos.csv"');
+    res.status(200).send(csv);
+  }
+);
+
+// ── IMPORT : applique les corrections depuis le CSV vidéos révisé ─────────────
+// Reçoit le CSV en POST body (text/plain). Pour chaque ligne :
+//   - si delete = "1"/"x"/"yes" → supprime la vidéo (+ ses ggs et comments)
+//   - si game_corrige non vide → met à jour game
+//   - si genre_corrige non vide → met à jour genre
+// Réponse JSON avec le résumé.
+export const importVideoUpdates = onRequest(
+  { region: "us-central1", timeoutSeconds: 540 },
+  async (req, res) => {
+    if (req.query.key !== CLEANUP_KEY) { res.status(403).send("Forbidden"); return; }
+    if (req.method !== "POST") { res.status(405).send("Use POST with CSV body"); return; }
+
+    const csv = typeof req.body === "string" ? req.body : (req.rawBody?.toString("utf-8") || "");
+    if (!csv) { res.status(400).json({ error: "Empty CSV body" }); return; }
+
+    // Parse CSV simple (gère les guillemets)
+    const parseLine = (line: string): string[] => {
+      const out: string[] = [];
+      let cur = "", inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (inQ) {
+          if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+          else if (c === '"') inQ = false;
+          else cur += c;
+        } else {
+          if (c === '"') inQ = true;
+          else if (c === ",") { out.push(cur); cur = ""; }
+          else cur += c;
+        }
+      }
+      out.push(cur);
+      return out;
+    };
+
+    const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length < 2) { res.status(400).json({ error: "No data rows" }); return; }
+
+    const header = parseLine(lines[0]).map((h) => h.trim());
+    const idx = (name: string) => header.indexOf(name);
+    const iId = idx("id");
+    const iDelete = idx("delete");
+    const iGameCor = idx("game_corrige");
+    const iGenreCor = idx("genre_corrige");
+
+    if (iId === -1) { res.status(400).json({ error: "Missing 'id' column" }); return; }
+
+    let deleted = 0, gameUpdated = 0, genreUpdated = 0, errors = 0;
+    const DELETE_VALS = new Set(["1", "x", "X", "yes", "oui", "true", "delete"]);
+
+    for (let i = 1; i < lines.length; i++) {
+      try {
+        const cells = parseLine(lines[i]);
+        const id = (cells[iId] || "").trim();
+        if (!id) continue;
+
+        const delVal = iDelete >= 0 ? (cells[iDelete] || "").trim() : "";
+        if (DELETE_VALS.has(delVal)) {
+          // Supprime la vidéo + ses ggs + ses commentaires
+          const ggSnap = await db.collection("ggs").where("videoId", "==", id).get();
+          const cSnap = await db.collection("comments").where("videoId", "==", id).get();
+          const batch = db.batch();
+          ggSnap.docs.forEach((d) => batch.delete(d.ref));
+          cSnap.docs.forEach((d) => batch.delete(d.ref));
+          batch.delete(db.collection("videos").doc(id));
+          await batch.commit();
+          deleted++;
+          continue; // pas besoin de mettre à jour une vidéo supprimée
+        }
+
+        const updates: Record<string, string> = {};
+        if (iGameCor >= 0) {
+          const g = (cells[iGameCor] || "").trim();
+          if (g) { updates.game = g; gameUpdated++; }
+        }
+        if (iGenreCor >= 0) {
+          const gn = (cells[iGenreCor] || "").trim();
+          if (gn) { updates.genre = gn; genreUpdated++; }
+        }
+        if (Object.keys(updates).length > 0) {
+          await db.collection("videos").doc(id).update(updates);
+        }
+      } catch (e) {
+        errors++;
+        logger.warn(`importVideoUpdates: erreur ligne ${i}`, e);
+      }
+    }
+
+    const result = { ok: true, deleted, gameUpdated, genreUpdated, errors, totalRows: lines.length - 1 };
+    logger.info("importVideoUpdates done", result);
+    res.status(200).json(result);
+  }
+);
+
+// ── EXPORT 3 : détecte les doublons potentiels pour aider la révision ─────────
+// Groupe les vidéos par (videoUrl) ou (publicId) ou (title+userId) identiques.
+// CSV: groupe, id, title, username, game, ggCount, createdAt, suggestion_delete
+export const exportDuplicates = onRequest(
+  { region: "us-central1", timeoutSeconds: 300 },
+  async (req, res) => {
+    if (req.query.key !== CLEANUP_KEY) { res.status(403).send("Forbidden"); return; }
+
+    const videosSnap = await db.collection("videos").get();
+    const all = videosSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+    // Groupe par publicId (même fichier Cloudinary = vrai doublon)
+    const byKey: Record<string, any[]> = {};
+    all.forEach((v) => {
+      // Clé de doublon : publicId si présent, sinon videoUrl, sinon title+userId
+      const key = v.publicId || v.videoUrl || `${v.title}__${v.userId}`;
+      if (!key) return;
+      if (!byKey[key]) byKey[key] = [];
+      byKey[key].push(v);
+    });
+
+    let csv = "groupe,id,title,username,game,genre,ggCount,createdAt,suggestion_delete\n";
+    let groupNum = 0;
+    for (const key of Object.keys(byKey)) {
+      const group = byKey[key];
+      if (group.length < 2) continue; // pas un doublon
+      groupNum++;
+      // Garde celui avec le + de GG, suggère delete pour les autres
+      group.sort((a, b) => (b.ggCount || 0) - (a.ggCount || 0));
+      group.forEach((v, i) => {
+        const created = v.createdAt?.toDate ? v.createdAt.toDate().toISOString() : "";
+        const suggestion = i === 0 ? "" : "1"; // garde le 1er (+ de GG), supprime le reste
+        csv += [
+          groupNum, csvCell(v.id), csvCell(v.title), csvCell(v.username),
+          csvCell(v.game), csvCell(v.genre), v.ggCount || 0, csvCell(created), suggestion,
+        ].join(",") + "\n";
+      });
+    }
+
+    res.set("Content-Type", "text/csv; charset=utf-8");
+    res.set("Content-Disposition", 'attachment; filename="duplicates.csv"');
+    res.status(200).send(csv);
+  }
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MUX VIDEO INTEGRATION
+// Les clés Mux ne sont jamais dans l'app mobile — elles vivent ici, côté serveur.
+// L'app appelle uploadMuxGetUrl pour obtenir une URL d'upload temporaire (1h),
+// puis uploade directement depuis l'app vers Mux. Ensuite elle appelle
+// muxWebhook quand Mux a fini le transcodage pour mettre à jour Firestore.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const MUX_TOKEN_ID     = "de3558c1-e46f-4cc7-81da-5683fecf09cf";     // ← colle ici
+const MUX_TOKEN_SECRET = "oDSQSeS/iShNpWXskkSdx7pMokiJFB2I0r/+ImtwY015DVqbs5Jo/r+UFX8zpWdgsgKDXxljjuZ"; // ← colle ici
+const MUX_BASE_URL     = "https://api.mux.com";
+const muxAuth          = Buffer.from(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`).toString("base64");
+
+// ── 1. L'app appelle cette fonction pour obtenir une URL d'upload Mux ─────
+// Retourne { uploadUrl, uploadId } → l'app uploade la vidéo directement vers uploadUrl
+// puis sauvegarde uploadId dans Firestore pour tracker le statut.
+export const muxGetUploadUrl = onRequest(
+  { region: "us-central1", timeoutSeconds: 30, cors: true },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).send("POST only"); return; }
+
+    try {
+      // Crée un Direct Upload Mux (valide 1 heure)
+      const response = await fetch(`${MUX_BASE_URL}/video/v1/uploads`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${muxAuth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          cors_origin: "*",
+          new_asset_settings: {
+            playback_policy: ["public"],
+            // Génère automatiquement : HLS adaptatif, plusieurs qualités, thumbnail
+            mp4_support: "capped-1080p", // Permet aussi un download MP4 si besoin
+          },
+          timeout: 3600, // URL valide 1 heure
+        }),
+      });
+
+      const data: any = await response.json();
+      if (!response.ok) {
+        logger.error("muxGetUploadUrl error:", data);
+        res.status(500).json({ error: data.error?.message || "Mux error" });
+        return;
+      }
+
+      res.status(200).json({
+        uploadUrl: data.data.url,
+        uploadId:  data.data.id,
+      });
+    } catch (e: any) {
+      logger.error("muxGetUploadUrl exception:", e);
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+// ── 2. Webhook Mux → notifié quand la vidéo est prête ────────────────────
+// Mux appelle cette URL quand le transcodage est terminé.
+// Configure dans dashboard.mux.com → Settings → Webhooks
+// URL : https://us-central1-gamingactions-app.cloudfunctions.net/muxWebhook
+export const muxWebhook = onRequest(
+  { region: "us-central1", timeoutSeconds: 60 },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).send("POST only"); return; }
+
+    const event = req.body;
+    const type   = event?.type;
+    const data   = event?.data;
+
+    // On s'intéresse aux événements asset.ready (transcodage terminé)
+    if (type !== "video.asset.ready") {
+      res.status(200).send("ignored");
+      return;
+    }
+
+    const assetId    = data?.id;
+    const uploadId   = data?.upload_id;
+    const playbackId = data?.playback_ids?.[0]?.id;
+    const duration   = data?.duration;
+
+    if (!uploadId || !playbackId) {
+      res.status(200).send("missing data");
+      return;
+    }
+
+    try {
+      // Trouve le document vidéo Firestore par muxUploadId
+      const videoSnap = await db.collection("videos")
+        .where("muxUploadId", "==", uploadId)
+        .limit(1)
+        .get();
+
+      if (videoSnap.empty) {
+        logger.warn(`muxWebhook: no video found for uploadId ${uploadId}`);
+        res.status(200).send("not found");
+        return;
+      }
+
+      const videoRef = videoSnap.docs[0].ref;
+      await videoRef.update({
+        muxAssetId:    assetId,
+        muxPlaybackId: playbackId,
+        duration:      Math.round(duration || 0),
+        muxStatus:     "ready",
+        // thumbnail générée automatiquement par Mux — pas de quota de transformation
+        thumbnail: `https://image.mux.com/${playbackId}/thumbnail.jpg?time=3&width=400&height=225&fit_mode=crop`,
+        videoUrl:  `https://stream.mux.com/${playbackId}.m3u8`, // HLS adaptatif
+      });
+
+      logger.info(`muxWebhook: video ${videoSnap.docs[0].id} ready — playbackId ${playbackId}`);
+      res.status(200).send("ok");
+    } catch (e: any) {
+      logger.error("muxWebhook error:", e);
+      res.status(500).send("error");
+    }
+  }
+);
+
+// ── 3. Migration : uploade les vidéos Cloudinary existantes vers Mux ─────
+// Lance une fois pour migrer les 521 vidéos existantes.
+// Fonctionnement : lit toutes les vidéos Cloudinary dans Firestore,
+// pour chacune : télécharge depuis Cloudinary → uploade vers Mux → met à jour Firestore.
+// Sécurisé par clé. Peut être relancé (skip les vidéos déjà migrées).
+export const migrateCloudinaryToMux = onRequest(
+  { region: "us-central1", timeoutSeconds: 540, memory: "1GiB" },
+  async (req, res) => {
+    if (req.query.key !== "ga_cleanup_2026") { res.status(403).send("Forbidden"); return; }
+
+    // dry_run=true pour simuler sans modifier Firestore
+    const dryRun = req.query.dry_run === "true";
+
+    const videosSnap = await db.collection("videos").get();
+    let migrated = 0, skipped = 0, failed = 0;
+    const failures: string[] = [];
+
+    for (const vDoc of videosSnap.docs) {
+      const v = vDoc.data();
+
+      // Skip si déjà migré vers Mux
+      if (v.muxPlaybackId) { skipped++; continue; }
+      // Skip si pas d'URL Cloudinary
+      if (!v.videoUrl || !v.videoUrl.includes("cloudinary")) { skipped++; continue; }
+
+      try {
+        if (dryRun) { migrated++; continue; }
+
+        // Étape 1 : créer un Direct Upload Mux
+        const uploadResp = await fetch(`${MUX_BASE_URL}/video/v1/uploads`, {
+          method: "POST",
+          headers: { "Authorization": `Basic ${muxAuth}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cors_origin: "*",
+            new_asset_settings: {
+              playback_policy: ["public"],
+              mp4_support: "capped-1080p",
+            },
+          }),
+        });
+        const uploadData: any = await uploadResp.json();
+        if (!uploadResp.ok) throw new Error(uploadData.error?.message || "Mux upload create failed");
+
+        const muxUploadUrl = uploadData.data.url;
+        const muxUploadId  = uploadData.data.id;
+
+        // Étape 2 : télécharger la vidéo depuis Cloudinary
+        // On reconstruit l'URL originale sans q_auto pour éviter une transformation
+        const cleanUrl = v.videoUrl.replace("/upload/q_auto/", "/upload/");
+        const videoResp = await fetch(cleanUrl);
+        if (!videoResp.ok) throw new Error(`Cloudinary fetch failed: ${videoResp.status}`);
+        const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+
+        // Étape 3 : pusher la vidéo vers Mux
+        const muxPutResp = await fetch(muxUploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "video/mp4" },
+          body: videoBuffer,
+        });
+        if (!muxPutResp.ok) throw new Error(`Mux PUT failed: ${muxPutResp.status}`);
+
+        // Étape 4 : marquer le document Firestore (muxPlaybackId sera rempli par le webhook)
+        await vDoc.ref.update({
+          muxUploadId,
+          muxStatus: "processing",
+        });
+
+        migrated++;
+        logger.info(`migrateCloudinaryToMux: ${vDoc.id} → upload ${muxUploadId}`);
+
+        // Pause de 200ms pour ne pas saturer l'API Mux
+        await new Promise((r) => setTimeout(r, 200));
+      } catch (e: any) {
+        failed++;
+        failures.push(`${vDoc.id}: ${e.message}`);
+        logger.error(`migrateCloudinaryToMux: ${vDoc.id} failed`, e.message);
+      }
+    }
+
+    res.status(200).json({
+      ok: true, dryRun, migrated, skipped, failed,
+      total: videosSnap.size, failures: failures.slice(0, 10),
+      note: dryRun
+        ? "Dry run — aucune modification. Relance sans dry_run=true pour migrer."
+        : "Migration lancée. Le webhook Mux remplira muxPlaybackId pour chaque vidéo transcodée (quelques minutes par vidéo).",
+    });
   }
 );

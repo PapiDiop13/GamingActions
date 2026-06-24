@@ -1,0 +1,10 @@
+{
+  "name": "ga-migration-scripts",
+  "version": "1.0.0",
+  "description": "Migration scripts for Gaming Actions",
+  "main": "migrate_to_mux.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}

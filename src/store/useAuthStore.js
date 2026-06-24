@@ -112,8 +112,16 @@ const useAuthStore = create((set, get) => ({
   signIn: async (email, password) => {
     try {
       set({ error: null });
-      const { user } = await signInWithEmailAndPassword(auth, email, password);
+      // Normalize email — same normalization as the password reset flow,
+      // so a reset done with "John@Email.com" matches login "john@email.com ".
+      const normalizedEmail = (email || '').trim().toLowerCase();
+      const { user } = await signInWithEmailAndPassword(auth, normalizedEmail, password);
       await reload(user);
+
+      // Note: clicking a Firebase password-reset link automatically verifies the
+      // email (it proves ownership). So users who reset their password can log in
+      // even if they never clicked a separate verification link.
+      // We still block only genuinely unverified accounts (signed up, never verified).
       if (!user.emailVerified) {
         await firebaseSignOut(auth);
         throw new Error('EMAIL_NOT_VERIFIED');

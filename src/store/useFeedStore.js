@@ -11,6 +11,7 @@ import { findBannedWords, censorText, logModeration } from '../utils/moderation'
 import { logEvent, logError, LOG_CONTEXT } from '../utils/errorLogger';
 import { loadPrefs, sortFeedByPrefs, recordView } from '../utils/feedAlgo';
 import { getOrCreatePlaylist, advancePosition, resetPlaylist, getPlaylistInfo } from '../utils/feedSession';
+import { getVideoUrl, getThumbnailUrl } from '../config/mux';
 
 // Dédoublonnage des vues sur la session courante : une vue par vidéo / lancement d'app.
 const viewedThisSession = new Set();
@@ -128,6 +129,9 @@ const useFeedStore = create((set, get) => ({
         .filter(x => x.data) // skip any id missing from cache
         .map(({ id, data }) => {
           const prev = existingState[id] || {};
+          // Build a normalized video object compatible with both Mux (new) and
+          // Cloudinary (legacy) videos. getVideoUrl/getThumbnailUrl handles both.
+          const videoObj = { id, ...data };
           return {
             id,
             ...data,
@@ -136,7 +140,9 @@ const useFeedStore = create((set, get) => ({
             isFollowing:  false,
             commentCount: prev.commentCount !== undefined ? prev.commentCount : (data.commentsCount || 0),
             viewCount:    prev.viewCount !== undefined ? prev.viewCount : (data.viewCount || 0),
-            thumbnailUrl: data.thumbnail || null,
+            // Normalized URLs — works for both Mux (muxPlaybackId) and Cloudinary (videoUrl)
+            videoUrl:     getVideoUrl(videoObj),
+            thumbnailUrl: getThumbnailUrl(videoObj) || data.thumbnail || null,
           };
         });
 
@@ -293,6 +299,54 @@ const useFeedStore = create((set, get) => ({
           v.id === videoId ? { ...v, hasGG: !newHasGG, ggCount: video.ggCount } : v
         ),
       }));
+    }
+  },
+
+  // toggleGGDirect — GG a video that is NOT in the feed store (e.g. opened from
+  // a profile, search, or notification). Works directly with Firestore + a
+  // provided current state, returns the new state so the caller can update its UI.
+  // Returns { hasGG, ggCount } or null on failure.
+  toggleGGDirect: async (videoId, videoOwnerId, userId, currentHasGG, currentCount) => {
+    if (!userId || !videoId) return null;
+    if (videoOwnerId === userId) return null; // can't GG own video
+
+    const ggId  = `${userId}_${videoId}`;
+    const ggRef = doc(db, 'ggs', ggId);
+    const newHasGG = !currentHasGG;
+    const newCount = newHasGG
+      ? (currentCount || 0) + 1
+      : Math.max(0, (currentCount || 0) - 1);
+
+    try {
+      if (newHasGG) {
+        await setDoc(ggRef, { userId, videoId, createdAt: serverTimestamp() });
+        await updateDoc(doc(db, 'videos', videoId), { ggCount: newCount });
+        if (videoOwnerId) {
+          await awardPoints(videoOwnerId, POINTS.RECEIVE_GG, 1, 'Received a GG');
+          await addDoc(collection(db, 'notifications'), {
+            userId: videoOwnerId, type: 'gg',
+            fromUserId: userId,
+            fromUsername: get().userProfiles[userId]?.username || 'Someone',
+            text: 'gave you a GG on your clip ⭐',
+            videoId, read: false, createdAt: serverTimestamp(),
+          });
+        }
+      } else {
+        await deleteDoc(ggRef);
+        await updateDoc(doc(db, 'videos', videoId), { ggCount: newCount });
+        if (videoOwnerId) await awardPoints(videoOwnerId, -POINTS.RECEIVE_GG, -1, 'GG removed');
+      }
+      // Also update the feed store if the video happens to be there too
+      set((state) => ({
+        videos: state.videos.map((v) =>
+          v.id === videoId ? { ...v, hasGG: newHasGG, ggCount: newCount } : v
+        ),
+      }));
+      return { hasGG: newHasGG, ggCount: newCount };
+    } catch (e) {
+      await logError(LOG_CONTEXT.GG_VOTE_FAIL, e, userId);
+      console.log('toggleGGDirect error:', e.message);
+      return null;
     }
   },
 

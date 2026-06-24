@@ -120,7 +120,7 @@ export default function NotificationsScreen({ navigation }) {
         {isSystem ? (
           // Notif système → logo Gaming Actions
           <View style={[styles.iconWrap, { backgroundColor: COLORS.gold + '18', overflow: 'hidden' }]}>
-            <Image source={{ uri: 'https://res.cloudinary.com/doeqzltv0/image/upload/v1781665036/high-level-description-a-minimal-esports_suTAzMGBVkuiFDGhTaiWqg_FbErQD1GTfqf2I9I1w4rWQ_x5hlui.jpg' }} style={{ width: 44, height: 44 }} resizeMode="cover" />
+            <Image source={require('../../../assets/logo.png')} style={{ width: 44, height: 44 }} resizeMode="cover" />
           </View>
         ) : item.fromAvatar ? (
           // Notif d'un user avec avatar
