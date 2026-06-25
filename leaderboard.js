@@ -15,6 +15,36 @@ const db = getFirestore(app);
 
 const DEFAULT_AVATAR = 'https://storage.googleapis.com/gamingactions-app.firebasestorage.app/defaults/avatar_default.png';
 
+// ── Countdown — same logic as the app ───────────────────────────────────────
+function updateCountdown() {
+  var now = new Date();
+  var endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  var diffMs = endOfMonth - now;
+  var daysLeft = Math.floor(diffMs / 86400000);
+  var diffH = Math.floor((diffMs % 86400000) / 3600000);
+  var diffM = Math.floor((diffMs % 3600000) / 60000);
+  var diffS = Math.floor((diffMs % 60000) / 1000);
+
+  var pad = function(n) { return String(n).padStart(2, '0'); };
+  var chip = document.getElementById('countdown-chip');
+  var timer = document.getElementById('countdown-timer');
+  if (!timer) return;
+
+  var isLastDay = daysLeft <= 1;
+  if (chip) chip.style.borderColor = isLastDay ? 'rgba(255,45,85,0.5)' : 'rgba(201,168,76,0.3)';
+
+  if (daysLeft > 0) {
+    timer.textContent = daysLeft + 'D ' + pad(diffH) + ':' + pad(diffM) + ':' + pad(diffS);
+    timer.style.color = isLastDay ? '#FF2D55' : '#C9A84C';
+  } else {
+    timer.textContent = pad(diffH) + ':' + pad(diffM) + ':' + pad(diffS);
+    timer.style.color = '#FF2D55';
+  }
+}
+
+updateCountdown();
+setInterval(updateCountdown, 1000);
+
 function rankClass(i) {
   if (i === 0) return 'gold';
   if (i === 1) return 'silver';
