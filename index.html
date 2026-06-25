@@ -98,6 +98,37 @@
     .store-btn { width: 100%; max-width: 280px; }
     .stats { gap: 36px; }
   }
+
+  /* ── LEADERBOARD LIVE ── */
+  .leaderboard-section { padding: 100px 24px; background: linear-gradient(180deg, var(--black) 0%, #0D0D18 100%); }
+  .leaderboard-section .section-label { text-align: center; font-size: 13px; font-weight: 700; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
+  .leaderboard-section h2 { text-align: center; font-size: clamp(28px, 5vw, 48px); font-weight: 900; margin-bottom: 8px; }
+  .leaderboard-section .section-sub { text-align: center; color: var(--gray); margin-bottom: 48px; font-size: 16px; }
+  .live-dot { display: inline-block; width: 8px; height: 8px; background: var(--green); border-radius: 50%; margin-right: 6px; animation: pulse-green 1.5s infinite; }
+  @keyframes pulse-green { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
+  .lb-tabs { display: flex; justify-content: center; gap: 8px; margin-bottom: 32px; }
+  .lb-tab { background: var(--card); border: 1.5px solid var(--gray2); border-radius: 50px; padding: 8px 24px; font-size: 13px; font-weight: 700; color: var(--gray); cursor: pointer; transition: all 0.2s; }
+  .lb-tab.active { border-color: var(--gold); color: var(--gold); background: rgba(201,168,76,0.1); }
+  .lb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 900px; margin: 0 auto; }
+  @media(max-width:640px){ .lb-grid { grid-template-columns: 1fr; } }
+  .lb-panel { background: var(--card); border: 1px solid var(--gray2); border-radius: 16px; overflow: hidden; }
+  .lb-panel-title { padding: 16px 20px; font-size: 13px; font-weight: 800; color: var(--gold); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--gray2); display: flex; align-items: center; gap: 8px; }
+  .lb-list { list-style: none; }
+  .lb-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; }
+  .lb-item:last-child { border-bottom: none; }
+  .lb-item:hover { background: rgba(201,168,76,0.04); }
+  .lb-rank { font-size: 13px; font-weight: 900; color: var(--gray); width: 24px; text-align: center; flex-shrink: 0; }
+  .lb-rank.gold { color: #FFD700; }
+  .lb-rank.silver { color: #C0C0C0; }
+  .lb-rank.bronze { color: #CD7F32; }
+  .lb-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--gray2); background: var(--dark); }
+  .lb-info { flex: 1; min-width: 0; }
+  .lb-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lb-meta { font-size: 11px; color: var(--gray); margin-top: 2px; }
+  .lb-gg { font-size: 13px; font-weight: 800; color: var(--gold); flex-shrink: 0; }
+  .lb-loading { text-align: center; padding: 40px; color: var(--gray); font-size: 14px; }
+  .lb-crown { font-size: 10px; margin-left: 4px; }
+
 </style>
 </head>
 <body>
@@ -230,6 +261,23 @@
   </div>
 </div>
 
+<!-- LIVE LEADERBOARD -->
+<section class="leaderboard-section">
+  <div class="section-label"><span class="live-dot"></span>Live Rankings</div>
+  <h2>Who's <span style="color:var(--gold)">Dominating</span> Right Now?</h2>
+  <p class="section-sub">Updated in real-time — every GG counts</p>
+  <div class="lb-grid">
+    <div class="lb-panel">
+      <div class="lb-panel-title">🏆 Top Players</div>
+      <ul class="lb-list" id="lb-players"><li class="lb-loading">Loading...</li></ul>
+    </div>
+    <div class="lb-panel">
+      <div class="lb-panel-title">🎮 Top Clips</div>
+      <ul class="lb-list" id="lb-clips"><li class="lb-loading">Loading...</li></ul>
+    </div>
+  </div>
+</section>
+
 <!-- CTA -->
 <section class="cta">
   <h2>Ready to <span style="color:var(--gold)">Rize to the GG?</span></h2>
@@ -266,6 +314,102 @@
   </div>
   <div class="footer-copy">© 2026 Gaming Actions Inc. All rights reserved.</div>
 </footer>
+
+
+  <!-- Firebase Leaderboard Live -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+    import { getFirestore, collection, query, orderBy, limit, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDHYlFVDkF85KknGDiqatsCSOzW2bkMyDU",
+      authDomain: "gamingactions-app.firebaseapp.com",
+      projectId: "gamingactions-app",
+      storageBucket: "gamingactions-app.firebasestorage.app",
+      messagingSenderId: "878199468974",
+      appId: "1:878199468974:web:ba90762a320f3e2eda0e3f"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const DEFAULT_AVATAR = 'https://storage.googleapis.com/gamingactions-app.firebasestorage.app/defaults/avatar_default.png';
+
+    function rankClass(i) {
+      if (i === 0) return 'gold';
+      if (i === 1) return 'silver';
+      if (i === 2) return 'bronze';
+      return '';
+    }
+
+    function rankEmoji(i) {
+      if (i === 0) return '👑';
+      if (i === 1) return '🥈';
+      if (i === 2) return '🥉';
+      return (i + 1).toString();
+    }
+
+    // ── Top Players (by ggReceived) ──────────────────────────────────────
+    const playersQ = query(
+      collection(db, 'users'),
+      orderBy('ggReceived', 'desc'),
+      limit(10)
+    );
+
+    onSnapshot(playersQ, (snap) => {
+      const el = document.getElementById('lb-players');
+      if (!el) return;
+      if (snap.empty) { el.innerHTML = '<li class="lb-loading">No players yet</li>'; return; }
+
+      el.innerHTML = snap.docs.map((d, i) => {
+        const u = d.data();
+        const avatar = u.avatar || DEFAULT_AVATAR;
+        const name = u.username || 'Unknown';
+        const gg = u.ggReceived || 0;
+        const crown = i === 0 ? '<span class="lb-crown">👑</span>' : '';
+        return \`<li class="lb-item">
+          <span class="lb-rank \${rankClass(i)}">\${rankEmoji(i)}</span>
+          <img class="lb-avatar" src="\${avatar}" onerror="this.src='\${DEFAULT_AVATAR}'" loading="lazy">
+          <div class="lb-info">
+            <div class="lb-name">\${name}\${crown}</div>
+            <div class="lb-meta">GA Points · Rank #\${i + 1}</div>
+          </div>
+          <div class="lb-gg">\${gg} GG</div>
+        </li>\`;
+      }).join('');
+    });
+
+    // ── Top Clips (by ggCount) ───────────────────────────────────────────
+    const clipsQ = query(
+      collection(db, 'videos'),
+      orderBy('ggCount', 'desc'),
+      limit(10)
+    );
+
+    onSnapshot(clipsQ, (snap) => {
+      const el = document.getElementById('lb-clips');
+      if (!el) return;
+      if (snap.empty) { el.innerHTML = '<li class="lb-loading">No clips yet</li>'; return; }
+
+      el.innerHTML = snap.docs.map((d, i) => {
+        const v = d.data();
+        const thumb = v.thumbnail || v.thumbnailUrl || DEFAULT_AVATAR;
+        const title = v.title || v.caption || 'Untitled';
+        const username = v.username || 'Unknown';
+        const gg = v.ggCount || 0;
+        const game = v.game || '';
+        return \`<li class="lb-item">
+          <span class="lb-rank \${rankClass(i)}">\${rankEmoji(i)}</span>
+          <img class="lb-avatar" src="\${thumb}" onerror="this.src='\${DEFAULT_AVATAR}'" loading="lazy" style="border-radius:8px">
+          <div class="lb-info">
+            <div class="lb-name">\${title}</div>
+            <div class="lb-meta">\${username}\${game ? ' · ' + game : ''}</div>
+          </div>
+          <div class="lb-gg">\${gg} GG</div>
+        </li>\`;
+      }).join('');
+    });
+  </script>
 
 </body>
 </html>
