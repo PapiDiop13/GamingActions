@@ -20,7 +20,7 @@ export function PaymentComingSoon({ visible, onClose, title = 'Payment', message
                 <Ionicons name="logo-apple" size={14} color={COLORS.gray} />
                 <Text style={styles.infoText}> Apple Pay · </Text>
                 <Ionicons name="card-outline" size={14} color={COLORS.gray} />
-                <Text style={styles.infoText}> Stripe · RevenueCat</Text>
+                <Text style={styles.infoText}> Secure · Encrypted</Text>
               </View>
               <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                 <Text style={styles.closeBtnText}>OK, noted 👌</Text>

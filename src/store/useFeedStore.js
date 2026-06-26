@@ -205,6 +205,11 @@ const useFeedStore = create((set, get) => ({
       isCurrentLeader: userProfiles[v.userId]?.isCurrentLeader || false,
       streakLevel: userProfiles[v.userId]?.streakLevel || v.streakLevel || 'noob',
       hideStreakLevel: userProfiles[v.userId]?.hideStreakLevel || false,
+      // Cosmétiques profil
+      equippedUsernameEffect: userProfiles[v.userId]?.equippedUsernameEffect || null,
+      equippedProfileBadge:   userProfiles[v.userId]?.equippedProfileBadge   || null,
+      equippedCommentFrame:   userProfiles[v.userId]?.equippedCommentFrame   || null,
+      equippedCardBorder:     userProfiles[v.userId]?.equippedCardBorder     || null,
     }));
   },
 
@@ -439,6 +444,12 @@ const useFeedStore = create((set, get) => ({
     const { filterConsole, filterGenre, filterGame, activeTab } = get();
     let filtered = get().getEnrichedVideos();
     filtered = filtered.filter((v) => !v.restricted);
+    // Filter out videos from blocked users
+    const { useAuthStore } = require('./useAuthStore');
+    const blockedUsers = useAuthStore?.getState?.()?.userProfile?.blockedUsers || [];
+    if (blockedUsers.length > 0) {
+      filtered = filtered.filter((v) => !blockedUsers.includes(v.userId));
+    }
     if (activeTab === 'following') filtered = filtered.filter((v) => v.isFollowing);
     if (filterConsole) filtered = filtered.filter((v) =>
       v.console?.toLowerCase() === filterConsole.toLowerCase()

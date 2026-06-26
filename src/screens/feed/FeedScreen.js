@@ -148,7 +148,25 @@ function GGListModal({ visible, onClose, videoId }) {
               <Text style={{ color: COLORS.gray, textAlign: 'center', marginTop: 20 }}>No GGs yet.</Text>
             ) : users.map((u) => (
               <View key={u.uid} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
-                <FramedAvatar user={u} size={36} />
+                <View style={u?.equippedCardBorder ? {
+                  borderWidth: 1.5, borderRadius: 22,
+                  borderColor: (() => {
+                    const CB = { cb_gold:'#C9A84C', cb_silver:'#C0C0C0', cb_blue_neon:'#00D4FF',
+                      cb_red_neon:'#FF2D55', cb_purple_neon:'#BF5AF2', cb_green_neon:'#39FF14',
+                      cb_galaxy_border:'#7C4DFF', cb_fire_border:'#FF3D00',
+                      cb_lightning_border:'#FFD700', cb_holo_border:'#FF0080' };
+                    return CB[u.equippedCardBorder] || '#C9A84C';
+                  })(),
+                  shadowColor: (() => {
+                    const CB = { cb_blue_neon:'#00D4FF', cb_red_neon:'#FF2D55',
+                      cb_purple_neon:'#BF5AF2', cb_green_neon:'#39FF14', cb_galaxy_border:'#7C4DFF',
+                      cb_fire_border:'#FF3D00', cb_lightning_border:'#FFD700', cb_holo_border:'#FF0080' };
+                    return CB[u.equippedCardBorder] || 'transparent';
+                  })(),
+                  shadowOpacity: 0.7, shadowRadius: 4, shadowOffset: { width:0, height:0 },
+                } : null}>
+                  <FramedAvatar user={u} size={36} />
+                </View>
                 <Text style={{ fontSize: 14, color: COLORS.white, fontWeight: '600', marginLeft: 12 }}>{u.username || 'Player'}</Text>
                 {u.plan === 'legendary' && <View style={[cardS.legBadge, { marginLeft: 6 }]}><Text style={cardS.legBadgeText}>LEG</Text></View>}
                 {u.accountType === 'gameconic' && <View style={[cardS.legBadge, { marginLeft: 6, backgroundColor: COLORS.red }]}><Text style={cardS.legBadgeText}>ICON</Text></View>}
@@ -358,6 +376,53 @@ function PreviewComments({ videoId, isActive, onOpenSheet }) {
   );
 }
 
+// ─── Animated Username for Feed ──────────────────────────────────────────────
+const UE_MAP_FEED = {
+  ue_gold:           { color: '#C9A84C', glow: false, anim: false },
+  ue_blue_glow:      { color: '#00D4FF', glow: true,  anim: false },
+  ue_purple_glow:    { color: '#BF5AF2', glow: true,  anim: false },
+  ue_red_glow:       { color: '#FF2D55', glow: true,  anim: false },
+  ue_green_glow:     { color: '#39FF14', glow: true,  anim: false },
+  ue_gold_glow:      { color: '#FFD700', glow: true,  anim: false },
+  ue_fire_text:      { color: '#FF3D00', glow: false, anim: true  },
+  ue_galaxy_text:    { color: '#7C4DFF', glow: false, anim: true  },
+  ue_rainbow_text:   { color: '#FF0080', glow: false, anim: true  },
+  ue_lightning_text: { color: '#FFD700', glow: false, anim: true  },
+};
+
+function FeedAnimatedUsername({ username, ueId, baseStyle }) {
+  const ue = ueId ? UE_MAP_FEED[ueId] : null;
+  const color = ue?.color || '#FFFFFF';
+  const glow  = ue?.glow  || false;
+  const isAnim = ue?.anim || false;
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (!isAnim) { pulse.setValue(0); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 0, duration: 700, useNativeDriver: false }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [isAnim, ueId]);
+  const shadowR = pulse.interpolate({ inputRange: [0,1], outputRange: [3, 11] });
+  const opacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.75, 1] });
+  if (isAnim) {
+    return (
+      <Animated.Text style={[baseStyle, { color, opacity,
+        textShadowColor: color, textShadowRadius: shadowR, textShadowOffset: { width:0, height:0 },
+      }]}>{username}</Animated.Text>
+    );
+  }
+  return (
+    <Text style={[baseStyle, {
+      color,
+      textShadowColor: glow ? color : 'transparent',
+      textShadowRadius: glow ? 6 : 0,
+    }]}>{username}</Text>
+  );
+}
+
 function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isActive, shouldLoad = true }) {
   const { toggleGG, incrementView } = useFeedStore();
   const { user } = useAuthStore();
@@ -550,12 +615,51 @@ const isOwnVideo = item.userId === user?.uid;
         <FramedAvatar user={item.userId === user?.uid ? { ...item, ...userProfile } : item} size={32} onPress={onNavigateProfile} />
         <View style={{ marginLeft: 8, flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
-            <Text style={cardS.creatorName}>{item.username}</Text>
+            <FeedAnimatedUsername
+              username={item.username}
+              ueId={item.equippedUsernameEffect}
+              baseStyle={cardS.creatorName}
+            />
             {isLegendary && <View style={cardS.legBadge}><Text style={cardS.legBadgeText}>LEG</Text></View>}
             {item.accountType === 'gameconic' && <View style={[cardS.legBadge, { backgroundColor: COLORS.red }]}><Text style={cardS.legBadgeText}>ICON</Text></View>}
             {item.accountType === 'creator' && <View style={[cardS.legBadge, { backgroundColor: COLORS.blue }]}><Text style={[cardS.legBadgeText, { color: COLORS.dark }]}>CR</Text></View>}
             {item.isChampion ? <ChampionBadge small /> : item.isCurrentLeader ? <LeaderBadge small /> : null}
           </View>
+          {/* Profile badge cosmétique */}
+          {(() => {
+            const badgeId = item.equippedProfileBadge;
+            if (!badgeId || badgeId === 'badge_none') return null;
+            const BADGE_DATA = {
+              badge_goat:     { emoji: '🐐', name: 'The GOAT',      color: '#FFD700' },
+              badge_champion_t: { emoji: '👑', name: 'Champion',    color: '#FFD700' },
+              badge_elite:    { emoji: '💎', name: 'Elite',         color: '#00D4FF' },
+              badge_vip:      { emoji: '👑', name: 'VIP',           color: '#C9A84C' },
+              badge_clutch:   { emoji: '⚡', name: 'Clutch Player', color: '#FFD700' },
+              badge_legend:   { emoji: '🔥', name: 'Living Legend', color: '#FF3D00' },
+              badge_apex:     { emoji: '🦅', name: 'Apex Predator', color: '#FF3D00' },
+              badge_immortal: { emoji: '⚔️', name: 'Immortal',     color: '#FFD700' },
+              badge_godmode:  { emoji: '🌟', name: 'GOD MODE',      color: '#FFD700' },
+              badge_phantom:  { emoji: '👻', name: 'Phantom',       color: '#7C4DFF' },
+              badge_sniper:   { emoji: '🎯', name: 'Sniper',        color: '#00D4FF' },
+              badge_tryhard:  { emoji: '💪', name: 'Tryhard',       color: '#FF6D00' },
+              badge_fragger:  { emoji: '💥', name: 'Top Fragger',   color: '#FF2D55' },
+              badge_strat:    { emoji: '🧠', name: 'Strategist',    color: '#BF5AF2' },
+              badge_rookie:   { emoji: '🎮', name: 'Rookie',        color: '#C0C0C0' },
+              badge_og:       { emoji: '🏅', name: 'OG Player',     color: '#C9A84C' },
+              badge_nochill:  { emoji: '🥶', name: 'No Chill',      color: '#00E5FF' },
+              badge_verified: { emoji: '✅', name: 'Verified',      color: '#00C853' },
+            };
+            const bd = BADGE_DATA[badgeId];
+            if (!bd) return null;
+            return (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: bd.color + '18', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 }}>
+                  <Text style={{ fontSize: 9 }}>{bd.emoji} </Text>
+                  <Text style={{ fontSize: 9, fontWeight: '800', color: bd.color }}>{bd.name}</Text>
+                </View>
+              </View>
+            );
+          })()}
           {(() => {
             const sl = item.streakLevel;
             if (!sl || sl === 'noob') return null;

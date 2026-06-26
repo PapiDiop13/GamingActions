@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.gamingactions.app",
-      "buildNumber": "42",
+      "buildNumber": "43",
       "infoPlist": {
         "NSCameraUsageDescription": "Gaming Actions needs access to your camera to record gameplay clips and take profile pictures.",
         "NSPhotoLibraryUsageDescription": "Gaming Actions needs access to your photo library to upload gameplay clips and set your profile picture.",

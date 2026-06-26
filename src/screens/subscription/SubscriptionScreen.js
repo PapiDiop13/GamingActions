@@ -92,6 +92,9 @@ function PlanCard({ plan, selected, onSelect }) {
 
 export default function SubscriptionScreen({ navigation }) {
   const { user, userProfile } = useAuthStore();
+  const ADMIN_EMAILS = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
+  const isAdminUser = userProfile?.accountType === 'gameconic' || userProfile?.accountType === 'admin'
+    || userProfile?.isAdmin || ADMIN_EMAILS.includes(user?.email?.toLowerCase());
   const [selectedPlan, setSelectedPlan] = useState('legendary_yearly');
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -114,18 +117,23 @@ export default function SubscriptionScreen({ navigation }) {
   }, [user?.uid]);
 
   const handleSubscribe = async () => {
-    // RevenueCat not yet configured — show coming soon
+    if (isAdminUser) {
+      // Admin/Gameconic — activate test mode directly
+      setLoading(true);
+      try {
+        await activateTestLegendary(user?.uid, selectedPlan);
+        const snap = await getDoc(doc(db, 'subscriptions', user.uid));
+        if (snap.exists()) setSubscription(snap.data());
+        Alert.alert('🧪 Test Mode', 'Legendary activated! (admin bypass)');
+      } catch (e) { Alert.alert('Error', e.message); }
+      setLoading(false);
+      return;
+    }
     Alert.alert(
-      '🚀 Coming Soon',
-      'Legendary subscriptions will be available very soon!\n\nThanks for your patience! 🏆',
+      '🔜 Coming Soon',
+      'Legendary subscriptions will be available for purchase very soon!\n\nStay tuned for the update! 🏆',
       [{ text: 'Got it 👌' }]
     );
-    // TODO: uncomment when react-native-purchases is installed + keys configured:
-    // setLoading(true);
-    // const result = await purchaseLegendary(user?.uid, selectedPlan);
-    // setLoading(false);
-    // if (result.success) Alert.alert('🏆 Welcome to Legendary!', 'Active!');
-    // else if (!result.cancelled) Alert.alert('Error', result.error || 'Something went wrong');
   };
 
   const handleRestore = async () => {

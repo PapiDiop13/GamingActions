@@ -36,6 +36,7 @@ import FrameGalleryScreen from '../screens/admin/FrameGalleryScreen';
 import PrivacyPolicyScreen from '../screens/legal/PrivacyPolicyScreen';
 import TermsScreen from '../screens/legal/TermsScreen';
 import ReportBugScreen from '../screens/legal/ReportBugScreen';
+import ContestRulesScreen from '../screens/legal/ContestRulesScreen';
 import UploadScreen from '../screens/upload/UploadScreen';
 import ContentTypeScreen from '../screens/upload/ContentTypeScreen';
 import HowToUploadScreen from '../screens/upload/HowToUploadScreen';
@@ -79,6 +80,7 @@ function FeedStack() {
       <Stack.Screen name="Terms" component={TermsScreen} />
       <Stack.Screen name="CommunityGuidelines" component={CommunityGuidelinesScreen} />
       <Stack.Screen name="ReportBug" component={ReportBugScreen} />
+      <Stack.Screen name="ContestRules" component={ContestRulesScreen} />
       <Stack.Screen name="Followers" component={FollowersScreen} />
       <Stack.Screen name="Following" component={FollowingScreen} />
       <Stack.Screen name="PointsHistory" component={PointsHistoryScreen} />
@@ -192,7 +194,7 @@ function CustomTabBar({ state, descriptors, navigation }) {
     Feed: ['home', 'home-outline'],
     Tips: ['game-controller', 'game-controller-outline'],
     Rankings: ['trophy', 'trophy-outline'],
-    Shop: ['bag', 'bag-outline'],
+    Shop: ['storefront', 'storefront-outline'],
   };
 
   // Hide tab bar when inside a nested screen

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
   Dimensions, Share, Modal, Image, Alert, Linking, RefreshControl,
-  TouchableWithoutFeedback,
+  TouchableWithoutFeedback, Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,11 +16,62 @@ import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { showAlert } from '../../store/useAlertStore';
 import { ringColorForUser, glowColorForUser, getFrameById, getVideoFrameById } from '../../constants/frames';
+import { getCosmeticById, PROFILE_BACKGROUNDS, PROFILE_BANNERS, USERNAME_EFFECTS, PROFILE_BADGES, CARD_BORDERS } from '../../constants/cosmetics';
 import { ElectricBanner, ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
 import FramedAvatar from '../../components/FramedAvatar';
 
+// ─── Utilitaire de contraste adaptatif ────────────────────────────────────────
+const TC_DARK = {
+  primary:   '#FFFFFF',
+  secondary: '#B0B0CC',
+  muted:     'rgba(255,255,255,0.55)',
+  statBg:    'rgba(255,255,255,0.06)',
+  statBorder:'rgba(255,255,255,0.10)',
+  editBtn:   'rgba(255,255,255,0.08)',
+  editBorder:'rgba(255,255,255,0.25)',
+  tabBorder: 'rgba(255,255,255,0.10)',
+  isDark: true,
+};
+const TC_LIGHT = {
+  primary:   '#0A0A0F',
+  secondary: '#333344',
+  muted:     'rgba(0,0,0,0.55)',
+  statBg:    'rgba(0,0,0,0.07)',
+  statBorder:'rgba(0,0,0,0.12)',
+  editBtn:   'rgba(0,0,0,0.08)',
+  editBorder:'rgba(0,0,0,0.25)',
+  tabBorder: 'rgba(0,0,0,0.12)',
+  isDark: false,
+};
+
+// Luminance WCAG d'une couleur hex
+function _lum(hex) {
+  try {
+    if (!hex || hex[0] !== '#') return 0;
+    const h = hex.replace('#','');
+    const r = parseInt(h.slice(0,2),16)/255;
+    const g = parseInt(h.slice(2,4),16)/255;
+    const b = parseInt(h.slice(4,6),16)/255;
+    const lin = x => x<=0.03928 ? x/12.92 : Math.pow((x+0.055)/1.055,2.4);
+    return 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b);
+  } catch { return 0; }
+}
+
+function getBgTextColors(bgId) {
+  try {
+    if (!bgId || bgId === 'bg_none') return TC_DARK;
+    const bg = PROFILE_BACKGROUNDS.find(b => b.id === bgId);
+    if (!bg) return TC_DARK;
+    const mainColor = (bg.colors && bg.colors[0]) || '#0A0A0F';
+    return _lum(mainColor) > 0.35 ? TC_LIGHT : TC_DARK;
+  } catch { return TC_DARK; }
+}
+
+
+
 const { width: SW, height: SH } = Dimensions.get('window');
-const THUMB_SIZE = (SW - 4) / 3;
+const THUMB_SIZE = (SW - 4) / 3; // 3 colonnes
+const THUMB_H = THUMB_SIZE * 0.80; // plus haut qu'avant (était 0.65)
 const BANNER_H = Math.round(SW / 3); // ratio 3:1, cohérent avec le recadrage d'EditProfile
 const GREEN = '#00C853';
 
@@ -286,27 +337,62 @@ function StreakBar({ level, points }) {
   );
 }
 const sbS = StyleSheet.create({
-  container: { marginHorizontal: 14, marginBottom: 12, backgroundColor: COLORS.card, borderRadius: 12, padding: 12, borderWidth: 0.5, borderColor: COLORS.gray3 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  label: { fontSize: 10, color: COLORS.gray, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
-  levelText: { fontSize: 10, fontWeight: '800' },
-  track: { height: 6, borderRadius: 3, backgroundColor: COLORS.gray3, overflow: 'hidden', marginBottom: 4 },
+  container: { marginHorizontal: 14, marginBottom: 8, backgroundColor: COLORS.card, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 0.5, borderColor: COLORS.gray3 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
+  label: { fontSize: 9, color: COLORS.gray, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  levelText: { fontSize: 10, fontWeight: '900' },
+  track: { height: 5, borderRadius: 3, backgroundColor: COLORS.gray3, overflow: 'hidden', marginBottom: 0 },
   fill: { height: '100%', borderRadius: 3 },
-  markers: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  marker: { fontSize: 8, fontWeight: '600' },
-  note: { fontSize: 9, color: COLORS.gray2, marginTop: 4 },
+  markers: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 },
+  marker: { fontSize: 7, fontWeight: '600' },
+  note: { fontSize: 8, color: COLORS.gray2, marginTop: 3 },
 });
 
+
+// ─── Animated Username Component ─────────────────────────────────────────────
+function AnimatedUsername({ username, color, glow, isAnimated, baseStyle }) {
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (!isAnimated) return;
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 0, duration: 800, useNativeDriver: false }),
+    ]));
+    anim.start();
+    return () => anim.stop();
+  }, [isAnimated, color]);
+  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+  const shadow = pulse.interpolate({ inputRange: [0, 1], outputRange: [4, 14] });
+
+  if (isAnimated) {
+    return (
+      <Animated.Text style={[baseStyle, {
+        color,
+        opacity,
+        textShadowColor: color,
+        textShadowRadius: shadow,
+        textShadowOffset: { width: 0, height: 0 },
+      }]}>{username}</Animated.Text>
+    );
+  }
+  return (
+    <Text style={[baseStyle, {
+      color,
+      textShadowColor: glow ? color : 'transparent',
+      textShadowRadius: glow ? 8 : 0,
+    }]}>{username}</Text>
+  );
+}
+
 export default function ProfileScreen({ navigation, route }) {
-    const { user: authUser, userProfile } = useAuthStore();
+    const { user: authUser, userProfile, saveProfile } = useAuthStore();
     const { toggleFollow, checkIsFollowing, isFollowing, fetchFollowing } = useUserStore();
     const { isSubscribedTo, checkIsSubscribed } = useFanbaseStore();
     const userId = route?.params?.userId;
     const showBack = route?.params?.showBack || false;
   
     const isOwn = !userId || userId === authUser?.uid;  
-    const [externalProfile, setExternalProfile] = useState(null);
-    const [activeTab, setActiveTab] = useState('clips');
+    const [externalProfile, setExternalProfile] = useState(null);    const [activeTab, setActiveTab] = useState('clips');
     const [bellActive, setBellActive] = useState(false);
     const [showGGPopup, setShowGGPopup] = useState(false);
     const [showPointsPopup, setShowPointsPopup] = useState(false);
@@ -340,6 +426,9 @@ export default function ProfileScreen({ navigation, route }) {
         }
       : (externalProfile || null);
   
+    // Couleurs de texte adaptées au background cosmétique actif
+    const tc = getBgTextColors(user?.equippedProfileBg);
+
     const onRefresh = async () => {
         setRefreshing(true);
         // Force reload videos
@@ -457,8 +546,21 @@ export default function ProfileScreen({ navigation, route }) {
       url: `https://gamingactions.app/user/${user?.username}`,
     });
   };
+  // Compute bg color for container
+  const _bgId = user?.equippedProfileBg;
+  const _bg = _bgId ? PROFILE_BACKGROUNDS.find(b => b.id === _bgId) : null;
+  const containerBgColor = (_bg && _bg.id !== 'bg_none' && _bg.colors?.[0]) ? _bg.colors[0] : '#080810';
+  const accentBgColor = _bg ? (_bg.colors?.[ _bg.colors.length - 1] || _bg.colors?.[0]) : null;
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: containerBgColor }]}>
+      {/* Accent circles — fixed position below banner */}
+      {accentBgColor && (
+        <View style={{ position: 'absolute', top: BANNER_H + (Platform.OS === 'ios' ? 54 : 30), left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}>
+          <View style={{ position: 'absolute', bottom: 100, right: -40, width: 260, height: 260, borderRadius: 130, backgroundColor: accentBgColor, opacity: 0.08 }} />
+          <View style={{ position: 'absolute', top: 40, left: -60, width: 180, height: 180, borderRadius: 90, backgroundColor: accentBgColor, opacity: 0.05 }} />
+        </View>
+      )}
       <StatusBar style="light" />
       <GGInfoPopup visible={showGGPopup} onClose={() => setShowGGPopup(false)} navigation={navigation} />
       <GAPointsPopup visible={showPointsPopup} onClose={() => setShowPointsPopup(false)} navigation={navigation} />
@@ -488,37 +590,106 @@ export default function ProfileScreen({ navigation, route }) {
               <Ionicons name="cash-outline" size={22} color={COLORS.gold} />
             </TouchableOpacity>
           )}
+          {!isOwn && userId && (
+            <TouchableOpacity
+              onPress={() => Alert.alert(
+                `@${user?.username}`,
+                '',
+                [
+                  { text: 'Report User', onPress: () => navigation.navigate('Report', { target: user, targetType: 'profile' }) },
+                  { text: (userProfile?.blockedUsers || []).includes(userId) ? 'Unblock User' : 'Block User', style: 'destructive', onPress: async () => {
+                    const isBlocked = (userProfile?.blockedUsers || []).includes(userId);
+                    if (isBlocked) {
+                      const newBlocked = (userProfile?.blockedUsers || []).filter(id => id !== userId);
+                      await saveProfile({ blockedUsers: newBlocked });
+                      Alert.alert('✅ Unblocked', `@${user?.username} has been unblocked.`);
+                    } else {
+                      Alert.alert(
+                        `Block @${user?.username}?`,
+                        'They won\'t be able to see your profile or interact with your content. Their content will be removed from your feed.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Block', style: 'destructive', onPress: async () => {
+                            const newBlocked = [...new Set([...(userProfile?.blockedUsers || []), userId])];
+                            await saveProfile({ blockedUsers: newBlocked });
+                            Alert.alert('✅ Blocked', `@${user?.username} has been blocked.`);
+                            navigation.goBack();
+                          }},
+                        ]
+                      );
+                    }
+                  }},
+                  { text: 'Cancel', style: 'cancel' },
+                ]
+              )}
+              style={{ marginLeft: 8 }}
+            >
+              <Ionicons name="ellipsis-horizontal" size={22} color={COLORS.white} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} stickyHeaderIndices={[3]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} />}>
+      {/* ─── FIXED TOP SECTION ─── bannière + info + streak + tabs */}
+      <View style={{ zIndex: 1, overflow: 'visible' }}>
+
         {/* Banner */}
-      <View style={styles.banner}>
-  {user?.banner ? (
-    <Image source={{ uri: user.banner }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-  ) : (
-    <Text style={styles.bannerBg}>GA</Text>
-  )}
-  {/* Effet éclair pour le champion du mois */}
-  {user?.isChampion && (
-    <ElectricBanner width={SW} height={BANNER_H} />
-  )}
-  {/* Badge champion/leader animé sur la bannière */}
-  {(user?.isChampion || user?.isCurrentLeader) && (
-    <View style={{ position: 'absolute', top: 10, right: 12 }}>
-      {user?.isChampion ? <ChampionBadge /> : <LeaderBadge />}
-    </View>
-  )}
-</View>
+        <View style={[styles.banner, (() => {
+          const bannerId = user?.equippedProfileBanner;
+          const banner = bannerId ? PROFILE_BANNERS.find(b => b.id === bannerId) : null;
+          if (banner && !user?.banner) return { backgroundColor: banner.colors?.[0] || '#0D0820' };
+          return {};
+        })()]}>
+          {user?.banner ? (
+            <Image source={{ uri: user.banner }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          ) : (() => {
+            const bannerId = user?.equippedProfileBanner;
+            const banner = bannerId ? PROFILE_BANNERS.find(b => b.id === bannerId) : null;
+            if (banner && banner.id !== 'banner_none') {
+              const accentColor = banner.colors?.[banner.colors.length - 1] || '#C9A84C';
+              return (
+                <>
+                  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: accentColor, opacity: 0.9 }} />
+                  <View style={{ position: 'absolute', right: -30, top: -30, width: 120, height: 120, borderRadius: 60, backgroundColor: accentColor, opacity: 0.2 }} />
+                  <View style={{ position: 'absolute', left: -20, bottom: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: accentColor, opacity: 0.12 }} />
+                  <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1.5, backgroundColor: accentColor, opacity: 0.5 }} />
+                  <Text style={[styles.bannerBg, { color: accentColor }]}>GA</Text>
+                </>
+              );
+            }
+            return <Text style={styles.bannerBg}>GA</Text>;
+          })()}
+          {user?.isChampion && <ElectricBanner width={SW} height={BANNER_H} />}
+          {(user?.isChampion || user?.isCurrentLeader) && (
+            <View style={{ position: 'absolute', top: 10, right: 12 }}>
+              {user?.isChampion ? <ChampionBadge /> : <LeaderBadge />}
+            </View>
+          )}
+        </View>
 
         {/* Profile info */}
         <View style={styles.infoSection}>
-          <View style={styles.avatarRow}>
+          {/* Avatar flottant — positionné en absolute au-dessus de la bannière */}
+          <View style={{
+            position: 'absolute',
+            top: -48,
+            left: 10,
+            zIndex: 20,
+            width: 90,
+            height: 90,
+            overflow: 'visible',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
             <FramedAvatar user={user} size={64} />
+          </View>
+          {/* Actions row — aligné à droite, hauteur fixe pour réserver l'espace avatar */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
+            height: 44, marginBottom: 6 }}>
             {isOwn ? (
               <View style={styles.ownActions}>
-                <TouchableOpacity onPress={() => navigation.navigate('EditProfile')} style={styles.editBtn}>
-                  <Text style={styles.editBtnText}>Edit Profile</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('EditProfile')} style={[styles.editBtn, { borderColor: tc.editBorder, backgroundColor: tc.editBtn }]}>
+                  <Text style={[styles.editBtnText, { color: tc.primary }]}>Edit Profile</Text>
                 </TouchableOpacity>
                 {isCreator && (
                   <TouchableOpacity onPress={() => navigation.navigate('Dashboard')} style={styles.dashBtn}>
@@ -578,31 +749,60 @@ export default function ProfileScreen({ navigation, route }) {
           </View>
 
           <View style={styles.nameRow}>
-            <Text style={styles.name}>{user?.username}</Text>
+            {(() => {
+              const ueId = user?.equippedUsernameEffect;
+              const ueItem = ueId ? USERNAME_EFFECTS.find(effect => effect.id === ueId) : null;
+              const nameColor = ueItem ? (ueItem.color || (ueItem.colors?.[0]) || tc.primary) : tc.primary;
+              const hasGlow = ueItem?.glow || false;
+              const isAnimated = ueItem?.animated || false;
+              return (
+                <AnimatedUsername
+                  username={user?.username}
+                  color={nameColor}
+                  glow={hasGlow}
+                  isAnimated={isAnimated}
+                  baseStyle={styles.name}
+                />
+              );
+            })()}
             {user?.plan === 'legendary' && <View style={styles.legBadge}><Text style={styles.legBadgeText}>LEGENDARY</Text></View>}
             {user?.accountType === 'gameconic' && <View style={[styles.legBadge, { backgroundColor: COLORS.red }]}><Text style={styles.legBadgeText}>GAMECONIC</Text></View>}
             {user?.accountType === 'creator' && <View style={[styles.legBadge, { backgroundColor: COLORS.blue }]}><Text style={[styles.legBadgeText, { color: COLORS.dark }]}>CREATOR</Text></View>}
             {user?.isChampion ? <ChampionBadge /> : user?.isCurrentLeader ? <LeaderBadge /> : null}
           </View>
+          {/* Profile Badge / Title cosmétique */}
+          {(() => {
+            const badgeId = user?.equippedProfileBadge;
+            const badge = badgeId ? PROFILE_BADGES.find(b => b.id === badgeId) : null;
+            if (!badge || badge.id === 'badge_none') return null;
+            return (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, marginTop: -2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: (badge.color || COLORS.gold) + '18', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 0.5, borderColor: (badge.color || COLORS.gold) + '40' }}>
+                  {badge.emoji ? <Text style={{ fontSize: 11, marginRight: 4 }}>{badge.emoji}</Text> : null}
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: badge.color || COLORS.gold }}>{badge.name}</Text>
+                </View>
+              </View>
+            );
+          })()}
           <View style={styles.metaRow}>
-            <Text style={styles.metaItem}>🎮 {user?.mainGame || 'Gaming'}</Text>
-            {user?.country ? <Text style={styles.metaItem}>🌍 {user.country}</Text> : null}
+            <Text style={[styles.metaItem, { color: tc.secondary }]}>🎮 {user?.mainGame || 'Gaming'}</Text>
+            {user?.country ? <Text style={[styles.metaItem, { color: tc.secondary }]}>🌍 {user.country}</Text> : null}
           </View>
-          {user?.bio ? <Text style={styles.bio}>{user.bio}</Text> : null}
+          {user?.bio ? <Text style={[styles.bio, { color: tc.muted }]}>{user.bio}</Text> : null}
 
           {/* Stats */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
-          <TouchableOpacity onPress={() => navigation.navigate('Followers', { userId: user?.uid })} style={styles.stat}>
-              <Text style={styles.statNum}>{user?.followers || 0}</Text>
-              <Text style={styles.statLabel}>Followers</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Followers', { userId: user?.uid })} style={[styles.stat, { backgroundColor: tc.statBg, borderColor: tc.statBorder }]}>
+              <Text style={[styles.statNum, { color: tc.primary }]}>{user?.followers || 0}</Text>
+              <Text style={[styles.statLabel, { color: tc.secondary }]}>Followers</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('Following', { userId: user?.uid })} style={styles.stat}>
-              <Text style={styles.statNum}>{user?.following || 0}</Text>
-              <Text style={styles.statLabel}>Following</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Following', { userId: user?.uid })} style={[styles.stat, { backgroundColor: tc.statBg, borderColor: tc.statBorder }]}>
+              <Text style={[styles.statNum, { color: tc.primary }]}>{user?.following || 0}</Text>
+              <Text style={[styles.statLabel, { color: tc.secondary }]}>Following</Text>
             </TouchableOpacity>
-            <View style={styles.stat}>
-              <Text style={styles.statNum}>{userVideos.length}</Text>
-              <Text style={styles.statLabel}>Clips</Text>
+            <View style={[styles.stat, { backgroundColor: tc.statBg, borderColor: tc.statBorder }]}>
+              <Text style={[styles.statNum, { color: tc.primary }]}>{userVideos.length}</Text>
+              <Text style={[styles.statLabel, { color: tc.secondary }]}>Clips</Text>
             </View>
             <TouchableOpacity onPress={() => setShowGGPopup(true)} style={[styles.stat, { borderColor: COLORS.gold + '40' }]}>
               <Text style={[styles.statNum, { color: COLORS.gold }]}>
@@ -631,15 +831,24 @@ export default function ProfileScreen({ navigation, route }) {
         />
 
         {/* Tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={styles.tabsContent}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.tabs, { borderBottomColor: tc.tabBorder }]} contentContainerStyle={styles.tabsContent}>
           {TABS.map((tab) => (
             <TouchableOpacity key={tab} onPress={() => setActiveTab(tab.toLowerCase())} style={styles.tabItem}>
-              <Text style={[styles.tabText, activeTab === tab.toLowerCase() && styles.tabTextActive]}>{tab}</Text>
+              <Text style={[styles.tabText, { color: tc.secondary }, activeTab === tab.toLowerCase() && styles.tabTextActive]}>{tab}</Text>
               {activeTab === tab.toLowerCase() && <View style={styles.tabIndicator} />}
             </TouchableOpacity>
           ))}
         </ScrollView>
 
+      </View>
+
+      {/* ─── SCROLLABLE CONTENT — grille + autres tabs ─── */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} />}
+      >
         {/* CLIPS */}
         {activeTab === 'clips' && (
           <View style={styles.grid}>
@@ -882,14 +1091,14 @@ export default function ProfileScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#080810' },
+  container: { flex: 1, backgroundColor: '#080810' }, // overridden dynamically
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 10, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   headerTitle: { fontSize: 16, fontWeight: '800', color: COLORS.white, letterSpacing: 0.5 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  banner: { width: '100%', height: BANNER_H + (Platform.OS === 'ios' ? 54 : 30), backgroundColor: '#0d0820', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  banner: { width: '100%', height: BANNER_H + (Platform.OS === 'ios' ? 54 : 30), backgroundColor: '#0d0820', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', zIndex: 2 },
   bannerBg: { fontSize: 80, fontWeight: '900', color: COLORS.gold, opacity: 0.04, letterSpacing: 10 },
-  infoSection: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 8, backgroundColor: '#080810' },
-  avatarRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 10, marginTop: -32 },
+  infoSection: { paddingHorizontal: 14, paddingTop: 0, paddingBottom: 8, backgroundColor: 'transparent' },
+  avatarRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 10, marginTop: -28 },
   ownActions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 4 },
   editBtn: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.06)' },
   editBtnText: { fontSize: 13, color: COLORS.white, fontWeight: '700' },
@@ -909,14 +1118,14 @@ const styles = StyleSheet.create({
   stat: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', marginRight: 8, minWidth: 72 },
   statNum: { fontSize: 17, fontWeight: '900', color: COLORS.white },
   statLabel: { fontSize: 9, color: COLORS.gray, textTransform: 'uppercase', marginTop: 2, letterSpacing: 0.5 },
-  tabs: { backgroundColor: '#080810', borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  tabs: { backgroundColor: 'transparent', borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.08)' },
   tabsContent: { paddingHorizontal: 14 },
   tabItem: { alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16 },
   tabText: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
   tabTextActive: { color: COLORS.gold, fontWeight: '800' },
   tabIndicator: { height: 2, width: '70%', backgroundColor: COLORS.gold, borderRadius: 1, position: 'absolute', bottom: 0 },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
-  thumb: { width: THUMB_SIZE, height: THUMB_SIZE * 0.65, overflow: 'hidden', borderWidth: 0.5, borderColor: '#080810', position: 'relative', backgroundColor: '#111120' },
+  thumb: { width: THUMB_SIZE, height: THUMB_H, overflow: 'hidden', borderWidth: 0.5, borderColor: '#080810', position: 'relative', backgroundColor: '#111120' },
   thumbLegendary: { borderWidth: 1, borderColor: COLORS.gold },
   thumbBg: { flex: 1, backgroundColor: '#111120', alignItems: 'center', justifyContent: 'center' },
   thumbGG: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },

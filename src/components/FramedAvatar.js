@@ -91,7 +91,7 @@ export default function FramedAvatar({ user, size = 36, onPress, showGlow = true
   // Taille du composant = taille de l'image uniquement.
   // Le ring et le glow sont en overflow (position absolute, dépassent légèrement).
   const avatar = (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center', overflow: 'visible' }}>
 
       {/* Couronne — sort AU-DESSUS en overflow, ne pousse rien */}
       {showCrown && (

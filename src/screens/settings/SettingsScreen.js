@@ -6,8 +6,8 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
+import { doc, updateDoc, deleteDoc, collection, query, where, getDocs, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { signOut, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import { db, auth } from '../../config/firebase';
 import { clearPrefs } from '../../utils/feedAlgo';
 import { resetPlaylist } from '../../utils/feedSession';
@@ -76,27 +76,76 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const handleDelete = () => {
+    // Step 1 — first warning
     Alert.alert(
-      'Deactivate Account',
-      'Your account will be deactivated and you will be signed out. Your data will be preserved — contact support to reactivate.',
+      '🗑️ Delete Account',
+      'This will permanently delete your account, all your clips, comments, GGs, and points.\n\nThis action is IRREVERSIBLE.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Deactivate',
+          text: 'Continue →',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              if (user?.uid) {
-                await updateDoc(doc(db, 'users', user.uid), {
-                  banned: true,
-                  bannedAt: serverTimestamp(),
-                  bannedReason: 'self_deactivated',
-                });
-              }
-              await signOut(auth);
-            } catch (e) {
-              Alert.alert('Error', 'Could not complete. Please try again later.');
-            }
+          onPress: () => {
+            // Step 2 — final confirmation
+            Alert.alert(
+              '⚠️ Are you absolutely sure?',
+              'Type DELETE to confirm — your account and all data will be permanently removed.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: '🗑️ Delete Forever',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      const uid = user?.uid;
+                      if (!uid) return;
+
+                      // 1. Delete user's videos
+                      const videosSnap = await getDocs(query(collection(db, 'videos'), where('userId', '==', uid)));
+                      const batch1 = writeBatch(db);
+                      videosSnap.docs.forEach(d => batch1.delete(d.ref));
+                      await batch1.commit();
+
+                      // 2. Delete user's comments
+                      const commentsSnap = await getDocs(query(collection(db, 'comments'), where('userId', '==', uid)));
+                      const batch2 = writeBatch(db);
+                      commentsSnap.docs.forEach(d => batch2.delete(d.ref));
+                      await batch2.commit();
+
+                      // 3. Delete user's GGs
+                      const ggsSnap = await getDocs(query(collection(db, 'ggs'), where('userId', '==', uid)));
+                      const batch3 = writeBatch(db);
+                      ggsSnap.docs.forEach(d => batch3.delete(d.ref));
+                      await batch3.commit();
+
+                      // 4. Delete user's notifications
+                      const notifsSnap = await getDocs(query(collection(db, 'notifications'), where('userId', '==', uid)));
+                      const batch4 = writeBatch(db);
+                      notifsSnap.docs.forEach(d => batch4.delete(d.ref));
+                      await batch4.commit();
+
+                      // 5. Delete Firestore user doc
+                      await deleteDoc(doc(db, 'users', uid));
+
+                      // 6. Delete Firebase Auth user
+                      await deleteUser(auth.currentUser);
+
+                    } catch (e) {
+                      // If deleteUser fails due to re-auth needed
+                      if (e.code === 'auth/requires-recent-login') {
+                        Alert.alert(
+                          'Re-authentication Required',
+                          'For security, please sign out and sign back in before deleting your account.',
+                          [{ text: 'OK' }]
+                        );
+                      } else {
+                        Alert.alert('Error', 'Could not delete account. Please try again or contact support@gamingactions.com');
+                      }
+                    }
+                  },
+                },
+              ]
+            );
           },
         },
       ]
@@ -243,6 +292,7 @@ export default function SettingsScreen({ navigation }) {
         <View style={styles.section}>
           <SettingsRow icon="cloud-upload-outline" label="How to Upload Clips" onPress={() => navigation.navigate('HowToUpload')} color={COLORS.blue} />
           <SettingsRow icon="book-outline" label="Community Guidelines" onPress={() => navigation.navigate('CommunityGuidelines')} />
+          <SettingsRow icon="trophy-outline" label="Championship Contest Rules" onPress={() => navigation.navigate('ContestRules')} color={COLORS.gold} />
           <SettingsRow icon="bug-outline" label="Report a Bug" onPress={() => navigation.navigate('ReportBug')} />
           <SettingsRow icon="document-text-outline" label="Terms of Use" onPress={() => navigation.navigate('Terms')} />
           <SettingsRow icon="shield-outline" label="Privacy Policy" onPress={() => navigation.navigate('PrivacyPolicy')} />
@@ -253,7 +303,7 @@ export default function SettingsScreen({ navigation }) {
         <View style={styles.section}>
           <SettingsRow icon="log-out-outline" label="Sign Out" onPress={handleLogout} danger />
           <SettingsRow icon="time-outline" label="Clear Watch History" onPress={handleClearHistory} />
-          <SettingsRow icon="trash-outline" label="Deactivate Account" onPress={handleDelete} danger />
+          <SettingsRow icon="trash-outline" label="Delete Account" onPress={handleDelete} danger />
         </View>
 
         <Text style={styles.version}>Gaming Actions v1.0.0 · Rize to the GG 🏆</Text>
