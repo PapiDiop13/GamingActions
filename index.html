@@ -26,7 +26,9 @@
   .nav-logo-badge { width: 36px; height: 36px; border-radius: 10px; border: 2px solid var(--gold); background: rgba(201,168,76,0.12); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; color: var(--gold); }
   .nav-logo-text { font-size: 17px; font-weight: 900; letter-spacing: 1px; color: var(--white); }
   .nav-logo-text span { color: var(--gold); }
-  .nav-right { display: flex; align-items: center; gap: 20px; }
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .nav-login { font-size: 13px; color: var(--gray); font-weight: 700; text-decoration: none; padding: 8px 16px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.12); transition: all .2s; }
+  .nav-login:hover { color: var(--white); border-color: rgba(255,255,255,0.3); }
   .nav-link { font-size: 13px; color: var(--gray); font-weight: 600; text-decoration: none; transition: color .2s; }
   .nav-link:hover { color: var(--gold); }
   .nav-cta { background: var(--gold); color: var(--black); font-size: 13px; font-weight: 800; padding: 9px 20px; border-radius: 50px; text-decoration: none; transition: opacity .2s; }
@@ -161,6 +163,7 @@
     <a class="nav-link" href="#features">Features</a>
     <a class="nav-link" href="#customize">Shop</a>
     <a class="nav-link" href="#leaderboard">Rankings</a>
+    <a class="nav-login" href="/legendary">Sign In</a>
     <a class="nav-cta" href="https://apps.apple.com/app/gaming-actions/id6780596082" target="_blank">Download Free</a>
   </div>
 </nav>
@@ -339,7 +342,15 @@
       <li>Early access to new features</li>
       <li>Bonus GA Points on daily login</li>
     </ul>
-    <div class="coming-soon-pill">🔜 Coming Very Soon</div>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:12px;">
+      <a href="/legendary?plan=monthly" style="display:inline-flex;align-items:center;gap:8px;background:var(--gold);color:var(--black);font-size:15px;font-weight:900;padding:14px 28px;border-radius:12px;text-decoration:none;transition:all .2s;" onmouseover="this.style.opacity='.88'" onmouseout="this.style.opacity='1'">
+        👑 Monthly — CA$1.99/mo
+      </a>
+      <a href="/legendary?plan=yearly" style="display:inline-flex;align-items:center;gap:8px;background:transparent;color:var(--gold);border:1.5px solid var(--gold);font-size:15px;font-weight:900;padding:14px 28px;border-radius:12px;text-decoration:none;transition:all .2s;" onmouseover="this.style.background='rgba(201,168,76,0.1)'" onmouseout="this.style.background='transparent'">
+        📅 Yearly — CA$14.99/yr <span style="font-size:11px;background:rgba(0,200,83,0.2);color:#00C853;padding:2px 7px;border-radius:10px;margin-left:4px">Save 37%</span>
+      </a>
+    </div>
+    <p style="font-size:12px;color:var(--gray);margin-top:4px;">🔒 Secure payment via Stripe · Cancel anytime · Instant activation</p>
   </div>
 </section>
 </div>
@@ -376,9 +387,9 @@
 <!-- STATS -->
 <div class="stats-section">
   <div class="stats">
+    <div class="stat"><span class="stat-num" id="stat-users">—</span><span class="stat-label">Gamers Joined</span></div>
+    <div class="stat"><span class="stat-num" id="stat-clips">—</span><span class="stat-label">Clips Shared</span></div>
     <div class="stat"><span class="stat-num">130+</span><span class="stat-label">Avatar Frames</span></div>
-    <div class="stat"><span class="stat-num">80+</span><span class="stat-label">Cosmetic Items</span></div>
-    <div class="stat"><span class="stat-num">500+</span><span class="stat-label">Clips Shared</span></div>
     <div class="stat"><span class="stat-num">1</span><span class="stat-label">Champion Per Month</span></div>
   </div>
 </div>
@@ -450,5 +461,25 @@
 </footer>
 
 <script type="module" src="./leaderboard.js"></script>
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+  import { getFirestore, collection, getCountFromServer } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+  const app = initializeApp({ apiKey:"AIzaSyDHYlFVDkF85KknGDiqatsCSOzW2bkMyDU", authDomain:"gamingactions-app.firebaseapp.com", projectId:"gamingactions-app" });
+  const db = getFirestore(app);
+  function fmt(n) { if(n>=1000) return (n/1000).toFixed(1)+'K'; return String(n); }
+  try {
+    const [usersSnap, clipsSnap] = await Promise.all([
+      getCountFromServer(collection(db,'users')),
+      getCountFromServer(collection(db,'videos')),
+    ]);
+    const u = document.getElementById('stat-users');
+    const c = document.getElementById('stat-clips');
+    if(u) u.textContent = fmt(usersSnap.data().count);
+    if(c) c.textContent = fmt(clipsSnap.data().count) + '+';
+  } catch(e) {
+    const u = document.getElementById('stat-users'); if(u) u.textContent='100+';
+    const c = document.getElementById('stat-clips'); if(c) c.textContent='500+';
+  }
+</script>
 </body>
 </html>
