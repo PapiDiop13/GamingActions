@@ -2,102 +2,229 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── Utilisateurs authentifiés : accès standard ──
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+    function isAdmin() {
+      return isAuth() && (
+        request.auth.token.email in ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com']
+        || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true
+      );
+    }
+    function notBanned() {
+      return !get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('banned', false);
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    // Lecture : tout user connecté (pour profils publics)
+    // Écriture : uniquement son propre profil OU admin
+    // Les champs sensibles (gaPoints, streakPoints, ggReceived, plan, banned)
+    // ne peuvent être modifiés que par le serveur (Admin SDK) ou l'admin.
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin();
     }
 
+    // ── Videos ───────────────────────────────────────────────────────────────
     match /videos/{videoId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
     }
 
+    // ── GGs ──────────────────────────────────────────────────────────────────
+    // Un GG ne peut être créé que par son propriétaire (userId == auth.uid)
     match /ggs/{ggId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuth()
+        && resource.data.userId == request.auth.uid;
     }
 
+    // ── Follows ──────────────────────────────────────────────────────────────
     match /follows/{followId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.followerId == request.auth.uid;
+      allow delete: if isAuth()
+        && resource.data.followerId == request.auth.uid;
     }
 
+    // ── Comments ─────────────────────────────────────────────────────────────
     match /comments/{commentId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
     }
 
     match /tipComments/{commentId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
     }
 
+    // ── Points history ────────────────────────────────────────────────────────
+    // Lecture : user voit uniquement son historique
+    // Écriture : user peut créer ses propres entrées (daily login, achats shop)
+    //            Admin peut tout modifier (corrections)
     match /points_history/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
 
-    match /creator_requests/{reqId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /moderation_logs/{logId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /moderation_counters/{userId} {
-      allow read, write: if request.auth != null;
-    }
-
+    // ── Notifications ─────────────────────────────────────────────────────────
     match /notifications/{notifId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth();
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
     }
 
-    match /reports/{reportId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /thanks/{thankId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /bells/{bellId} {
-      allow read, write: if request.auth != null;
-    }
-
+    // ── Fanbase ───────────────────────────────────────────────────────────────
     match /fanbase_subscriptions/{subId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.subscriberId == request.auth.uid;
+      allow delete: if isAuth() && (
+        resource.data.subscriberId == request.auth.uid
+        || resource.data.creatorId == request.auth.uid
+        || isAdmin()
+      );
     }
 
+    // ── Gift cards (create = user, update = admin only) ───────────────────────
+    match /gift_card_requests/{docId} {
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Earnings & withdrawals ────────────────────────────────────────────────
+    // creator_earnings : le user peut lire son propre doc et mettre à jour
+    // balance/pendingWithdrawal lors d'une demande de retrait.
+    // subscriberCount et totalEarned restent admin-only.
+    match /creator_earnings/{creatorId} {
+      allow read: if isOwner(creatorId) || isAdmin();
+      allow create: if isAdmin();
+      allow update: if isOwner(creatorId) || isAdmin();
+    }
+
+    match /withdrawal_requests/{docId} {
+      allow read: if isAuth() && resource.data.creatorId == request.auth.uid;
+      allow create: if isAuth()
+        && request.resource.data.creatorId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Subscriptions (géré par RevenueCat + Admin SDK) ───────────────────────
+    match /subscriptions/{docId} {
+      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow write: if isAdmin();
+    }
+
+    // ── Reports ───────────────────────────────────────────────────────────────
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuth() && notBanned();
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Thanks ────────────────────────────────────────────────────────────────
+    match /thanks/{thankId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Bells ─────────────────────────────────────────────────────────────────
+    match /bells/{bellId} {
+      allow read: if isAuth() && resource.data.bellerId == request.auth.uid;
+      allow create: if isAuth();
+      allow delete: if isAuth() && resource.data.bellerId == request.auth.uid;
+    }
+
+    // ── Creator requests ──────────────────────────────────────────────────────
+    match /creator_requests/{reqId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Custom games (read all, create par user pour upload, update/delete admin) ──
     match /custom_games/{gameId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned();
+      allow update, delete: if isAdmin();
     }
 
+    // ── App config (read all auth, write admin only) ──────────────────────────
     match /app_config/{configId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read: if isAuth();
+      allow write: if isAdmin();
     }
 
+    // ── Username reservation ──────────────────────────────────────────────────
     match /username/{usernameId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAuth();
+      allow write: if isAuth();
     }
 
+    // ── Bug reports ───────────────────────────────────────────────────────────
     match /bug_reports/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAdmin();
+      allow create: if isAuth();
     }
 
-    // ── Logging & monitoring (nouvelles collections) ──
+    // ── Logging (write-only pour les users, read admin) ───────────────────────
     match /errorLogs/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAdmin();
+      allow create: if isAuth();
     }
 
     match /appLogs/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAdmin();
+      allow create: if isAuth();
     }
 
     match /errorCounters/{docId} {
-      allow read, write: if request.auth != null;
+      allow read: if isAdmin();
+      allow write: if isAuth();
     }
 
-    // ── Feed session tracking ──
-    // (géré localement via AsyncStorage, pas de collection Firestore)
+    // ── Moderation ────────────────────────────────────────────────────────────
+    match /moderation_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuth();
+    }
 
+    match /moderation_counters/{userId} {
+      allow read: if isAdmin();
+      allow write: if isAuth();
+    }
   }
 }

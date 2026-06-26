@@ -1,0 +1,147 @@
+{
+  "expo": {
+    "name": "Gaming Actions",
+    "slug": "GamingActions",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.gamingactions.app",
+      "buildNumber": "42",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Gaming Actions needs access to your camera to record gameplay clips and take profile pictures.",
+        "NSPhotoLibraryUsageDescription": "Gaming Actions needs access to your photo library to upload gameplay clips and set your profile picture.",
+        "NSPhotoLibraryAddUsageDescription": "Gaming Actions needs permission to save clips to your photo library.",
+        "NSMicrophoneUsageDescription": "Gaming Actions needs access to your microphone to record audio with your gameplay clips.",
+        "NSUserTrackingUsageDescription": "Gaming Actions uses this data to provide you with a personalized experience and improve the app.",
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "associatedDomains": [
+        "applinks:gamingactions.app"
+      ],
+      "googleServicesFile": "./GoogleService-Info.plist"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0F"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.gamingactions.app",
+      "versionCode": 32,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "blockedPermissions": [
+        "com.google.android.gms.permission.AD_ID"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "gamingactions.app",
+              "pathPrefix": "/clip"
+            },
+            {
+              "scheme": "https",
+              "host": "gamingactions.app",
+              "pathPrefix": "/user"
+            },
+            {
+              "scheme": "https",
+              "host": "www.gamingactions.app",
+              "pathPrefix": "/clip"
+            },
+            {
+              "scheme": "https",
+              "host": "www.gamingactions.app",
+              "pathPrefix": "/user"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#C9A84C",
+          "sounds": [],
+          "iosDisplayInForeground": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Gaming Actions needs access to your photos to upload gameplay clips.",
+          "cameraPermission": "Gaming Actions needs access to your camera to record clips."
+        }
+      ],
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      "expo-font",
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "Gaming Actions uses this data to provide personalized content and improve your experience."
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.878199468974-57kfnd5o91gatnl3lv079v49gdvhkt2t"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3c5066a4-e461-4e70-b99f-19476e0b45af"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/3c5066a4-e461-4e70-b99f-19476e0b45af"
+    },
+    "scheme": "ga"
+  }
+}

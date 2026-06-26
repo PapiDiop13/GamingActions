@@ -18,7 +18,7 @@ import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firesto
 import { ringColorForUser, commentFrameStyle } from '../../constants/frames';
 import FramedAvatar from '../../components/FramedAvatar';
 import CommentsSheet from '../../components/CommentsSheet';
-import { recordView } from '../../utils/feedAlgo';
+import { recordView, loadPrefs } from '../../utils/feedAlgo';
 
 // ─── GG Button animé ─────────────────────────────────────────────────────────
 function GGBtn({ hasGG, count, onPress, disabled }) {
@@ -42,8 +42,6 @@ function GGBtn({ hasGG, count, onPress, disabled }) {
   );
 }
 
-// ─── Comments Sheet ───────────────────────────────────────────────────────────
-
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function VideoPlayerScreen({ navigation, route }) {
   const { video } = route?.params || {};
@@ -53,19 +51,27 @@ export default function VideoPlayerScreen({ navigation, route }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const controlsTimer = React.useRef(null);
+
+  const showControlsTemporarily = React.useCallback(() => {
+    setShowControls(true);
+    if (controlsTimer.current) clearTimeout(controlsTimer.current);
+    controlsTimer.current = setTimeout(() => setShowControls(false), 3500);
+  }, []);
+
+  React.useEffect(() => {
+    showControlsTemporarily();
+    return () => { if (controlsTimer.current) clearTimeout(controlsTimer.current); };
+  }, []);
+
   const [showComments, setShowComments] = useState(false);
 
-  // Récupère l'état GG live depuis le store
   const liveVideo = useFeedStore(s => s.videos.find(v => v.id === video?.id));
 
-  // Si la vidéo vient du profil (pas dans le store), charger GG + counts depuis Firestore
   const [localHasGG, setLocalHasGG] = useState(false);
   const [localGGCount, setLocalGGCount] = useState(video?.ggCount ?? 0);
-  // Live comment count — counts the REAL comments in Firestore, not a stale
-  // stored field (fixes the "0 comments" bug from commentCount/commentsCount mismatch).
   const [liveCommentCount, setLiveCommentCount] = useState(video?.commentCount ?? video?.commentsCount ?? 0);
 
-  // Real-time listener on the comments collection for accurate count
   useEffect(() => {
     if (!video?.id) return;
     const { collection: col, query: q2, where: w2, onSnapshot: sub } = require('firebase/firestore');
@@ -78,11 +84,9 @@ export default function VideoPlayerScreen({ navigation, route }) {
   }, [video?.id]);
 
   useEffect(() => {
-    if (!video?.id || liveVideo) return; // si dans le store, pas besoin
+    if (!video?.id || liveVideo) return;
     getDoc(doc(db, 'videos', video.id)).then(snap => {
-      if (snap.exists()) {
-        setLocalGGCount(snap.data().ggCount || 0);
-      }
+      if (snap.exists()) setLocalGGCount(snap.data().ggCount || 0);
     }).catch(() => {});
     if (user?.uid) {
       getDoc(doc(db, 'ggs', `${user.uid}_${video.id}`)).then(snap => {
@@ -95,15 +99,11 @@ export default function VideoPlayerScreen({ navigation, route }) {
   const ggCount = liveVideo ? (liveVideo.ggCount ?? video?.ggCount ?? 0) : localGGCount;
   const commentCount = liveCommentCount;
 
-  // ── 5-second view timer ─────────────────────────────────────────────────────
-  // A clip is only counted as "viewed" after 5 continuous seconds of watch time.
-  // Scrolling past in 1-2 seconds = ignored (avoids polluting preference model).
-  // On confirmed view: increments Firestore viewCount + updates local feed algo prefs.
   const viewTimerRef = useRef(null);
+  const progressWidth = React.useRef(300);
   const viewConfirmedRef = useRef(false);
 
   useEffect(() => {
-    // Clear any previous timer when video changes
     if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
     viewConfirmedRef.current = false;
 
@@ -112,12 +112,10 @@ export default function VideoPlayerScreen({ navigation, route }) {
     viewTimerRef.current = setTimeout(async () => {
       if (!viewConfirmedRef.current) {
         viewConfirmedRef.current = true;
-        // Increment Firestore viewCount (deduped per session in the store)
         incrementView(video.id, user?.uid);
-        // Update local preference model for recommendation algo
         await recordView(video);
       }
-    }, 5000); // 5 seconds = intentional watch, not a scroll-past
+    }, 5000);
 
     return () => {
       if (viewTimerRef.current) clearTimeout(viewTimerRef.current);
@@ -155,7 +153,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
 
   const toggleOrientation = async () => {
     if (!isLandscape) {
-      setShowComments(false); // Fermer commentaires avant landscape (évite crash)
+      setShowComments(false);
       await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
       setIsLandscape(true);
     } else {
@@ -174,14 +172,12 @@ export default function VideoPlayerScreen({ navigation, route }) {
 
   return (
     <View style={styles.container}>
-      <CommentsSheet 
-        visible={showComments} 
-        onClose={() => setShowComments(false)} 
-        video={video} 
+      <CommentsSheet
+        visible={showComments}
+        onClose={() => setShowComments(false)}
+        video={video}
         userProfile={userProfile}
-        onCommentAdded={() => {
-          if (!liveVideo) setLocalCommentCount(c => c + 1);
-        }}
+        onCommentAdded={() => {}}
       />
 
       <View style={styles.videoArea}>
@@ -192,12 +188,10 @@ export default function VideoPlayerScreen({ navigation, route }) {
             </View>
         }
 
-        {/* Tap pour show/hide controls */}
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowControls(c => !c)} />
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={showControlsTemporarily} />
 
         {showControls && (
           <>
-            {/* Top bar */}
             <View style={styles.topBar}>
               <TouchableOpacity onPress={handleBack} style={styles.iconBtn}>
                 <Ionicons name="chevron-down" size={28} color={COLORS.white} />
@@ -208,7 +202,6 @@ export default function VideoPlayerScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
-            {/* Centre play/pause — masqué en landscape */}
             {!isLandscape && (
               <TouchableOpacity style={styles.centerBtn} onPress={() => { if (player.playing) player.pause(); else player.play(); }}>
                 <View style={styles.playIcon}>
@@ -217,7 +210,6 @@ export default function VideoPlayerScreen({ navigation, route }) {
               </TouchableOpacity>
             )}
 
-            {/* Right side actions — masqué en landscape pour éviter crash + gêne */}
             {!isLandscape && (
               <View style={styles.sideBar}>
                 <GGBtn
@@ -225,10 +217,8 @@ export default function VideoPlayerScreen({ navigation, route }) {
                   count={ggCount}
                   onPress={async () => {
                     if (liveVideo) {
-                      // Video is in the feed store — use the store toggle
-                      toggleGG(video?.id, user?.uid);
+                      toggleGG(video?.id, user?.uid, liveVideo);
                     } else {
-                      // Video from profile/search — optimistic update + direct write
                       const prevHasGG = localHasGG;
                       const prevCount = localGGCount;
                       setLocalHasGG(!prevHasGG);
@@ -240,7 +230,6 @@ export default function VideoPlayerScreen({ navigation, route }) {
                         setLocalHasGG(result.hasGG);
                         setLocalGGCount(result.ggCount);
                       } else {
-                        // Revert on failure
                         setLocalHasGG(prevHasGG);
                         setLocalGGCount(prevCount);
                       }
@@ -248,19 +237,30 @@ export default function VideoPlayerScreen({ navigation, route }) {
                   }}
                   disabled={isOwnVideo}
                 />
-                <TouchableOpacity onPress={() => { setShowComments(true); }} style={[styles.sideAction, { marginTop: 20 }]}>
+                <TouchableOpacity onPress={() => setShowComments(true)} style={[styles.sideAction, { marginTop: 20 }]}>
                   <Ionicons name="chatbubble-outline" size={22} color={COLORS.white} />
                   <Text style={styles.sideActionText}>{commentCount}</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            {/* Bottom bar */}
             <View style={styles.bottomBar}>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-                <View style={[styles.progressDot, { left: `${Math.min(progress * 100, 97)}%` }]} />
-              </View>
+              <TouchableOpacity
+                activeOpacity={1}
+                onLayout={(e) => { progressWidth.current = e.nativeEvent.layout.width; }}
+                onPress={(e) => {
+                  const w = progressWidth.current || 1;
+                  const fraction = Math.max(0, Math.min(1, e.nativeEvent.locationX / w));
+                  try { player.currentTime = fraction * duration; } catch {}
+                  showControlsTemporarily();
+                }}
+                style={[styles.progressTrack, { paddingVertical: 10, marginVertical: -10 }]}
+              >
+                <View style={{ height: 3, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, position: 'relative' }}>
+                  <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                  <View style={[styles.progressDot, { left: `${Math.min(progress * 100, 97)}%` }]} />
+                </View>
+              </TouchableOpacity>
               <View style={styles.timeRow}>
                 <Text style={styles.time}>{formatTime(position)}</Text>
                 <TouchableOpacity onPress={toggleOrientation} style={styles.rotateBtn}>
@@ -310,7 +310,6 @@ const styles = StyleSheet.create({
   time: { fontSize: 12, color: 'rgba(255,255,255,0.7)' },
   rotateBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   rotateBtnText: { color: COLORS.white, fontSize: 11, fontWeight: '700', marginLeft: 5 },
-  // Comments sheet
   sheetWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
   sheet: { backgroundColor: COLORS.dark, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: Platform.OS === 'ios' ? 30 : 12 },
   sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.gray2, alignSelf: 'center', marginTop: 10, marginBottom: 8 },

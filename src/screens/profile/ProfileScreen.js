@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
   Dimensions, Share, Modal, Image, Alert, Linking, RefreshControl,
   TouchableWithoutFeedback,
 } from 'react-native';
@@ -11,9 +11,10 @@ import useAuthStore from '../../store/useAuthStore';
 import useUserStore from '../../store/useUserStore';
 import useFanbaseStore from '../../store/useFanbaseStore';
 import { db } from '../../config/firebase';
-import { awardPoints, POINTS } from '../../utils/points';
+import { POINTS } from '../../utils/points';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
-import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { showAlert } from '../../store/useAlertStore';
 import { ringColorForUser, glowColorForUser, getFrameById, getVideoFrameById } from '../../constants/frames';
 import { ElectricBanner, ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
 import FramedAvatar from '../../components/FramedAvatar';
@@ -104,9 +105,9 @@ function GGInfoPopup({ visible, onClose, navigation }) {
 
 function GAPointsPopup({ visible, onClose, navigation }) {
   const EARN = [
-    { icon: 'cloud-upload-outline', color: COLORS.gold, action: 'Post a clip', points: '+50 pts' },
+    { icon: 'cloud-upload-outline', color: COLORS.gold, action: 'Post a clip', points: '+25 pts' },
     { icon: 'star-outline', color: COLORS.gold, action: 'Receive a GG', points: '+2 pts' },
-    { icon: 'person-add-outline', color: COLORS.blue, action: 'Get a new follower', points: '+5 pts' },
+    { icon: 'person-add-outline', color: COLORS.blue, action: 'Get a new follower', points: '+1 pt' },
     { icon: 'calendar-outline', color: GREEN, action: 'Daily login', points: '+10 pts' },
     { icon: 'people-outline', color: COLORS.blue, action: 'New fanbase subscriber', points: '+20 pts' },
     { icon: 'trophy-outline', color: COLORS.gold, action: 'Monthly Top 10', points: '+200 pts' },
@@ -189,7 +190,7 @@ function StreakInfoPopup({ visible, onClose, level, points }) {
   const ptsToNext = next ? (next.minPoints - points) : 0;
 
   const HOW_ITEMS = [
-    { icon: '📹', action: 'Post a clip', pts: '+50 pts' },
+    { icon: '📹', action: 'Post a clip', pts: '+25 pts' },
     { icon: '⭐', action: 'Receive a GG', pts: '+2 pts' },
     { icon: '👤', action: 'Get a new follower', pts: '+1 pt' },
     { icon: '📅', action: 'Daily login bonus', pts: '+1 to +15 pts' },
@@ -416,30 +417,38 @@ export default function ProfileScreen({ navigation, route }) {
     : ['Clips', 'Infos'];
 
   const handleDeleteVideo = async (video) => {
-    Alert.alert(
-      'Delete Video',
-      'This cannot be undone. Are you sure?',
-      [
+    const ggPoints = (video.ggCount || 0) * 2;
+    const totalLost = POINTS.POST_CLIP + ggPoints;
+    const pointsMsg = ggPoints > 0
+      ? `You will lose ${totalLost} GA Points:\n• -${POINTS.POST_CLIP} pts (clip bonus)\n• -${ggPoints} pts (${video.ggCount} GGs received)`
+      : `You will lose ${POINTS.POST_CLIP} GA Points (clip bonus).`;
+
+    showAlert({
+      title: '🗑️ Delete Clip',
+      message: `"${video.title || video.caption || 'Untitled'}" will be permanently deleted.\n\n⚠️ ${pointsMsg}`,
+      type: 'danger',
+      buttons: [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
-              const { deleteDoc, doc } = await import('firebase/firestore');
               await deleteDoc(doc(db, 'videos', video.id));
-              // −50 pts (anti-triche : les points de publication partent avec le clip)
-              const { user: authUser } = useAuthStore.getState();
-              if (authUser?.uid) await awardPoints(authUser.uid, -POINTS.POST_CLIP);
+              // Le trigger serveur onVideoDeleted gère :
+              // - videoCount -1
+              // - gaPoints/streakPoints (clip bonus + GG points)
+              // - points_history
+              // Le client ne fait rien de plus → plus de conflit de transaction.
               setUserVideos(prev => prev.filter(v => v.id !== video.id));
             } catch (e) {
               await logError(LOG_CONTEXT.VIDEO_DELETE, e, useAuthStore.getState().user?.uid);
-              Alert.alert('Error', 'Could not delete video. Please try again later.');
+              showAlert({ title: 'Error', message: 'Could not delete video. Please try again.', type: 'danger' });
             }
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   const handleShare = async () => {
@@ -474,6 +483,11 @@ export default function ProfileScreen({ navigation, route }) {
               <Ionicons name="settings-outline" size={22} color={COLORS.white} />
             </TouchableOpacity>
           )}
+          {isOwn && isCreator && (
+            <TouchableOpacity onPress={() => navigation.navigate('Earnings')} style={{ marginLeft: 8 }}>
+              <Ionicons name="cash-outline" size={22} color={COLORS.gold} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -506,9 +520,11 @@ export default function ProfileScreen({ navigation, route }) {
                 <TouchableOpacity onPress={() => navigation.navigate('EditProfile')} style={styles.editBtn}>
                   <Text style={styles.editBtnText}>Edit Profile</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => navigation.navigate('Dashboard')} style={styles.dashBtn}>
-                  <Ionicons name="bar-chart-outline" size={16} color={COLORS.gold} />
-                </TouchableOpacity>
+                {isCreator && (
+                  <TouchableOpacity onPress={() => navigation.navigate('Dashboard')} style={styles.dashBtn}>
+                    <Ionicons name="bar-chart-outline" size={16} color={COLORS.gold} />
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
               <View style={styles.ownActions}>
@@ -632,11 +648,15 @@ export default function ProfileScreen({ navigation, route }) {
                 <Ionicons name="game-controller-outline" size={40} color={COLORS.gray2} />
                 <Text style={styles.emptyTabText}>No clips yet</Text>
               </View>
-            ) : userVideos.filter(v => (v.contentType === 'clip' || !v.contentType) && (isOwn || (!v.restricted && !v.banned))).map((v) => (
+            ) : userVideos.filter(v => (v.contentType === 'clip' || !v.contentType) && (isOwn || (!v.restricted && !v.banned))).map((v, idx, arr) => (
               <TouchableOpacity
   key={v.id}
   style={[styles.thumb, (v.isLegendaryFrame || v.videoFrame) && { borderWidth: 1, borderColor: (getVideoFrameById(v.videoFrame)?.color || COLORS.gold) }]}
-  onPress={() => navigation.navigate('VideoPlayer', { video: v })}
+  onPress={() => navigation.navigate('ProfileFeed', {
+    videos: arr,
+    startIndex: idx,
+    username: (isOwn ? userProfile?.username : externalProfile?.username) || '',
+  })}
   onLongPress={() => {
     if (isOwn) {
       Alert.alert(
@@ -862,59 +882,59 @@ export default function ProfileScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.black },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 54, paddingBottom: 10 },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: COLORS.white },
-  headerRight: { flexDirection: 'row', alignItems: 'center' },
-  banner: { width: '100%', height: BANNER_H, backgroundColor: '#0d0820', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  bannerBg: { fontSize: 60, fontWeight: '900', color: COLORS.gold, opacity: 0.04, letterSpacing: 10 },
-  infoSection: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8 },
-  avatarRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  ownActions: { flexDirection: 'row', alignItems: 'center' },
-  editBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 0.5, borderColor: COLORS.gray3, marginRight: 8 },
-  editBtnText: { fontSize: 12, color: COLORS.white, fontWeight: '600' },
-  dashBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 0.5, borderColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
-  followBtn: { paddingHorizontal: 20, paddingVertical: 8, backgroundColor: COLORS.gold, borderRadius: 20, marginRight: 8 },
-  followBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.black },
-  bellBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 0.5, borderColor: COLORS.gray3, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
-  fanbaseBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: COLORS.blue },
-  fanbaseBtnText: { fontSize: 12, color: COLORS.blue, fontWeight: '700', marginLeft: 4 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 },
-  name: { fontSize: 18, fontWeight: '900', color: COLORS.white, marginRight: 8 },
-  legBadge: { backgroundColor: COLORS.gold, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, marginRight: 5 },
-  legBadgeText: { fontSize: 8, fontWeight: '900', color: COLORS.black },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6 },
-  metaItem: { fontSize: 11, color: COLORS.gray, marginRight: 12, marginBottom: 2 },
-  bio: { fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 18, marginBottom: 8 },
-  stat: { backgroundColor: COLORS.card, borderRadius: 10, padding: 8, alignItems: 'center', borderWidth: 0.5, borderColor: COLORS.gray3, marginRight: 6, minWidth: 70 },
-  statNum: { fontSize: 15, fontWeight: '800', color: COLORS.white },
-  statLabel: { fontSize: 9, color: COLORS.gray, textTransform: 'uppercase', marginTop: 1 },
-  tabs: { backgroundColor: COLORS.black, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  container: { flex: 1, backgroundColor: '#080810' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 10, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
+  headerTitle: { fontSize: 16, fontWeight: '800', color: COLORS.white, letterSpacing: 0.5 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  banner: { width: '100%', height: BANNER_H + (Platform.OS === 'ios' ? 54 : 30), backgroundColor: '#0d0820', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  bannerBg: { fontSize: 80, fontWeight: '900', color: COLORS.gold, opacity: 0.04, letterSpacing: 10 },
+  infoSection: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 8, backgroundColor: '#080810' },
+  avatarRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 10, marginTop: -32 },
+  ownActions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 4 },
+  editBtn: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.06)' },
+  editBtnText: { fontSize: 13, color: COLORS.white, fontWeight: '700' },
+  dashBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(201,168,76,0.5)', backgroundColor: 'rgba(201,168,76,0.08)', alignItems: 'center', justifyContent: 'center' },
+  followBtn: { paddingHorizontal: 22, paddingVertical: 9, backgroundColor: COLORS.gold, borderRadius: 22 },
+  followBtnText: { fontSize: 13, fontWeight: '900', color: COLORS.black },
+  bellBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' },
+  fanbaseBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 22, borderWidth: 1, borderColor: COLORS.blue, backgroundColor: 'rgba(0,212,255,0.06)', gap: 5 },
+  fanbaseBtnText: { fontSize: 12, color: COLORS.blue, fontWeight: '800' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 5, gap: 6 },
+  name: { fontSize: 20, fontWeight: '900', color: COLORS.white, letterSpacing: 0.3 },
+  legBadge: { backgroundColor: COLORS.gold, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  legBadgeText: { fontSize: 9, fontWeight: '900', color: COLORS.black, letterSpacing: 0.5 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6, gap: 8 },
+  metaItem: { fontSize: 12, color: COLORS.gray },
+  bio: { fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 19, marginBottom: 12 },
+  stat: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)', marginRight: 8, minWidth: 72 },
+  statNum: { fontSize: 17, fontWeight: '900', color: COLORS.white },
+  statLabel: { fontSize: 9, color: COLORS.gray, textTransform: 'uppercase', marginTop: 2, letterSpacing: 0.5 },
+  tabs: { backgroundColor: '#080810', borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.06)' },
   tabsContent: { paddingHorizontal: 14 },
-  tabItem: { alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16 },
+  tabItem: { alignItems: 'center', paddingVertical: 13, paddingHorizontal: 16 },
   tabText: { fontSize: 12, color: COLORS.gray, fontWeight: '600' },
-  tabTextActive: { color: COLORS.gold, fontWeight: '700' },
-  tabIndicator: { height: 2, width: '80%', backgroundColor: COLORS.gold, borderRadius: 1, position: 'absolute', bottom: 0 },
+  tabTextActive: { color: COLORS.gold, fontWeight: '800' },
+  tabIndicator: { height: 2, width: '70%', backgroundColor: COLORS.gold, borderRadius: 1, position: 'absolute', bottom: 0 },
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
-  thumb: { width: THUMB_SIZE, height: THUMB_SIZE * 0.65, overflow: 'hidden', borderWidth: 0.5, borderColor: COLORS.black, position: 'relative' },
+  thumb: { width: THUMB_SIZE, height: THUMB_SIZE * 0.65, overflow: 'hidden', borderWidth: 0.5, borderColor: '#080810', position: 'relative', backgroundColor: '#111120' },
   thumbLegendary: { borderWidth: 1, borderColor: COLORS.gold },
-  thumbBg: { flex: 1, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center' },
-  thumbGG: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  thumbGGText: { fontSize: 8, color: COLORS.gold, fontWeight: '700' },
-  thumbViews: { position: 'absolute', bottom: 4, right: 4, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
+  thumbBg: { flex: 1, backgroundColor: '#111120', alignItems: 'center', justifyContent: 'center' },
+  thumbGG: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
+  thumbGGText: { fontSize: 8, color: COLORS.gold, fontWeight: '800' },
+  thumbViews: { position: 'absolute', bottom: 4, right: 4, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
   thumbViewsText: { fontSize: 8, color: COLORS.white, fontWeight: '700', marginLeft: 2 },
   emptyTab: { alignItems: 'center', paddingTop: 60, paddingBottom: 20, width: '100%' },
-  emptyTabText: { fontSize: 14, color: COLORS.gray, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 },
-  fanbaseJoinBtn: { marginTop: 12, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: COLORS.blue, borderRadius: 20 },
+  emptyTabText: { fontSize: 14, color: COLORS.gray, marginTop: 12, textAlign: 'center', paddingHorizontal: 40, lineHeight: 20 },
+  fanbaseJoinBtn: { marginTop: 12, paddingHorizontal: 24, paddingVertical: 13, backgroundColor: COLORS.blue, borderRadius: 22 },
   fanbaseJoinText: { fontSize: 14, color: COLORS.dark, fontWeight: '800' },
-  fanbaseHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
-  fanbaseHeaderTitle: { fontSize: 13, fontWeight: '700', color: COLORS.white },
-  manageBtn: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 10, borderWidth: 0.5, borderColor: COLORS.gold },
+  fanbaseHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 13, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  fanbaseHeaderTitle: { fontSize: 13, fontWeight: '800', color: COLORS.white },
+  manageBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 0.5, borderColor: COLORS.gold, backgroundColor: 'rgba(201,168,76,0.08)' },
   manageBtnText: { fontSize: 11, color: COLORS.gold, fontWeight: '700' },
   fanboxBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: 14, marginTop: 16, marginBottom: 8, backgroundColor: COLORS.red, borderRadius: 14, paddingVertical: 13 },
   fanboxBtnText: { fontSize: 14, fontWeight: '800', color: COLORS.white, marginLeft: 8 },
   infosSection: { padding: 14 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.06)' },
   infoText: { fontSize: 14, color: COLORS.white, marginLeft: 12 },
 });
 const hubS = StyleSheet.create({

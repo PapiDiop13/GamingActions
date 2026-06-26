@@ -6,7 +6,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, updateDoc, doc, increment } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import { getMuxThumbnailUrl, getMuxPlaybackUrl } from '../../config/mux';
@@ -14,6 +14,7 @@ import { db } from '../../config/firebase';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import ConsoleIcon from '../../components/ConsoleIcon';
 import { awardPoints, POINTS } from '../../utils/points';
+import { showAlert } from '../../store/useAlertStore';
 import { VIDEO_FRAMES, getVideoFrameById } from '../../constants/frames';
 import { setUploadState } from '../feed/FeedScreen';
 import { globalNavigate } from '../../utils/navigationRef';
@@ -25,18 +26,18 @@ const GREEN = '#00C853';
 import { GAMES } from '../../constants/games';
 
 const GENRES_WITH_GAMES = [
-  { id: 'all', label: 'All Games', icon: '🎮', games: GAMES.map(g => g.name) },
-  { id: 'fps', label: 'FPS', icon: '🎯', games: GAMES.filter(g => g.genre === 'fps').map(g => g.name) },
-  { id: 'sports', label: 'Sports', icon: '⚽', games: GAMES.filter(g => g.genre === 'sports').map(g => g.name) },
-  { id: 'battle_royale', label: 'Battle Royale', icon: '🏆', games: GAMES.filter(g => g.genre === 'battle_royale').map(g => g.name) },
-  { id: 'rpg', label: 'RPG', icon: '⚔️', games: GAMES.filter(g => g.genre === 'rpg').map(g => g.name) },
-  { id: 'action', label: 'Action', icon: '💥', games: GAMES.filter(g => g.genre === 'action').map(g => g.name) },
-  { id: 'adventure', label: 'Adventure', icon: '🗺️', games: GAMES.filter(g => g.genre === 'adventure').map(g => g.name) },
-  { id: 'moba', label: 'MOBA', icon: '🧙', games: GAMES.filter(g => g.genre === 'moba').map(g => g.name) },
-  { id: 'racing', label: 'Racing', icon: '🏎️', games: GAMES.filter(g => g.genre === 'racing').map(g => g.name) },
-  { id: 'fighting', label: 'Fighting', icon: '🥊', games: GAMES.filter(g => g.genre === 'fighting').map(g => g.name) },
-  { id: 'strategy', label: 'Strategy', icon: '♟️', games: GAMES.filter(g => g.genre === 'strategy').map(g => g.name) },
-  { id: 'other', label: 'Other', icon: '🎮', games: GAMES.filter(g => g.genre === 'other').map(g => g.name) },
+  { id: 'all',          label: 'All Games',    icon: '🎮', games: GAMES.map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'fps',          label: 'FPS',          icon: '🎯', games: GAMES.filter(g => g.genre === 'fps').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'sports',       label: 'Sports',       icon: '⚽', games: GAMES.filter(g => g.genre === 'sports').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'battle_royale',label: 'Battle Royale',icon: '🏆', games: GAMES.filter(g => g.genre === 'battle_royale').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'action',       label: 'Action / Adventure', icon: '💥', games: GAMES.filter(g => g.genre === 'action').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'rpg',          label: 'RPG',          icon: '⚔️', games: GAMES.filter(g => g.genre === 'rpg').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'fighting',     label: 'Fighting',     icon: '🥊', games: GAMES.filter(g => g.genre === 'fighting').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'moba',         label: 'MOBA / Strategy', icon: '🧙', games: GAMES.filter(g => g.genre === 'moba').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'racing',       label: 'Racing',       icon: '🏎️', games: GAMES.filter(g => g.genre === 'racing').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'horror',       label: 'Horror',       icon: '👻', games: GAMES.filter(g => g.genre === 'horror').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'simulation',   label: 'Simulation / Sandbox', icon: '🏗️', games: GAMES.filter(g => g.genre === 'simulation').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
+  { id: 'other',        label: 'Other',        icon: '🕹️', games: GAMES.filter(g => g.genre === 'other').map(g => g.name).sort((a, b) => a.localeCompare(b)) },
 ];
 
 const CONSOLES = [
@@ -142,7 +143,10 @@ export default function UploadScreen({ navigation, route }) {
   };
 
 
-  const WEEKLY_UPLOAD_LIMIT = 50;
+  // Upload limit: 20/week for free, unlimited for Legendary/Creator/Admin
+  const isCreator = userProfile?.accountType === 'creator' || userProfile?.accountType === 'gameconic';
+  const hasUnlimitedUploads = isLegendaryUser || isCreator;
+  const WEEKLY_UPLOAD_LIMIT = hasUnlimitedUploads ? Infinity : 20;
 
   const handlePublish = async () => {
     const game = showCustomGame ? customGame.trim() : selectedGame;
@@ -151,9 +155,8 @@ export default function UploadScreen({ navigation, route }) {
     if (!selectedConsole) return Alert.alert('Missing', 'Please select your console.');
     if (!videoUri) return Alert.alert('Missing', 'Please select a video.');
 
-    // ─── Limite : 50 uploads max par utilisateur sur une fenêtre glissante de 7 jours ───
-    // (filtrage côté client pour éviter d'imposer un index composite Firestore)
-    if (user?.uid) {
+    // ─── Limite hebdomadaire : 20 pour free, illimité pour Legendary/Creator ───
+    if (user?.uid && !hasUnlimitedUploads) {
       try {
         const snap = await getDocs(query(collection(db, 'videos'), where('userId', '==', user.uid)));
         const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -165,12 +168,16 @@ export default function UploadScreen({ navigation, route }) {
         if (recentCount >= WEEKLY_UPLOAD_LIMIT) {
           await logEvent(LOG_CONTEXT.UPLOAD_LIMIT, { recentCount }, user?.uid);
           return Alert.alert(
-            'Weekly limit reached',
-            `You can upload up to ${WEEKLY_UPLOAD_LIMIT} videos per week. You've hit the limit — please try again in a few days. 🎮`
+            '📊 Weekly limit reached',
+            'You can upload up to 20 videos per week on the free plan.\n\nUpgrade to Legendary for unlimited uploads! 🏆',
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Go Legendary ⭐', onPress: () => navigation.navigate('Subscription') },
+            ]
           );
         }
       } catch (e) {
-        // En cas d'échec du check, on laisse passer (on ne bloque pas l'utilisateur par erreur réseau)
+        // En cas d'échec du check, on laisse passer
       }
     }
 
@@ -267,32 +274,50 @@ export default function UploadScreen({ navigation, route }) {
         randomOrder: Date.now() + Math.floor(Math.random() * 100000),
       });
   
-      setUploadState({ isUploading: false, progress: 0 });
-      if (user?.uid) await awardPoints(user.uid, POINTS.POST_CLIP, 0, 'Posted a clip');
+      if (user?.uid) {
+        await awardPoints(user.uid, POINTS.POST_CLIP, 0, 'Posted a clip');
+        // Sync videoCount sur le profil (utilisé par Gift Cards)
+        updateDoc(doc(db, 'users', user.uid), { videoCount: increment(1) }).catch(() => {});
+      }
       await logEvent(LOG_CONTEXT.UPLOAD_SUCCESS, { contentType, game }, user?.uid);
 
-      // Store review — Apple gère la fréquence (max 3x/an), on demande à chaque upload
+      // Store review — uniquement sur le 1er clip (meilleur timing UX + Apple préfère)
+      // Apple gère la fréquence max (3x/an) mais on ne demande qu'au premier clip.
       try {
         const isAvailable = await StoreReview.isAvailableAsync();
-        if (isAvailable) await StoreReview.requestReview();
+        const currentCount = (userProfile?.videoCount || 0) + 1;
+        if (isAvailable && currentCount === 1) await StoreReview.requestReview();
       } catch (e) {}
 
-      // Pop le stack upload pour revenir à ContentType (tab bar visible)
-      try { navigation.popToTop(); } catch (e) {}
+      // Reset état upload
+      setUploading(false);
+      setUploadState({ isUploading: false, progress: 0 });
 
-      Alert.alert(
-        '✅ Published!',
-        'Your content is now live. +50 GA Points earned! 🎮',
-        [
-          { text: 'Go to Feed', onPress: () => { try { globalNavigate('Feed'); } catch(e) {} }},
-          { text: 'My Profile', onPress: () => { try { globalNavigate('Feed', { screen: 'UserProfile', params: { userId: user?.uid } }); } catch(e) {} }},
-        ]
-      );
-  
+      // 1. Quitter l'écran upload → retourner au Feed
+      try { navigation.popToTop(); } catch(e) {}
+      try { globalNavigate('Feed'); } catch(e) {}
+
+      // 2. Afficher l'alerte par-dessus le Feed (GAAlert est dans AppOverlays,
+      //    toujours monté indépendamment de la navigation)
+      setTimeout(() => {
+        showAlert({
+          title: '✅ Published!',
+          message: 'Your content is now live. +25 GA Points earned! 🎮',
+          type: 'success',
+          buttons: [
+            { text: 'OK 🎮', style: 'default' },
+            { text: 'My Profile', onPress: () => {
+              try { globalNavigate('Feed', { screen: 'UserProfile', params: { userId: user?.uid } }); } catch(e) {}
+            }},
+          ],
+        });
+      }, 300);
+
     } catch (e) {
       setUploadState({ isUploading: false, progress: 0 });
+      setUploading(false);
       await logError(LOG_CONTEXT.UPLOAD_FAIL, e, user?.uid);
-      Alert.alert('❌ Upload failed', 'Something went wrong. Please try again.');
+      showAlert({ title: '❌ Upload Failed', message: 'Something went wrong. Please try again.', type: 'danger' });
     } finally {
       setUploading(false);
     }

@@ -9,12 +9,26 @@ import { db } from '../../config/firebase';
 import useAuthStore from '../../store/useAuthStore';
 
 const NOTIF_CONFIG = {
-  gg:      { icon: 'star',            color: COLORS.gold,  label: '⭐ GG' },
-  follow:  { icon: 'person-add',      color: COLORS.blue,  label: 'Followers' },
-  comment: { icon: 'chatbubble',      color: COLORS.blue,  label: 'Comments' },
-  fanbase: { icon: 'lock-open',       color: '#00C853',    label: '🔒 Fanbase' },
-  ranking: { icon: 'trophy',          color: COLORS.gold,  label: 'Rankings' },
-  system:  { icon: 'game-controller', color: COLORS.gray,  label: 'System' },
+  gg:                  { icon: 'star',               color: COLORS.gold,   label: '⭐ GG' },
+  follow:              { icon: 'person-add',          color: COLORS.blue,   label: 'Followers' },
+  comment:             { icon: 'chatbubble',           color: COLORS.blue,   label: 'Comments' },
+  comment_like:        { icon: 'heart',               color: COLORS.red,    label: 'Likes' },
+  comment_reply:       { icon: 'chatbubble-ellipses', color: COLORS.blue,   label: 'Replies' },
+  reply:               { icon: 'chatbubble-ellipses', color: COLORS.blue,   label: 'Replies' },
+  mention:             { icon: 'at',                  color: '#7C4DFF',     label: 'Mentions' },
+  fanbase:             { icon: 'lock-open',            color: '#00C853',     label: '🔒 Fanbase' },
+  fanbase_join:        { icon: 'lock-open',            color: '#00C853',     label: '🔒 Fanbase' },
+  thanks:              { icon: 'thumbs-up',            color: COLORS.gold,   label: '👍 Thanks' },
+  ranking:             { icon: 'trophy',               color: COLORS.gold,   label: 'Rankings' },
+  announcement:        { icon: 'megaphone',            color: '#FF6B00',     label: '📣 News' },
+  system:              { icon: 'game-controller',      color: COLORS.gray,   label: 'System' },
+  leader_bonus:        { icon: 'crown',                color: COLORS.gold,   label: '👑 Crown Bonus' },
+  withdrawal_paid:     { icon: 'cash',                 color: '#00C853',     label: '💸 Withdrawal' },
+  withdrawal_rejected: { icon: 'close-circle',         color: COLORS.red,    label: 'Withdrawal' },
+  giftcard_sent:       { icon: 'gift',                 color: '#00C853',     label: '🎁 Gift Card' },
+  giftcard_rejected:   { icon: 'close-circle',         color: COLORS.red,    label: 'Gift Card' },
+  champion:            { icon: 'trophy',               color: COLORS.gold,   label: '👑 Champion' },
+  strike:              { icon: 'warning',              color: COLORS.red,    label: '⚠️ Strike' },
 };
 
 export default function NotificationsScreen({ navigation }) {
@@ -104,15 +118,18 @@ export default function NotificationsScreen({ navigation }) {
         style={[styles.notifRow, !item.read && styles.notifRowUnread]}
         onPress={async () => {
             markRead(item.id);
-            if ((item.type === 'gg' || item.type === 'comment' || item.type === 'comment_like' || item.type === 'comment_reply') && item.videoId) {
+            const videoTypes = ['gg', 'comment', 'comment_like', 'comment_reply', 'reply', 'mention', 'thanks'];
+            if (videoTypes.includes(item.type) && item.videoId) {
               try {
                 const videoSnap = await getDoc(doc(db, 'videos', item.videoId));
                 if (videoSnap.exists()) {
                   navigation.navigate('VideoPlayer', { video: { id: videoSnap.id, ...videoSnap.data() } });
                 }
               } catch (e) {}
-            } else if (item.type === 'follow' && item.fromUserId) {
+            } else if ((item.type === 'follow' || item.type === 'fanbase_join' || item.type === 'fanbase') && item.fromUserId) {
               navigation.navigate('UserProfile', { userId: item.fromUserId });
+            } else if (item.type === 'ranking' || item.type === 'champion' || item.type === 'leader_bonus') {
+              navigation.navigate('Rankings');
             }
           }}
         activeOpacity={0.85}

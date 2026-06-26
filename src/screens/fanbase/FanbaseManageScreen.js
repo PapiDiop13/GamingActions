@@ -55,6 +55,14 @@ export default function FanbaseManageScreen({ navigation }) {
         try {
           await deleteDoc(doc(db, 'fanbase_subscriptions', fan.id));
           await updateDoc(doc(db, 'users', user.uid), { fanbaseSubscribers: increment(-1) });
+          // Sync creator_earnings.subscriberCount
+          const earningsRef = doc(db, 'creator_earnings', user.uid);
+          const earningsSnap = await getDoc(earningsRef);
+          if (earningsSnap.exists()) {
+            await updateDoc(earningsRef, {
+              subscriberCount: Math.max(0, (earningsSnap.data()?.subscriberCount || 0) - 1),
+            });
+          }
           setFans(prev => prev.filter(f => f.id !== fan.id));
         } catch (e) { Alert.alert('Error', 'Something went wrong. Please try again.'); }
       }},

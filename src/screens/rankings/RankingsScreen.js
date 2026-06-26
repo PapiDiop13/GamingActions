@@ -16,6 +16,16 @@ import { ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
 
 const { width: SW } = Dimensions.get('window');
 
+// UIDs exemptés de l'exclusion — peuvent rester dans le classement même si creator/gameconic
+// Pour retirer quelqu'un, supprimer son UID de cette liste (pas besoin de maj app)
+const RANKING_EXEMPT_UIDS = [
+  // Ton UID — à retirer quand tu voudras t'exclure
+  // Trouve ton UID dans Firebase Console → Authentication → ton compte
+];
+
+// AccountTypes exclus du classement (trop influents)
+const EXCLUDED_ACCOUNT_TYPES = ['creator', 'gameconic'];
+
 // Enable LayoutAnimation on Android (iOS has it by default)
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -57,6 +67,82 @@ function TierBadge({ user }) {
   return (
     <View style={[s.tierBadge, { borderColor: tier.color + '70', backgroundColor: tier.color + '18' }]}>
       <Text style={[s.tierBadgeText, { color: tier.color }]}>{tier.label}</Text>
+    </View>
+  );
+}
+
+/* --------------------------------------------------------- Genre Leaderboard */
+// In-memory cache for genre leaderboards — avoids re-fetching on tab switch
+const GENRE_CACHE = {};
+const GENRE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function GenreLeaderboard({ genreId, navigation }) {
+  const [users, setUsers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      // Check cache first
+      const cached = GENRE_CACHE[genreId];
+      if (cached && Date.now() - cached.ts < GENRE_CACHE_TTL) {
+        if (!cancelled) { setUsers(cached.data); setLoading(false); }
+        return;
+      }
+      try {
+        // Get videos of this genre, aggregate by user
+        const snap = await getDocs(
+          query(collection(db, 'videos'),
+            where('genre', '==', genreId),
+            limit(200))
+        );
+        const userGGs = {};
+        snap.docs.forEach(d => {
+          const v = d.data();
+          if (!v.userId || !(v.ggCount > 0)) return;
+          if (!userGGs[v.userId]) userGGs[v.userId] = { uid: v.userId, username: v.username, avatar: v.avatar || '', ggCount: 0 };
+          userGGs[v.userId].ggCount += v.ggCount || 0;
+        });
+        const top3 = Object.values(userGGs)
+          .sort((a, b) => b.ggCount - a.ggCount)
+          .slice(0, 3)
+          .map((u, i) => ({ ...u, rank: i + 1 }));
+        // Store in cache
+        GENRE_CACHE[genreId] = { data: top3, ts: Date.now() };
+        if (!cancelled) { setUsers(top3); setLoading(false); }
+      } catch { if (!cancelled) setLoading(false); }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [genreId]);
+
+  if (loading) return <ActivityIndicator color={COLORS.gold} style={{ padding: 20 }} />;
+  if (users.length === 0) return (
+    <View style={{ padding: 16, alignItems: 'center' }}>
+      <Text style={{ color: COLORS.gray, fontSize: 12 }}>No clips in this genre yet — be the first! 🎮</Text>
+    </View>
+  );
+
+  const medals = ['🥇', '🥈', '🥉'];
+  const colors = [COLORS.gold, COLORS.silver, COLORS.bronze];
+
+  return (
+    <View>
+      {users.map((u, i) => (
+        <TouchableOpacity key={u.uid} onPress={() => navigation.navigate('UserProfile', { userId: u.uid })}
+          style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: i < users.length-1 ? 0.5 : 0, borderBottomColor: 'rgba(255,255,255,0.06)' }}>
+          <Text style={{ fontSize: 18, width: 32, textAlign: 'center' }}>{medals[i]}</Text>
+          <Avatar user={u} size={34} />
+          <Text style={{ flex: 1, color: COLORS.white, fontSize: 13, fontWeight: '700', marginLeft: 10 }} numberOfLines={1}>{u.username}</Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <Ionicons name="star" size={11} color={colors[i]} />
+              <Text style={{ color: colors[i], fontSize: 12, fontWeight: '900' }}>{fmtGG(u.ggCount)}</Text>
+            </View>
+            <Text style={{ color: COLORS.gray, fontSize: 9 }}>{[50,25,10][i]} pts/month</Text>
+          </View>
+        </TouchableOpacity>
+      ))}
     </View>
   );
 }
@@ -147,16 +233,16 @@ function HeroPodium({ data, navigation }) {
 }
 
 const pod = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: 12, paddingTop: 18, paddingBottom: 8 },
+  container: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: 8, paddingTop: 20, paddingBottom: 12, backgroundColor: 'rgba(201,168,76,0.03)', marginHorizontal: 0, borderBottomWidth: 0.5, borderBottomColor: 'rgba(201,168,76,0.15)' },
   spot: { flex: 1, alignItems: 'center' },
-  crown: { fontSize: 26, marginBottom: 2 },
-  medal: { fontSize: 20, marginBottom: 4 },
-  glow: { position: 'absolute', width: 96, height: 96, borderRadius: 48, backgroundColor: COLORS.gold },
-  name: { fontSize: 11, fontWeight: '800', color: COLORS.white, textAlign: 'center', marginTop: 6, maxWidth: '94%' },
-  ggChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 0.5, marginTop: 5, marginBottom: 8 },
-  ggChipText: { fontSize: 10, fontWeight: '800' },
-  pedestal: { width: '82%', borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  pedestalTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 4 },
+  crown: { fontSize: 30, marginBottom: 4 },
+  medal: { fontSize: 22, marginBottom: 6 },
+  glow: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: COLORS.gold },
+  name: { fontSize: 12, fontWeight: '900', color: COLORS.white, textAlign: 'center', marginTop: 7, maxWidth: '95%', letterSpacing: 0.3 },
+  ggChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginTop: 6, marginBottom: 10 },
+  ggChipText: { fontSize: 11, fontWeight: '900', letterSpacing: 0.3 },
+  pedestal: { width: '85%', borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  pedestalTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 5 },
   pedestalNum: { fontWeight: '900' },
 });
 
@@ -237,7 +323,11 @@ function PlayerRow({ user, maxGG, navigation }) {
   });
 
   return (
-    <Animated.View style={{ transform: [{ translateY: slideAnim }], backgroundColor: glowBg, borderRadius: 12 }}>
+    // Deux Animated.View imbriquées — obligatoire car on ne peut pas mélanger
+    // useNativeDriver: true (transform/slide) et false (backgroundColor/glow)
+    // sur le même nœud natif.
+    <Animated.View style={{ backgroundColor: glowBg, borderRadius: 12 }}>
+    <Animated.View style={{ transform: [{ translateY: slideAnim }] }}>
     <TouchableOpacity onPress={() => navigation.navigate('UserProfile', { userId: user.uid })} style={s.pRow} activeOpacity={0.85}>
       <Text style={[s.pRank, { color: tier.color }]}>{user.rank}</Text>
       <Avatar user={user} size={38} />
@@ -257,6 +347,7 @@ function PlayerRow({ user, maxGG, navigation }) {
         <Text style={s.pGGLabel}>GG</Text>
       </View>
     </TouchableOpacity>
+    </Animated.View>
     </Animated.View>
   );
 }
@@ -307,12 +398,13 @@ export default function RankingsScreen({ navigation }) {
     return () => clearInterval(timer);
   }, []);
 
-  // ── Real-time leaderboard ──────────────────────────────────────────────────
-  // Listen to ALL videos live. Whenever a GG changes (ggCount updates), the
-  // leaderboard recomputes and re-renders automatically — no refresh needed.
+  // ── Leaderboard listener ──────────────────────────────────────────────────
+  // Top GG tab: always real-time — seeing someone overtake you live creates
+  // urgency to post and reclaim your rank. That's the whole point.
+  // Limited to top 500 by ggCount to avoid reading all videos.
   useEffect(() => {
     const unsub = onSnapshot(
-      collection(db, 'videos'),
+      query(collection(db, 'videos'), orderBy('ggCount', 'desc'), limit(500)),
       (snap) => {
         const allVideos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         processRankings(allVideos);
@@ -350,7 +442,7 @@ export default function RankingsScreen({ navigation }) {
 
       const usersList = Object.values(userGGs)
         .sort((a, b) => b.ggCount - a.ggCount)
-        .slice(0, 10)
+        .slice(0, 20)
         .map((u, i) => ({ ...u, rank: i + 1 }));
 
       // Enrichit avec les vrais profils (avatar, plan, tier)
@@ -360,7 +452,7 @@ export default function RankingsScreen({ navigation }) {
             const snap = await getDoc(doc(db, 'users', u.uid));
             if (snap.exists()) {
               const p = snap.data();
-              return { ...u, avatar: p.avatar || '', plan: p.plan || u.plan, username: p.username || u.username, streakLevel: p.streakLevel || u.streakLevel };
+              return { ...u, avatar: p.avatar || '', plan: p.plan || u.plan, username: p.username || u.username, streakLevel: p.streakLevel || u.streakLevel, accountType: p.accountType || 'gamer', isChampion: p.isChampion || false, equippedFrame: p.equippedFrame || 'none' };
             }
           } catch (e) {}
           return u;
@@ -373,7 +465,23 @@ export default function RankingsScreen({ navigation }) {
           400, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity
         ));
       }
-      setTopUsers(enrichedUsers);
+      // Exclure creators/gameconic du classement (sauf UIDs exemptés)
+      const filteredUsers = enrichedUsers.filter(u =>
+        RANKING_EXEMPT_UIDS.includes(u.uid) ||
+        !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType)
+      ).slice(0, 10).map((u, i) => ({ ...u, rank: i + 1 }));
+
+      setTopUsers(filteredUsers);
+
+      // Remove isCurrentLeader badge from excluded users
+      const excludedWithLeader = enrichedUsers.filter(u =>
+        u.isCurrentLeader &&
+        EXCLUDED_ACCOUNT_TYPES.includes(u.accountType) &&
+        !RANKING_EXEMPT_UIDS.includes(u.uid)
+      );
+      for (const u of excludedWithLeader) {
+        try { await updateDoc(doc(db, 'users', u.uid), { isCurrentLeader: false }); } catch {}
+      }
 
       // Mon rang
       if (user?.uid) {
@@ -388,8 +496,13 @@ export default function RankingsScreen({ navigation }) {
         // The true #1 (most GG) should be the ONLY one with isCurrentLeader.
         // Guarded by a ref so we only write when the leader actually changes,
         // not on every snapshot (avoids unnecessary Firestore writes).
-        const trueLeaderId = sorted[0]?.uid;
-        const trueLeaderGG = sorted[0]?.ggCount || 0;
+        // Only consider non-excluded users for leader badge
+        const rankedSorted = sorted.filter(u =>
+          RANKING_EXEMPT_UIDS.includes(u.uid) ||
+          !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType)
+        );
+        const trueLeaderId = rankedSorted[0]?.uid;
+        const trueLeaderGG = rankedSorted[0]?.ggCount || 0;
         if (trueLeaderId && trueLeaderGG > 0 && lastLeaderRef.current !== trueLeaderId) {
           lastLeaderRef.current = trueLeaderId;
           try {
@@ -433,10 +546,25 @@ export default function RankingsScreen({ navigation }) {
   const maxGG = topUsers[0]?.ggCount || 1;
 
   const TABS = [
-    { id: 'topgg', label: 'Top GG', icon: 'star' },
+    { id: 'topgg',    label: 'Top GG',    icon: 'star' },
     { id: 'topvideo', label: 'Top Video', icon: 'videocam' },
-    { id: 'videoday', label: 'Du jour', icon: 'sunny' },
-    { id: 'history', label: 'History', icon: 'time' },
+    { id: 'bygenre',  label: 'By Genre',  icon: 'grid' },
+    { id: 'videoday', label: 'Of the Day',icon: 'sunny' },
+    { id: 'history',  label: 'History',   icon: 'time' },
+  ];
+
+  const GENRE_LIST = [
+    { id: 'fps',          label: 'FPS 🎯',              reward: 50 },
+    { id: 'sports',       label: 'Sports ⚽',           reward: 50 },
+    { id: 'battle_royale',label: 'Battle Royale 🏆',    reward: 50 },
+    { id: 'action',       label: 'Action / Adventure 💥',reward: 50 },
+    { id: 'rpg',          label: 'RPG ⚔️',              reward: 50 },
+    { id: 'fighting',     label: 'Fighting 🥊',         reward: 50 },
+    { id: 'moba',         label: 'MOBA / Strategy 🧙',  reward: 50 },
+    { id: 'racing',       label: 'Racing 🏎️',           reward: 50 },
+    { id: 'horror',       label: 'Horror 👻',           reward: 50 },
+    { id: 'simulation',   label: 'Simulation 🏗️',       reward: 50 },
+    { id: 'other',        label: 'Other 🕹️',            reward: 50 },
   ];
 
   const MOCK_HISTORY = []; // Coming soon — will be populated by Cloud Functions
@@ -445,10 +573,23 @@ export default function RankingsScreen({ navigation }) {
     <View style={s.container}>
       <StatusBar style="light" />
 
+      {/* Starfield background */}
+      <View style={s.starfield} pointerEvents="none">
+        {Array.from({length: 20}).map((_, i) => (
+          <View key={i} style={[s.star, {
+            top: `${5 + (i * 37) % 80}%`,
+            left: `${(i * 53) % 95}%`,
+            opacity: 0.15 + (i % 4) * 0.1,
+            width: i % 3 === 0 ? 3 : 2,
+            height: i % 3 === 0 ? 3 : 2,
+          }]} />
+        ))}
+      </View>
+
       {/* Header */}
       <View style={s.header}>
         <View>
-          <Text style={s.headerTitle}>RANKINGS</Text>
+          <Text style={s.headerTitle}>🏆 RANKINGS</Text>
           <Text style={s.headerSub}>{now2.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
         </View>
         <TouchableOpacity onPress={() => navigation.navigate('Countdown')} style={[s.timerChip, isLastDay && { borderColor: COLORS.red, backgroundColor: COLORS.redDim }]} activeOpacity={0.85}>
@@ -482,16 +623,44 @@ export default function RankingsScreen({ navigation }) {
             ) : (
               <>
                 {/* Bandeau enjeu */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 8, gap: 6 }}>
+                  <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF3B30' }} />
+                  <Text style={{ fontSize: 11, color: COLORS.gray, fontWeight: '600' }}>LIVE — updates in real time</Text>
+                </View>
                 <View style={s.prizeBanner}>
-                  <Ionicons name="trophy" size={14} color={COLORS.gold} />
-                  <Text style={s.prizeText}>  Reach <Text style={{ color: COLORS.gold, fontWeight: '800' }}>Top 3</Text> and wins the Champion of the Month crown</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                    <Ionicons name="trophy" size={16} color={COLORS.gold} />
+                    <Text style={[s.prizeText, { color: COLORS.gold, fontWeight: '900', fontSize: 13, marginLeft: 6 }]}>Monthly Rewards</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                    {[
+                      { rank: '#1', reward: '👑 Champion frame + 500 pts + shoutout', color: COLORS.gold },
+                      { rank: '#2', reward: '🥈 Silver Elite + 300 pts', color: COLORS.silver },
+                      { rank: '#3', reward: '🥉 Bronze Elite + 200 pts', color: COLORS.bronze },
+                      { rank: 'Top 9',  reward: '⭐ 100 GA Points bonus', color: COLORS.gray },
+                    ].map((r, i) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ color: r.color, fontSize: 11, fontWeight: '800' }}>{r.rank}</Text>
+                        <Text style={{ color: COLORS.gray, fontSize: 10 }}>{r.reward}</Text>
+                      </View>
+                    ))}
+                  </View>
                 </View>
 
                 <HeroPodium data={topUsers} navigation={navigation} />
 
-                <YourRankCard myRank={myRank} userProfile={userProfile} topUsers={topUsers} />
+                {/* Hide rank card if user is excluded from rankings */}
+                {!EXCLUDED_ACCOUNT_TYPES.includes(userProfile?.accountType) && (
+                  <YourRankCard myRank={myRank} userProfile={userProfile} topUsers={topUsers} />
+                )}
 
-                {topUsers.length > 3 && <Text style={s.listLabel}>CHALLENGERS</Text>}
+                {topUsers.length > 3 && (
+                  <View style={s.challengersHeader}>
+                    <View style={s.challengersDivider} />
+                    <Text style={s.listLabel}>⚡ CHALLENGERS</Text>
+                    <View style={s.challengersDivider} />
+                  </View>
+                )}
                 {topUsers.slice(3).map((u) => (
                   <PlayerRow key={u.uid} user={u} maxGG={maxGG} navigation={navigation} />
                 ))}
@@ -503,7 +672,7 @@ export default function RankingsScreen({ navigation }) {
         {/* ───────────── TOP VIDEO ───────────── */}
         {activeTab === 'topvideo' && (
           <>
-            <Text style={s.sectionNote}>🏆 Top 5 most GG-ed clips of all time</Text>
+            <Text style={s.sectionNote}>🏆 Top 5 most GG-ed clips of all time · Updates every 5 min</Text>
             {topVideos.length === 0 ? (
               <Text style={s.empty}>No video yet🎮</Text>
             ) : (
@@ -512,14 +681,48 @@ export default function RankingsScreen({ navigation }) {
           </>
         )}
 
+        {/* ───────────── BY GENRE ───────────── */}
+        {activeTab === 'bygenre' && (
+          <View style={{ paddingBottom: 20 }}>
+            <View style={{ marginHorizontal: 14, marginBottom: 12, padding: 14, backgroundColor: 'rgba(201,168,76,0.06)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(201,168,76,0.2)' }}>
+              <Text style={{ color: COLORS.gold, fontSize: 13, fontWeight: '800', marginBottom: 4 }}>🏅 Genre Rankings</Text>
+              <Text style={{ color: COLORS.gray, fontSize: 11, lineHeight: 17 }}>
+                {'Top 3 players per genre receive GA Points at end of month. Every genre gives smaller creators a chance to shine!'}
+              </Text>
+            </View>
+            {GENRE_LIST.map(genre => {
+              // Get top 3 for this genre from topUsers (approximate — uses all videos)
+              const genreUsers = Object.values(
+                topUsers.reduce((acc, u) => {
+                  // We don't have per-genre breakdown in topUsers — show general top with genre label
+                  return acc;
+                }, {})
+              );
+              // Get videos for this genre
+              return (
+                <View key={genre.id} style={{ marginHorizontal: 14, marginBottom: 16, backgroundColor: COLORS.card, borderRadius: 14, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.06)' }}>
+                    <Text style={{ color: COLORS.white, fontSize: 13, fontWeight: '800' }}>{genre.label}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(201,168,76,0.1)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 }}>
+                      <Ionicons name="star" size={10} color={COLORS.gold} />
+                      <Text style={{ color: COLORS.gold, fontSize: 10, fontWeight: '800' }}>#1: 50pts · #2: 25pts · #3: 10pts</Text>
+                    </View>
+                  </View>
+                  <GenreLeaderboard genreId={genre.id} navigation={navigation} />
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* ───────────── VIDEO OF DAY ───────────── */}
         {activeTab === 'videoday' && (
           <>
             <Text style={s.sectionNote}>
-              {videosOfDay.length > 0 ? '🌟 Clips uploaded in the last 24 hours' : '🌟 Most recent clips'}
+              {videosOfDay.length > 0 ? '🌟 Clip of the Day — best of the last 24h · Updates every 5 min' : '🌟 Clip of the Day'}
             </Text>
             {videosOfDay.length === 0 ? (
-              <Text style={s.empty}>No clips in the last 24 hours🎮</Text>
+              <Text style={s.empty}>No clips uploaded today yet — be the first! 🎮</Text>
             ) : (
               videosOfDay.map((v) => <VideoRow key={v.id} v={v} rank={v.rank} highlight={v.rank === 1} navigation={navigation} />)
             )}
@@ -541,50 +744,54 @@ export default function RankingsScreen({ navigation }) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.black },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 12 },
-  headerTitle: { fontSize: 26, fontWeight: '900', color: COLORS.white, letterSpacing: 1 },
-  headerSub: { fontSize: 12, color: COLORS.gray, marginTop: 2 },
-  timerChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.goldBorder },
-  timerText: { fontSize: 12, fontWeight: '800', color: COLORS.gold },
+  container: { flex: 1, backgroundColor: '#080810' },
+  starfield: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  star: { position: 'absolute', borderRadius: 2, backgroundColor: '#FFFFFF' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: 'rgba(201,168,76,0.2)' },
+  headerTitle: { fontSize: 24, fontWeight: '900', color: COLORS.white, letterSpacing: 2 },
+  headerSub: { fontSize: 11, color: COLORS.gray, marginTop: 2, letterSpacing: 0.5 },
+  timerChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(201,168,76,0.1)', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(201,168,76,0.4)' },
+  timerText: { fontSize: 13, fontWeight: '900', color: COLORS.gold, letterSpacing: 1 },
 
-  tabsRow: { paddingHorizontal: 14, paddingBottom: 12 },
-  tab: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 13, paddingVertical: 7, borderRadius: 20, backgroundColor: COLORS.card, borderWidth: 0.5, borderColor: COLORS.gray3, marginRight: 8, height: 34 },
+  tabsRow: { paddingHorizontal: 14, paddingBottom: 14, paddingTop: 4 },
+  tab: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', marginRight: 8, height: 36 },
   tabActive: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
   tabText: { fontSize: 11, color: COLORS.gray, fontWeight: '700' },
   tabTextActive: { color: COLORS.black, fontWeight: '900' },
 
-  empty: { color: COLORS.gray, textAlign: 'center', marginTop: 50, paddingHorizontal: 40, lineHeight: 20 },
-  sectionNote: { fontSize: 12, color: COLORS.gray, paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 },
+  empty: { color: COLORS.gray, textAlign: 'center', marginTop: 60, paddingHorizontal: 40, lineHeight: 22, fontSize: 14 },
+  sectionNote: { fontSize: 12, color: COLORS.gray, paddingHorizontal: 16, paddingBottom: 10, paddingTop: 6, letterSpacing: 0.3 },
 
-  prizeBanner: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 4, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: COLORS.goldGlow, borderWidth: 0.5, borderColor: COLORS.goldBorder },
-  prizeText: { fontSize: 11.5, color: COLORS.gray, flex: 1, lineHeight: 16 },
+  prizeBanner: { marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 16, backgroundColor: 'rgba(201,168,76,0.06)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)' },
+  prizeText: { fontSize: 11.5, color: COLORS.gray, lineHeight: 17 },
 
   /* Your rank */
-  youCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 14, marginBottom: 6, padding: 12, borderRadius: 16, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.goldBorder },
-  youRankBox: { flexDirection: 'row', alignItems: 'baseline', marginRight: 10 },
-  youRankHash: { fontSize: 12, fontWeight: '900', color: COLORS.gold },
-  youRankNum: { fontSize: 26, fontWeight: '900', color: COLORS.gold },
+  youCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 14, marginBottom: 8, padding: 14, borderRadius: 18, backgroundColor: 'rgba(201,168,76,0.08)', borderWidth: 1.5, borderColor: 'rgba(201,168,76,0.4)' },
+  youRankBox: { flexDirection: 'row', alignItems: 'baseline', marginRight: 12 },
+  youRankHash: { fontSize: 14, fontWeight: '900', color: COLORS.gold },
+  youRankNum: { fontSize: 30, fontWeight: '900', color: COLORS.gold },
   youTitle: { fontSize: 14, fontWeight: '800', color: COLORS.white },
-  youName: { fontSize: 13, fontWeight: '900', color: COLORS.gold, letterSpacing: 0.3 },
-  youSub: { fontSize: 11.5, color: COLORS.gray, marginTop: 3, lineHeight: 16 },
-  youGG: { fontSize: 20, fontWeight: '900', color: COLORS.white },
-  youGGLabel: { fontSize: 9, fontWeight: '800', color: COLORS.gold, letterSpacing: 1, marginTop: -2 },
+  youName: { fontSize: 13, fontWeight: '900', color: COLORS.gold, letterSpacing: 0.5 },
+  youSub: { fontSize: 12, color: COLORS.gray, marginTop: 4, lineHeight: 17 },
+  youGG: { fontSize: 22, fontWeight: '900', color: COLORS.white },
+  youGGLabel: { fontSize: 9, fontWeight: '800', color: COLORS.gold, letterSpacing: 1.5 },
 
-  listLabel: { fontSize: 10, fontWeight: '900', color: COLORS.gray, letterSpacing: 2, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6 },
+  challengersHeader: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 16, marginBottom: 6, gap: 10 },
+  challengersDivider: { flex: 1, height: 0.5, backgroundColor: 'rgba(255,255,255,0.1)' },
+  listLabel: { fontSize: 10, fontWeight: '900', color: COLORS.gray, letterSpacing: 3 },
 
   /* Player row */
-  pRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
-  pRank: { fontSize: 15, fontWeight: '900', width: 28, textAlign: 'center', marginRight: 8 },
-  pName: { fontSize: 13.5, color: COLORS.white, fontWeight: '700', maxWidth: 130 },
-  powerTrack: { height: 5, borderRadius: 3, backgroundColor: COLORS.gray3, overflow: 'hidden', marginRight: 8 },
-  powerFill: { height: '100%', borderRadius: 3 },
-  pGG: { fontSize: 15, fontWeight: '900', color: COLORS.gold },
-  pGGLabel: { fontSize: 8, fontWeight: '800', color: COLORS.gray, letterSpacing: 1 },
+  pRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  pRank: { fontSize: 16, fontWeight: '900', width: 32, textAlign: 'center', marginRight: 10 },
+  pName: { fontSize: 14, color: COLORS.white, fontWeight: '700', maxWidth: 130 },
+  powerTrack: { height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginRight: 8 },
+  powerFill: { height: '100%', borderRadius: 2 },
+  pGG: { fontSize: 16, fontWeight: '900', color: COLORS.gold },
+  pGGLabel: { fontSize: 8, fontWeight: '800', color: COLORS.gray, letterSpacing: 1.5 },
 
-  tierBadge: { paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4, borderWidth: 0.5, marginLeft: 6 },
+  tierBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, borderWidth: 0.5, marginLeft: 6 },
   tierBadgeText: { fontSize: 7.5, fontWeight: '900', letterSpacing: 0.5 },
-  legBadge: { backgroundColor: COLORS.gold, paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4, marginLeft: 5 },
+  legBadge: { backgroundColor: COLORS.gold, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, marginLeft: 5 },
   legBadgeText: { fontSize: 7.5, fontWeight: '900', color: COLORS.black },
 
   /* Video row */

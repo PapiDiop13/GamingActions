@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 
 const FAQ = [
-  { q: 'How do GA Points work?', a: 'You earn GA Points through activity: posting clips (+50), receiving GGs (+2), gaining followers (+5), daily login (+10), and more. Use them in the Shop or to unlock Legendary.' },
+  { q: 'How do GA Points work?', a: 'You earn GA Points through activity: posting clips (+25), receiving GGs (+2), gaining followers (+1), daily login bonus, and more. Use them in the Shop or to unlock Legendary.' },
   { q: 'What is Legendary plan?', a: 'Legendary gives you a gold frame on your clips, priority in the feed, access to exclusive badges, and more visibility. It\'s $2.99/month or 15,000 GA Points.' },
   { q: 'What is a Fanbase?', a: 'Fanbase is an exclusive subscription for $4.99/month per creator. As a subscriber you get access to exclusive clips, private tips, FanBox group chat, and more.' },
   { q: 'What is a GAMECONIC?', a: 'GAMECONICs are elite creators invited by Gaming Actions. They have a red badge and special privileges in the app. You cannot apply — they are selected by the team.' },

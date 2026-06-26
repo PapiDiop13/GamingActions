@@ -6,7 +6,6 @@ import {
   increment, limit, startAfter,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { awardPoints, POINTS } from '../utils/points';
 import { findBannedWords, censorText, logModeration } from '../utils/moderation';
 import { logEvent, logError, LOG_CONTEXT } from '../utils/errorLogger';
 import { loadPrefs, sortFeedByPrefs, recordView } from '../utils/feedAlgo';
@@ -250,53 +249,49 @@ const useFeedStore = create((set, get) => ({
     }
   },
 
-  toggleGG: async (videoId, userId) => {
+  toggleGG: async (videoId, userId, videoData = null) => {
     if (!userId) return;
     const { videos } = get();
-    const video = videos.find(v => v.id === videoId);
-    if (!video) return;
-    if (video.userId === userId) return;
+    // Ensure the video is in the store first (add it if it came from the feed only)
+    let storeVideo = videos.find(v => v.id === videoId);
+    if (!storeVideo && videoData) {
+      storeVideo = { ...videoData };
+      set((state) => ({ videos: [...state.videos, storeVideo] }));
+    }
+    if (!storeVideo) return;
+    if (storeVideo.userId === userId) return;
 
     const ggId = `${userId}_${videoId}`;
     const ggRef = doc(db, 'ggs', ggId);
-    const newHasGG = !video.hasGG;
+    // ALWAYS read current state from the store (not from stale videoData closure)
+    const current = get().videos.find(v => v.id === videoId);
+    const newHasGG = !current.hasGG;
     const newCount = newHasGG
-      ? (video.ggCount || 0) + 1
-      : Math.max(0, (video.ggCount || 0) - 1);
+      ? (current.ggCount || 0) + 1
+      : Math.max(0, (current.ggCount || 0) - 1);
 
+    // Optimistic update in store
     set((state) => ({
-      videos: state.videos.map((v) =>
-        v.id === videoId ? { ...v, hasGG: newHasGG, ggCount: newCount } : v
-      ),
+      videos: state.videos.map((v) => v.id === videoId ? { ...v, hasGG: newHasGG, ggCount: newCount } : v),
     }));
 
     try {
       if (newHasGG) {
+        // On écrit UNIQUEMENT le doc ggs. Le trigger serveur onGGWritten
+        // recompte ggCount, ggReceived, gaPoints, streakPoints, streakLevel,
+        // crée la notif in-app et envoie le push. Aucune écriture concurrente
+        // sur users/{creatorId} ici → plus de failed-precondition.
         await setDoc(ggRef, { userId, videoId, createdAt: serverTimestamp() });
-        await updateDoc(doc(db, 'videos', videoId), { ggCount: newCount });
-        await awardPoints(video.userId, POINTS.RECEIVE_GG, 1, 'Received a GG');
-        await logEvent(LOG_CONTEXT.GG_VOTE, { videoId, targetUserId: video.userId }, userId);
-        await addDoc(collection(db, 'notifications'), {
-          userId: video.userId,
-          type: 'gg',
-          fromUserId: userId,
-          fromUsername: get().userProfiles[userId]?.username || 'Someone',
-          text: 'gave you a GG on your clip ⭐',
-          videoId,
-          read: false,
-          createdAt: serverTimestamp(),
-        });
+        await logEvent(LOG_CONTEXT.GG_VOTE, { videoId, targetUserId: storeVideo.userId }, userId);
       } else {
         await deleteDoc(ggRef);
-        await updateDoc(doc(db, 'videos', videoId), { ggCount: newCount });
-        await awardPoints(video.userId, -POINTS.RECEIVE_GG, -1, 'GG removed');
       }
     } catch (e) {
       await logError(LOG_CONTEXT.GG_VOTE_FAIL, e, userId);
       console.log('toggleGG error:', e.message);
       set((state) => ({
         videos: state.videos.map((v) =>
-          v.id === videoId ? { ...v, hasGG: !newHasGG, ggCount: video.ggCount } : v
+          v.id === videoId ? { ...v, hasGG: !newHasGG, ggCount: storeVideo.ggCount } : v
         ),
       }));
     }
@@ -319,24 +314,12 @@ const useFeedStore = create((set, get) => ({
 
     try {
       if (newHasGG) {
+        // Voir toggleGG : on écrit UNIQUEMENT le doc ggs. Le serveur fait le reste.
         await setDoc(ggRef, { userId, videoId, createdAt: serverTimestamp() });
-        await updateDoc(doc(db, 'videos', videoId), { ggCount: newCount });
-        if (videoOwnerId) {
-          await awardPoints(videoOwnerId, POINTS.RECEIVE_GG, 1, 'Received a GG');
-          await addDoc(collection(db, 'notifications'), {
-            userId: videoOwnerId, type: 'gg',
-            fromUserId: userId,
-            fromUsername: get().userProfiles[userId]?.username || 'Someone',
-            text: 'gave you a GG on your clip ⭐',
-            videoId, read: false, createdAt: serverTimestamp(),
-          });
-        }
       } else {
         await deleteDoc(ggRef);
-        await updateDoc(doc(db, 'videos', videoId), { ggCount: newCount });
-        if (videoOwnerId) await awardPoints(videoOwnerId, -POINTS.RECEIVE_GG, -1, 'GG removed');
       }
-      // Also update the feed store if the video happens to be there too
+      // Met à jour le feed store si la vidéo s'y trouve aussi (optimistic UI)
       set((state) => ({
         videos: state.videos.map((v) =>
           v.id === videoId ? { ...v, hasGG: newHasGG, ggCount: newCount } : v

@@ -53,9 +53,9 @@ const useAuthStore = create((set, get) => ({
             }
             // Patch missing fields for migrated users — ensures gaPoints, streakLevel etc.
             // are always present without requiring a full re-registration.
-            const needsPatch = profile.gaPoints === undefined
+            const needsPatch = profile.gaPoints     === undefined
               || profile.streakPoints === undefined
-              || profile.streakLevel === undefined;
+              || profile.streakLevel  === undefined;
             if (needsPatch) {
               const patch = {};
               if (profile.gaPoints     === undefined) patch.gaPoints     = 0;
@@ -70,7 +70,7 @@ const useAuthStore = create((set, get) => ({
                 });
               });
             }
-            set({ user: firebaseUser, userProfile: { ...profile, ...(!profile.gaPoints && { gaPoints: profile.gaPoints ?? 0 }), streakLevel: profile.streakLevel ?? 'noob', streakPoints: profile.streakPoints ?? 0 }, isAuthenticated: true, isLoading: false });
+            set({ user: firebaseUser, userProfile: { ...profile, gaPoints: profile.gaPoints ?? 0, streakLevel: profile.streakLevel ?? 'noob', streakPoints: profile.streakPoints ?? 0, ggReceived: profile.ggReceived ?? 0 }, isAuthenticated: true, isLoading: false });
           } else {
             set({ user: firebaseUser, userProfile: null, isAuthenticated: true, isLoading: false });
           }

@@ -118,9 +118,9 @@ export async function awardPoints(userId, deltaPts, deltaGG = 0, reason = '', ex
 // ─── Point values for each user action ───────────────────────────────────────
 // Kept in one place so balance adjustments only require changing this object.
 export const POINTS = {
-  POST_CLIP:    50,  // Reward for contributing content to the platform
+  POST_CLIP:    25,  // Reward for contributing content to the platform
   RECEIVE_GG:    2,  // Small reward per GG vote received
   NEW_FOLLOWER:  1,  // Reduced from 5 → 1 to reduce farming incentive
-  DELETE_CLIP:  -50, // Debit mirrors POST_CLIP credit (anti-cheat)
+  DELETE_CLIP:  -25, // Debit mirrors POST_CLIP exactly (anti-cheat symmetry)
   DAILY_LOGIN:  null, // Dynamic — use getDailyBonus(streakLevel) instead
 };

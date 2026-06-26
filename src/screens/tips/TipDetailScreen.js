@@ -372,8 +372,12 @@ export default function TipDetailScreen({ navigation, route }) {
         createdAt: serverTimestamp(),
       });
 
-      // Met à jour le profil local
-      await saveProfile({ gaPoints: currentPoints - THANKS_COST });
+      // Met à jour le profil local (sans ré-écrire Firestore — increment déjà fait)
+      useAuthStore.setState(state => ({
+        userProfile: state.userProfile
+          ? { ...state.userProfile, gaPoints: Math.max(0, (state.userProfile.gaPoints || 0) - THANKS_COST) }
+          : state.userProfile,
+      }));
 
       setThanksCount(prev => prev + 1);
     } catch (e) {

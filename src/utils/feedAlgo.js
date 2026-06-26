@@ -11,8 +11,8 @@
  * This prevents the tunnel effect (only seeing FIFA forever) and keeps discovery alive.
  *
  * ── Scoring model ─────────────────────────────────────────────────────────────
- *   score = genre_score × 3      (strongest signal — genre taste is stable)
- *         + game_score  × 2      (specific game preference)
+ *   score = genre_score × 4      (dominant signal — genre taste is stable)
+ *         + game_score  × 1      (specific game preference, reduced weight)
  *         + gg_boost    × 1      (log-scaled quality signal)
  *         + recency     × 0.5    (slight freshness bias for last 7 days)
  *         + noise       ± 0.15   (small randomization — same prefs ≠ identical order)
@@ -25,9 +25,14 @@
  * ── Storage ───────────────────────────────────────────────────────────────────
  * AsyncStorage key: "ga_feed_prefs"
  * Structure: {
- *   genres: { [genreId]: viewCount },   // e.g. { sport: 10, fps: 3 }
- *   games:  { [gameName]: viewCount },  // e.g. { 'FIFA 24': 8, 'GTA V': 3 }
+ *   recentViews: [{ genre, game, ts }],  // rolling window of last 10 views (5s+)
+ *   genres: { [genreId]: viewCount },    // rebuilt from recentViews on each update
+ *   games:  { [gameName]: viewCount },   // rebuilt from recentViews on each update
  * }
+ *
+ * Using a rolling window means: watch 5 FIFA clips (Sport), then 3 NBA clips →
+ * genre counts shift toward Sport/Basketball immediately. The feed adapts in real time.
+ * After 10 new views of a different genre, the old preference is completely gone.
  *
  * ── Local vs Cloud ────────────────────────────────────────────────────────────
  * Local (current):  instant, free, per-device, no Firestore cost
@@ -48,7 +53,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PREFS_KEY       = 'ga_feed_prefs';
 const WILDCARD_RATIO  = 0.2;  // 20% of feed = wild cards (2 in 10)
-const MIN_VIEWS_TO_SCORE = 2; // Need at least 2 views before algo kicks in
+const MIN_VIEWS_TO_SCORE = 3; // Need at least 3 views in window before scoring
 
 // ─── Empty preference model ───────────────────────────────────────────────────
 const emptyPrefs = () => ({ genres: {}, games: {} });
@@ -74,16 +79,35 @@ export async function loadPrefs() {
  *
  * @param {object} video - video object from Firestore { genre, game }
  */
+// Max recent views to consider — keeps the model fresh and responsive
+const MAX_RECENT_VIEWS = 10;
+
 export async function recordView(video) {
   if (!video) return;
   try {
     const prefs = await loadPrefs();
-    if (video.genre) {
-      prefs.genres[video.genre] = (prefs.genres[video.genre] || 0) + 1;
+
+    // Keep a rolling window of the last MAX_RECENT_VIEWS videos watched
+    if (!prefs.recentViews) prefs.recentViews = [];
+    prefs.recentViews.push({
+      genre: video.genre || null,
+      game:  video.game  || null,
+      ts:    Date.now(),
+    });
+
+    // Trim to last MAX_RECENT_VIEWS only
+    if (prefs.recentViews.length > MAX_RECENT_VIEWS) {
+      prefs.recentViews = prefs.recentViews.slice(-MAX_RECENT_VIEWS);
     }
-    if (video.game) {
-      prefs.games[video.game] = (prefs.games[video.game] || 0) + 1;
+
+    // Rebuild genre/game counts from the rolling window only
+    prefs.genres = {};
+    prefs.games  = {};
+    for (const v of prefs.recentViews) {
+      if (v.genre) prefs.genres[v.genre] = (prefs.genres[v.genre] || 0) + 1;
+      if (v.game)  prefs.games[v.game]   = (prefs.games[v.game]   || 0) + 1;
     }
+
     await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch (_) {}
 }
@@ -92,8 +116,8 @@ export async function recordView(video) {
  * scoreVideo — computes a recommendation score for a single video.
  *
  * Weight rationale (after tuning):
- *   genre  × 3   : strongest signal — stable taste indicator
- *   game   × 2   : specific game preference
+ *   genre  × 4   : dominant signal — same genre, different games
+ *   game   × 1   : specific game preference (reduced — genre wins)
  *   ggBoost× 0.3 : quality signal but CAPPED — prevents viral clips from always
  *                  dominating. A clip with 1000 GGs scores +2.07, not +6.9.
  *                  This gives small creators a real chance.
@@ -139,7 +163,7 @@ export function scoreVideo(video, prefs, maxGenre = 1, maxGame = 1) {
                      : videoAgeMs <= SEVEN_DAYS ? 1.5
                      : 0;
 
-  return (genreScore * 3) + (gameScore * 2) + (ggBoost) + (recencyBoost);
+  return (genreScore * 4) + (gameScore * 1) + (ggBoost) + (recencyBoost);
 }
 
 /**

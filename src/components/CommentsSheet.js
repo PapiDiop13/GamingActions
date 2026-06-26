@@ -21,6 +21,7 @@ import { db } from '../config/firebase';
 import { commentFrameStyle } from '../constants/frames';
 import FramedAvatar from './FramedAvatar';
 import { globalNavigate } from '../utils/navigationRef';
+import { showAlert } from '../store/useAlertStore';
 
 const { height: SH } = require('react-native').Dimensions.get('window');
 const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 80 : 60;
@@ -91,16 +92,21 @@ function CommentBubble({ comment, onReply, compact, navigation }) {
   };
 
   const handleDelete = () => {
-    Alert.alert('Delete comment?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          await deleteDoc(doc(db, 'comments', comment.id));
-          if (comment.videoId) await updateDoc(doc(db, 'videos', comment.videoId), { commentsCount: increment(-1) });
-          setDeleted(true);
-        } catch (e) {}
-      }},
-    ]);
+    showAlert({
+      title: 'Delete Comment?',
+      message: 'This cannot be undone.',
+      type: 'danger',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'comments', comment.id));
+            if (comment.videoId) await updateDoc(doc(db, 'videos', comment.videoId), { commentsCount: increment(-1) });
+            setDeleted(true);
+          } catch (e) {}
+        }},
+      ],
+    });
   };
 
   const handleSaveEdit = async () => {
@@ -562,16 +568,21 @@ function SheetCommentItem({ comment, replies = [], onReply, currentUserId, isRep
     }
     options.push({
       text: '🗑️ Delete', style: 'destructive', onPress: () => {
-        Alert.alert('Delete comment?', 'This cannot be undone.', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: async () => {
-            try {
-              await deleteDoc(doc(db, 'comments', comment.id));
-              if (comment.videoId) await updateDoc(doc(db, 'videos', comment.videoId), { commentsCount: increment(-1) });
-              setDeleted(true);
-            } catch (e) {}
-          }},
-        ]);
+        showAlert({
+          title: 'Delete Comment?',
+          message: 'This cannot be undone.',
+          type: 'danger',
+          buttons: [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: async () => {
+              try {
+                await deleteDoc(doc(db, 'comments', comment.id));
+                if (comment.videoId) await updateDoc(doc(db, 'videos', comment.videoId), { commentsCount: increment(-1) });
+                setDeleted(true);
+              } catch (e) {}
+            }},
+          ],
+        });
       }
     });
     options.push({ text: 'Cancel', style: 'cancel' });

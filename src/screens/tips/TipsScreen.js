@@ -229,7 +229,13 @@ export default function TipsScreen({ navigation }) {
     try {
       const snap = await getDocs(buildQuery());
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t => !t.restricted);
-      setTips(list);
+      // Keep recent first but add slight shuffle within groups of 3
+      const shuffled = [];
+      for (let i = 0; i < list.length; i += 3) {
+        const chunk = list.slice(i, i + 3).sort(() => Math.random() - 0.5);
+        shuffled.push(...chunk);
+      }
+      setTips(shuffled);
       lastDocRef.current = snap.docs[snap.docs.length - 1] || null;
       hasMoreRef.current = snap.docs.length === PAGE;
     } catch (e) {

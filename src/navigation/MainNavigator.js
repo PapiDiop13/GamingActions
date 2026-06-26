@@ -42,6 +42,9 @@ import HowToUploadScreen from '../screens/upload/HowToUploadScreen';
 import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 import ReportScreen from '../screens/report/ReportScreen';
 import SubscriptionScreen from '../screens/subscription/SubscriptionScreen';
+import EarningsScreen from '../screens/earnings/EarningsScreen';
+import ProfileFeedScreen from '../screens/profile/ProfileFeedScreen';
+import GiftCardsScreen from '../screens/giftcards/GiftCardsScreen';
 import SearchScreen from '../screens/search/SearchScreen';
 import HashtagScreen from '../screens/search/HashtagScreen';
 import MyFanbaseScreen from '../screens/fanbase/MyFanbaseScreen';
@@ -90,6 +93,9 @@ function FeedStack() {
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="Report" component={ReportScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+      <Stack.Screen name="Earnings" component={EarningsScreen} />
+      <Stack.Screen name="ProfileFeed" component={ProfileFeedScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="GiftCards" component={GiftCardsScreen} />
       <Stack.Screen name="HowToUpload" component={HowToUploadScreen} />
       <Stack.Screen name="Fanbase" component={FanbaseScreen} />
       <Stack.Screen name="FanbaseContent" component={FanbaseContentScreen} />
@@ -162,6 +168,9 @@ function ShopStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="ShopMain" component={ShopScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+      <Stack.Screen name="Earnings" component={EarningsScreen} />
+      <Stack.Screen name="ProfileFeed" component={ProfileFeedScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="GiftCards" component={GiftCardsScreen} />
       <Stack.Screen name="Purchases" component={PurchasesScreen} />
       <Stack.Screen name="PointsHistory" component={PointsHistoryScreen} />
     </Stack.Navigator>

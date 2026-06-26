@@ -29,6 +29,10 @@ function calcStreakLevel(points: number): string {
   return level;
 }
 
+// Récompense en points pour un GG reçu (doit correspondre à POINTS.RECEIVE_GG
+// côté client dans src/utils/points.js — gardé synchrone manuellement).
+const RECEIVE_GG_POINTS = 2;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TRIGGER 1 — onGGWritten
 // Se déclenche à chaque GG ajouté ou retiré.
@@ -71,32 +75,80 @@ export const onGGWritten = onDocumentWritten(
       totalGGReceived += vDoc.id === videoId ? realGGCount : (vData.ggCount || 0);
     }
 
-    // Met à jour le profil du créateur
+    // Détermine si c'est un AJOUT ou un RETRAIT de GG (pour créditer/débiter les points)
+    // before absent + after présent  → GG ajouté  (+points)
+    // before présent + after absent  → GG retiré  (-points)
+    const isAdd    = !before && !!after;
+    const isRemove = !!before && !after;
+    const ptsDelta = isAdd ? RECEIVE_GG_POINTS : (isRemove ? -RECEIVE_GG_POINTS : 0);
+
+    // Met à jour le profil du créateur dans UNE transaction atomique.
+    // C'est la SOURCE UNIQUE de vérité : ggReceived, gaPoints, streakPoints,
+    // streakLevel sont tous recalculés ici. Le client ne fait QUE de
+    // l'optimistic UI local (aucune écriture concurrente sur ce doc → plus de
+    // failed-precondition).
     const creatorRef = db.collection("users").doc(creatorId);
-    const creatorSnap = await creatorRef.get();
-    if (creatorSnap.exists) {
-      const creatorData = creatorSnap.data()!;
-      const streakPts = creatorData.streakPoints || 0;
-      await creatorRef.update({
-        ggReceived: totalGGReceived,
-        streakLevel: calcStreakLevel(streakPts),
+    let creatorData: Record<string, any> | null = null;
+
+    await db.runTransaction(async (tx) => {
+      const creatorSnap = await tx.get(creatorRef);
+      if (!creatorSnap.exists) return;
+      creatorData = creatorSnap.data()!;
+
+      // gaPoints (solde dépensable) : jamais sous 0
+      const newGaPoints     = Math.max(0, (creatorData.gaPoints     || 0) + ptsDelta);
+      // streakPoints (niveau cumulatif) : jamais sous 0
+      const newStreakPoints = Math.max(0, (creatorData.streakPoints || 0) + ptsDelta);
+
+      tx.update(creatorRef, {
+        ggReceived:   totalGGReceived,
+        gaPoints:     newGaPoints,
+        streakPoints: newStreakPoints,
+        streakLevel:  calcStreakLevel(newStreakPoints),
+      });
+    });
+
+    // Trace dans points_history (audit trail visible dans PointsHistoryScreen)
+    if (ptsDelta !== 0) {
+      await db.collection("points_history").add({
+        userId:    creatorId,
+        delta:     ptsDelta,
+        reason:    isAdd ? "Received a GG" : "GG removed",
+        videoId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    // Notifications UNIQUEMENT sur ajout de GG (pas sur retrait), et jamais à soi-même
+    if (isAdd && after && creatorId !== after.userId && creatorData) {
+      const senderSnap = await db.collection("users").doc(after.userId).get();
+      const senderName = senderSnap.exists ? (senderSnap.data()!.username || "Someone") : "Someone";
+
+      // 1. Notif in-app Firestore (source unique — plus de création côté client)
+      await db.collection("notifications").add({
+        userId:       creatorId,
+        type:         "gg",
+        fromUserId:   after.userId,
+        fromUsername: senderName,
+        text:         "gave you a GG on your clip ⭐",
+        videoId,
+        read:         false,
+        createdAt:    admin.firestore.FieldValue.serverTimestamp(),
       });
 
-      // Push notification au créateur quand il reçoit un GG
-      if (after && creatorData.fcmToken && creatorId !== after.userId) {
-        // Récupère le nom de l'envoyeur
-        const senderSnap = await db.collection("users").doc(after.userId).get();
-        const senderName = senderSnap.exists ? (senderSnap.data()!.username || 'Someone') : 'Someone';
+      // 2. Push notification
+      const creatorDataTyped = creatorData as Record<string, any>;
+      if (creatorDataTyped.fcmToken) {
         await sendPushNotif(
-          creatorData.fcmToken,
-          '⭐ GG received!',
+          creatorDataTyped.fcmToken,
+          "⭐ GG received!",
           `${senderName} gave you a GG on your clip!`,
-          { screen: 'Feed', videoId }
+          { screen: "Feed", videoId }
         );
       }
     }
 
-    logger.info(`onGGWritten: vidéo ${videoId} → ggCount=${realGGCount}, créateur ${creatorId} → ggReceived=${totalGGReceived}`);
+    logger.info(`onGGWritten: vidéo ${videoId} → ggCount=${realGGCount}, créateur ${creatorId} → ggReceived=${totalGGReceived}, ptsDelta=${ptsDelta}`);
   }
 );
 
@@ -168,30 +220,22 @@ export const onVideoDeleted = onDocumentDeleted(
     if (!videoData) return;
 
     const creatorId: string = videoData.userId;
+    const deletedGGCount: number = videoData.ggCount || 0;
 
-    // Supprime tous les GGs de cette vidéo (batch)
-    const ggsSnap = await db.collection("ggs")
-      .where("videoId", "==", videoId)
-      .get();
+    // 1. Batch : supprime GGs orphelins + notifications + comments liés à la vidéo
+    const [ggsSnap, notifsSnap, commentsSnap] = await Promise.all([
+      db.collection("ggs").where("videoId", "==", videoId).get(),
+      db.collection("notifications").where("videoId", "==", videoId).get(),
+      db.collection("comments").where("videoId", "==", videoId).get(),
+    ]);
 
     const batch = db.batch();
     ggsSnap.docs.forEach((d) => batch.delete(d.ref));
-
-    // Supprime aussi les notifications liées à cette vidéo
-    const notifsSnap = await db.collection("notifications")
-      .where("videoId", "==", videoId)
-      .get();
     notifsSnap.docs.forEach((d) => batch.delete(d.ref));
-
-    // Supprime les comments
-    const commentsSnap = await db.collection("comments")
-      .where("videoId", "==", videoId)
-      .get();
     commentsSnap.docs.forEach((d) => batch.delete(d.ref));
-
     await batch.commit();
 
-    // Recalcule ggReceived du créateur après nettoyage
+    // 2. Recompte ggReceived du créateur depuis ses vidéos restantes
     const creatorVideosSnap = await db.collection("videos")
       .where("userId", "==", creatorId)
       .get();
@@ -200,17 +244,54 @@ export const onVideoDeleted = onDocumentDeleted(
       totalGGReceived += d.data().ggCount || 0;
     });
 
+    // 3. Transaction atomique sur le profil créateur :
+    //    - videoCount -1
+    //    - ggReceived recalculé
+    //    - gaPoints/streakPoints : retire les GG points + le clip bonus (POST_CLIP)
+    //    - streakLevel recalculé
+    const POST_CLIP_POINTS = 25; // Doit correspondre à POINTS.POST_CLIP côté client
     const creatorRef = db.collection("users").doc(creatorId);
-    const creatorSnap = await creatorRef.get();
-    if (creatorSnap.exists) {
-      const streakPts = creatorSnap.data()!.streakPoints || 0;
-      await creatorRef.update({
-        ggReceived: totalGGReceived,
-        streakLevel: calcStreakLevel(streakPts),
+    let finalGaPoints = 0;
+    await db.runTransaction(async (tx) => {
+      const creatorSnap = await tx.get(creatorRef);
+      if (!creatorSnap.exists) return;
+      const d = creatorSnap.data()!;
+
+      const ggPointsToRemove  = deletedGGCount * RECEIVE_GG_POINTS;
+      const totalPointsToRemove = ggPointsToRemove + POST_CLIP_POINTS;
+      const newGaPoints     = Math.max(0, (d.gaPoints     || 0) - totalPointsToRemove);
+      const newStreakPoints = Math.max(0, (d.streakPoints || 0) - totalPointsToRemove);
+      const newVideoCount   = Math.max(0, (d.videoCount   || 0) - 1);
+      finalGaPoints = newGaPoints;
+
+      tx.update(creatorRef, {
+        videoCount:   newVideoCount,
+        ggReceived:   totalGGReceived,
+        gaPoints:     newGaPoints,
+        streakPoints: newStreakPoints,
+        streakLevel:  calcStreakLevel(newStreakPoints),
+      });
+    });
+
+    // 4. points_history — trace audit (hors transaction, non bloquant)
+    const ggPointsToRemove = deletedGGCount * RECEIVE_GG_POINTS;
+    const totalPointsToRemove = ggPointsToRemove + POST_CLIP_POINTS;
+    if (totalPointsToRemove > 0) {
+      await db.collection("points_history").add({
+        userId:    creatorId,
+        delta:     -totalPointsToRemove,
+        reason:    `Clip deleted (-${POST_CLIP_POINTS} clip bonus, -${ggPointsToRemove} GG pts)`,
+        total:     finalGaPoints,
+        videoId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
 
-    logger.info(`onVideoDeleted: vidéo ${videoId} — ${ggsSnap.size} GGs nettoyés, créateur ${creatorId} ggReceived=${totalGGReceived}`);
+    logger.info(
+      `onVideoDeleted: vidéo ${videoId} — ${ggsSnap.size} GGs nettoyés, ` +
+      `créateur ${creatorId} ggReceived=${totalGGReceived}, ` +
+      `-${totalPointsToRemove} pts (clip + GGs)`
+    );
   }
 );
 
@@ -337,6 +418,34 @@ export const reconcileUserStats = onSchedule(
       );
       if (realGGReceived !== (uData.ggReceived || 0)) {
         updates.ggReceived = realGGReceived;
+      }
+
+      // 1b. videoCount réel (utilisé par Gift Cards)
+      const realVideoCount = videosSnap.size;
+      if (realVideoCount !== (uData.videoCount || 0)) {
+        updates.videoCount = realVideoCount;
+      }
+
+      // 1c. fanbaseSubscribers réels (utilisé par EarningsScreen)
+      const fanbaseSnap = await db.collection("fanbase_subscriptions")
+        .where("creatorId", "==", uDoc.id)
+        .get();
+      const realFanbaseSubscribers = fanbaseSnap.size;
+      if (realFanbaseSubscribers !== (uData.fanbaseSubscribers || 0)) {
+        updates.fanbaseSubscribers = realFanbaseSubscribers;
+        // Sync aussi creator_earnings.subscriberCount
+        const earningsRef = db.collection("creator_earnings").doc(uDoc.id);
+        const earningsSnap = await earningsRef.get();
+        if (earningsSnap.exists) {
+          if ((earningsSnap.data()!.subscriberCount || 0) !== realFanbaseSubscribers) {
+            await earningsRef.update({ subscriberCount: realFanbaseSubscribers });
+          }
+        } else if (realFanbaseSubscribers > 0) {
+          await earningsRef.set({
+            subscriberCount: realFanbaseSubscribers,
+            totalEarned: 0, totalPaid: 0, balance: 0, pendingWithdrawal: 0,
+          });
+        }
       }
 
       // 2. followers réels
@@ -922,6 +1031,122 @@ export const decayStreakPoints = onSchedule(
  * Performance: ~550 videos = 2 batches = fast (~200ms total write time).
  * At 10k+ videos, consider limiting to videos posted in the last 90 days.
  */
+// SCHEDULED — dailyLeaderBonus (daily at 1h UTC)
+// Awards GA Points to the current leader every day to reward holding the crown.
+// Small but consistent — motivates players to maintain their lead all month.
+export const dailyLeaderBonus = onSchedule(
+  {
+    schedule: "every day 01:00",
+    timeZone: "America/Toronto",
+    memory: "256MiB",
+  },
+  async () => {
+    const DAILY_LEADER_POINTS = 10; // 10 pts/day = ~310 pts/month for champion
+    logger.info("dailyLeaderBonus: start");
+    try {
+      // Find current leader
+      const leaderSnap = await db
+        .collection("users")
+        .where("isCurrentLeader", "==", true)
+        .limit(1)
+        .get();
+
+      if (leaderSnap.empty) {
+        logger.info("dailyLeaderBonus: no current leader found");
+        return;
+      }
+
+      const leaderDoc = leaderSnap.docs[0];
+      const leader = leaderDoc.data();
+
+      // Don't give bonus to excluded account types
+      const EXCLUDED = ["creator", "gameconic"];
+      if (EXCLUDED.includes(leader.accountType)) {
+        logger.info(`dailyLeaderBonus: ${leader.username} is ${leader.accountType} — skipped`);
+        return;
+      }
+
+      // Award points
+      await leaderDoc.ref.update({
+        gaPoints: admin.firestore.FieldValue.increment(DAILY_LEADER_POINTS),
+      });
+
+      // Add to points history
+      await db.collection("points_history").add({
+        userId: leaderDoc.id,
+        type: "leader_bonus",
+        delta: DAILY_LEADER_POINTS,
+        reason: "👑 Daily Crown Bonus — keep holding the top!",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Send notification
+      await db.collection("notifications").add({
+        userId: leaderDoc.id,
+        type: "leader_bonus",
+        fromUserId: "SYSTEM",
+        fromUsername: "Gaming Actions",
+        text: `👑 +${DAILY_LEADER_POINTS} GA Points — Crown Bonus! You're still #1. Keep dominating!`,
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      logger.info(`dailyLeaderBonus: ${leader.username} received ${DAILY_LEADER_POINTS} pts`);
+    } catch (e) {
+      logger.error("dailyLeaderBonus error:", e);
+    }
+  }
+);
+
+// SCHEDULED — checkExpiredSubscriptions (daily at 2h UTC)
+// Detects Legendary subscriptions that have expired and downgrades users to free.
+// This handles cases where RevenueCat webhook fails or is delayed.
+export const checkExpiredSubscriptions = onSchedule(
+  { schedule: "every day 02:00", timeZone: "America/Toronto", memory: "256MiB" },
+  async () => {
+    logger.info("checkExpiredSubscriptions: start");
+    try {
+      const now = admin.firestore.Timestamp.now();
+      // Find active subscriptions whose period has ended
+      const expiredSnap = await db.collection("subscriptions")
+        .where("status", "==", "active")
+        .where("currentPeriodEnd", "<=", now)
+        .where("isTest", "==", false)
+        .get();
+
+      if (expiredSnap.empty) {
+        logger.info("checkExpiredSubscriptions: none expired");
+        return;
+      }
+
+      logger.info(`checkExpiredSubscriptions: ${expiredSnap.size} expired`);
+      const batch = db.batch();
+
+      for (const subDoc of expiredSnap.docs) {
+        const sub = subDoc.data();
+        // Mark subscription as expired
+        batch.update(subDoc.ref, { status: "expired", updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        // Downgrade user to free
+        batch.update(db.collection("users").doc(sub.userId), { plan: "free" });
+        // Notify user
+        await db.collection("notifications").add({
+          userId: sub.userId,
+          type: "system",
+          fromUserId: "SYSTEM",
+          fromUsername: "Gaming Actions",
+          text: "Your Legendary subscription has expired. Renew to keep your benefits! Some exclusive frames may be locked.",
+          read: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+      logger.info(`checkExpiredSubscriptions: ${expiredSnap.size} users downgraded`);
+    } catch (e) {
+      logger.error("checkExpiredSubscriptions error:", e);
+    }
+  }
+);
+
 export const reshuffleFeedOrder = onSchedule(
   {
     schedule: "every 6 hours",

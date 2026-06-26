@@ -5,9 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../constants/colors';
 
 const EARN_METHODS = [
-  { icon: 'cloud-upload-outline', color: COLORS.gold, action: 'Post a clip', points: '+50 pts' },
+  { icon: 'cloud-upload-outline', color: COLORS.gold, action: 'Post a clip', points: '+25 pts' },
   { icon: 'star-outline', color: COLORS.gold, action: 'Receive a GG', points: '+2 pts' },
-  { icon: 'person-add-outline', color: COLORS.blue, action: 'Get a new follower', points: '+5 pts' },
+  { icon: 'person-add-outline', color: COLORS.blue, action: 'Get a new follower', points: '+1 pt' },
   { icon: 'calendar-outline', color: COLORS.green, action: 'Daily login', points: '+10 pts' },
   { icon: 'thumbs-up-outline', color: '#7C4DFF', action: 'Receive Thanks on a tip', points: '+5 pts' },
   { icon: 'people-outline', color: COLORS.blue, action: 'New fanbase subscriber', points: '+20 pts' },

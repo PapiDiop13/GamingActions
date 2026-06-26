@@ -378,12 +378,32 @@ function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isAc
     } else {
       opts.push({ text: '✅ Unhide', onPress: () => promptAdminAction('unhide') });
     }
+    opts.push({ text: '🗑️ Delete permanently', onPress: () => promptAdminAction('delete'), style: 'destructive' });
     opts.push({ text: 'View in Admin', onPress: () => navigation.navigate('Admin', { openVideo: item }) });
     opts.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Admin Actions', `Video by ${item.username}`, opts);
+    Alert.alert('🛡️ Admin Actions', `Video by ${item.username}`, opts);
   };
 
   const promptAdminAction = (action) => {
+    if (action === 'delete') {
+      Alert.alert('🗑️ Delete Video', `Permanently delete this video by ${item.username}?\n\nThis cannot be undone.`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            const { deleteDoc, doc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+            const { db: fdb } = await import('../../config/firebase');
+            await deleteDoc(doc(fdb, 'videos', item.id));
+            await addDoc(collection(fdb, 'notifications'), {
+              userId: item.userId, type: 'system', fromUserId: 'SYSTEM', fromUsername: 'Gaming Actions',
+              text: 'Your video was permanently removed by the moderation team.',
+              read: false, createdAt: serverTimestamp(),
+            });
+            Alert.alert('🗑️ Deleted');
+          } catch(e) { Alert.alert('Error', e.message); }
+        }},
+      ]);
+      return;
+    }
     const reasons = action === 'hide'
       ? ['Suspicious content', 'Under review', 'Copyright issue', 'Spam', 'Other']
       : ['Pornographic content', 'Graphic violence', 'Hate speech', 'Harassment', 'Illegal content', 'Other'];
@@ -646,7 +666,7 @@ const isOwnVideo = item.userId === user?.uid;
         <GGButton
           hasGG={item.hasGG}
           count={item.ggCount || 0}
-          onPress={() => toggleGG(item.id, user?.uid)}
+          onPress={() => toggleGG(item.id, user?.uid, item)}
           onShowList={() => setShowGGList(true)}
           disabled={item.userId === user?.uid}
         />
@@ -801,12 +821,27 @@ export default function FeedScreen({ navigation }) {
       setDisplayVideos(prev => {
         const existingIds = new Set(prev.map(v => v.id));
         const newOnes = filtered.filter(v => !existingIds.has(v.id));
-        return [...prev.map(v => filtered.find(f => f.id === v.id) || v), ...newOnes];
+        // Take fresh values from store (store is source of truth for hasGG/ggCount).
+        // Fall back to local value only if the video isn't in the store yet.
+        return [...prev.map(v => {
+          const updated = filtered.find(f => f.id === v.id);
+          if (!updated) return v;
+          return {
+            ...updated,
+            hasGG: updated.hasGG !== undefined ? updated.hasGG : v.hasGG,
+            ggCount: updated.ggCount !== undefined ? updated.ggCount : v.ggCount,
+          };
+        }), ...newOnes];
       });
     } else {
       setDisplayVideos(prev => prev.map(v => {
         const updated = filtered.find(f => f.id === v.id);
-        return updated || v;
+        if (!updated) return v;
+        return {
+          ...updated,
+          hasGG: updated.hasGG !== undefined ? updated.hasGG : v.hasGG,
+          ggCount: updated.ggCount !== undefined ? updated.ggCount : v.ggCount,
+        };
       }));
     }
   }, [videos, userProfiles]);

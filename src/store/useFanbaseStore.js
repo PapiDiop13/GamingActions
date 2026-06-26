@@ -88,6 +88,18 @@ const useFanbaseStore = create((set, get) => ({
         fanbaseSubscribers: increment(1),
       });
 
+      // Sync creator_earnings.subscriberCount (affiché dans EarningsScreen)
+      const earningsRef = doc(db, 'creator_earnings', creatorId);
+      const earningsSnap = await getDoc(earningsRef);
+      if (earningsSnap.exists()) {
+        await updateDoc(earningsRef, { subscriberCount: increment(1) });
+      } else {
+        await setDoc(earningsRef, {
+          subscriberCount: 1, totalEarned: 0, totalPaid: 0,
+          balance: 0, pendingWithdrawal: 0,
+        });
+      }
+
       // Notification au créateur (PAS de points — décision anti-triche)
       const myUsername = useAuthStore.getState().userProfile?.username || 'Someone';
       await addDoc(collection(db, 'notifications'), {
@@ -125,6 +137,14 @@ const useFanbaseStore = create((set, get) => ({
       await updateDoc(doc(db, 'users', creatorId), {
         fanbaseSubscribers: increment(-1),
       });
+      // Sync creator_earnings.subscriberCount
+      const earningsRef = doc(db, 'creator_earnings', creatorId);
+      const earningsSnap = await getDoc(earningsRef);
+      if (earningsSnap.exists()) {
+        await updateDoc(earningsRef, {
+          subscriberCount: Math.max(0, (earningsSnap.data()?.subscriberCount || 0) - 1),
+        });
+      }
       return true;
     } catch (e) {
       // ⚠️ Cancel failed — fanbase subscription may be in inconsistent state

@@ -3,6 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Dimensions, Alert, Modal, TouchableWithoutFeedback, Image, ActivityIndicator,
+  Animated, Easing,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,8 +36,9 @@ async function logPurchase(userId, frame, frameType, balanceAfter) {
 }
 
 const CATEGORIES = [
-  { id: 'avatar_frames',  label: 'Avatar Frames', icon: 'person-circle-outline' },
-  { id: 'video_frames',   label: 'Video Frames',  icon: 'videocam-outline' },
+  { id: 'avatar_frames',  label: 'Avatar',     icon: 'person-circle-outline' },
+  { id: 'video_frames',   label: 'Video',      icon: 'videocam-outline' },
+  { id: 'gift_cards',     label: 'Gift Cards', icon: 'gift-outline' },
   { id: 'comment_frames', label: 'Comment',       icon: 'chatbubble-outline' },
   { id: 'badges',         label: 'Badges',        icon: 'ribbon-outline' },
 ];
@@ -67,6 +69,47 @@ async function purchaseWithPoints(userId, cost, onSuccess) {
 }
 
 // ─── Avatar Frame Preview ─────────────────────────────────────────────────────
+function AnimatedRingPreview({ frame, size }) {
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  const spin  = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: false }),
+    ])).start();
+    Animated.loop(Animated.timing(spin, { toValue: 1, duration: 2500, useNativeDriver: true, easing: Easing.linear })).start();
+    return () => { pulse.stopAnimation(); spin.stopAnimation(); };
+  }, []);
+  const opacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.35, 0.95] });
+  const rotate  = spin.interpolate({ inputRange: [0,1], outputRange: ['0deg','360deg'] });
+  const spinIds = ['neon_pulse_blue','neon_pulse_pink','galaxy_animated','rainbow_animated','lightning_animated','void_animated','nebula_animated','neon_city_animated','cosmic_animated','blizzard_animated'];
+  const ringSize = size + 10;
+  if (spinIds.includes(frame.id)) {
+    return (
+      <>
+        <Animated.View style={{
+          position: 'absolute', width: ringSize, height: ringSize,
+          borderRadius: ringSize / 2, borderWidth: 3,
+          borderColor: frame.color, borderTopColor: 'transparent', borderRightColor: 'transparent',
+          transform: [{ rotate }],
+          shadowColor: frame.color, shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width:0, height:0 },
+        }} />
+        <Animated.View style={{
+          position: 'absolute', width: ringSize, height: ringSize,
+          borderRadius: ringSize / 2, borderWidth: 1.5, borderColor: frame.color, opacity,
+        }} />
+      </>
+    );
+  }
+  return (
+    <Animated.View style={{
+      position: 'absolute', width: ringSize, height: ringSize,
+      borderRadius: ringSize / 2, borderWidth: 3, borderColor: frame.color,
+      opacity, shadowColor: frame.color, shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width:0, height:0 },
+    }} />
+  );
+}
+
 function AvatarFramePreview({ frame, avatar, username, size = 58 }) {
   const initials = (username || 'GA').slice(0, 2).toUpperCase();
   const showRing = frame.id !== 'none';
@@ -75,9 +118,11 @@ function AvatarFramePreview({ frame, avatar, username, size = 58 }) {
       {showRing && frame.glow && (
         <View style={{ position: 'absolute', width: size + 20, height: size + 20, borderRadius: (size + 20) / 2, backgroundColor: frame.color, opacity: 0.18 }} />
       )}
-      {showRing && (
+      {showRing && frame.animated ? (
+        <AnimatedRingPreview frame={frame} size={size} />
+      ) : showRing ? (
         <View style={{ position: 'absolute', width: size + 10, height: size + 10, borderRadius: (size + 10) / 2, borderWidth: 2.5, borderColor: frame.color }} />
-      )}
+      ) : null}
       {avatar ? (
         <Image source={{ uri: avatar }} style={{ width: size, height: size, borderRadius: size / 2 }} resizeMode="cover" />
       ) : (
@@ -92,26 +137,88 @@ function AvatarFramePreview({ frame, avatar, username, size = 58 }) {
 // ─── Video Frame Preview ──────────────────────────────────────────────────────
 function VideoFramePreview({ frame, size = 70 }) {
   const hasFrame = frame.id !== 'none';
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (!frame.animated) return;
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 0, duration: 800, useNativeDriver: false }),
+    ]));
+    anim.start();
+    return () => anim.stop();
+  }, [frame.id]);
+  const animOpacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.5, 1] });
+  const animBorder  = pulse.interpolate({ inputRange: [0,1], outputRange: [2, 4] });
+
   return (
     <View style={{ width: size, height: size * 0.6, position: 'relative', borderRadius: 8, overflow: 'hidden', backgroundColor: '#0a0a1a' }}>
-      {/* Simulated video content */}
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <Ionicons name="game-controller" size={22} color={hasFrame ? frame.color : COLORS.gray3} style={{ opacity: 0.4 }} />
       </View>
-      {/* Frame border */}
       {hasFrame && (
         <>
-          <View style={{ position: 'absolute', inset: 0, borderWidth: 2.5, borderColor: frame.color, borderRadius: 8, opacity: frame.glow ? 0.9 : 0.7 }} />
-          {/* Corner accents */}
+          {frame.animated ? (
+            <Animated.View style={{ position: 'absolute', inset: 0, borderWidth: animBorder, borderColor: frame.color, borderRadius: 8, opacity: animOpacity,
+              shadowColor: frame.color, shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width:0, height:0 } }} />
+          ) : (
+            <View style={{ position: 'absolute', inset: 0, borderWidth: 2.5, borderColor: frame.color, borderRadius: 8, opacity: frame.glow ? 0.9 : 0.7 }} />
+          )}
           <View style={{ position: 'absolute', top: 3, left: 3, width: 8, height: 8, borderTopWidth: 2, borderLeftWidth: 2, borderColor: frame.color }} />
           <View style={{ position: 'absolute', top: 3, right: 3, width: 8, height: 8, borderTopWidth: 2, borderRightWidth: 2, borderColor: frame.color }} />
           <View style={{ position: 'absolute', bottom: 3, left: 3, width: 8, height: 8, borderBottomWidth: 2, borderLeftWidth: 2, borderColor: frame.color }} />
           <View style={{ position: 'absolute', bottom: 3, right: 3, width: 8, height: 8, borderBottomWidth: 2, borderRightWidth: 2, borderColor: frame.color }} />
-          {frame.glow && (
+          {frame.glow && !frame.animated && (
             <View style={{ position: 'absolute', inset: 0, borderWidth: 6, borderColor: frame.color, borderRadius: 8, opacity: 0.08 }} />
           )}
         </>
       )}
+    </View>
+  );
+}
+
+// ─── Comment Bubble Preview ───────────────────────────────────────────────────
+function CommentBubblePreview({ frame }) {
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (!frame.animated) return;
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 750, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 0, duration: 750, useNativeDriver: false }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [frame.id]);
+  const borderWidth = pulse.interpolate({ inputRange: [0,1], outputRange: [2, 3.5] });
+  const shadowOpacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.4, 1] });
+
+  const baseStyle = {
+    width: '100%', borderRadius: 10, padding: 10, marginBottom: 8,
+    backgroundColor: COLORS.black,
+  };
+
+  if (frame.animated) {
+    return (
+      <Animated.View style={[baseStyle, {
+        borderWidth, borderColor: frame.color,
+        shadowColor: frame.color, shadowOffset: { width:0, height:0 },
+        shadowOpacity, shadowRadius: 8,
+      }]}>
+        <Text style={{ fontSize: 10, color: COLORS.gold, fontWeight: '800' }}>YOU ⚡</Text>
+        <Text style={{ fontSize: 11, color: COLORS.white, marginTop: 2 }}>Sample comment 🔥</Text>
+      </Animated.View>
+    );
+  }
+  return (
+    <View style={[baseStyle, {
+      borderWidth: frame.id === 'none' ? 1 : 2,
+      borderColor: frame.id === 'none' ? COLORS.gray3 : frame.color,
+      shadowColor: frame.glow ? frame.color : 'transparent',
+      shadowOffset: { width:0, height:0 },
+      shadowOpacity: frame.glow ? 0.7 : 0,
+      shadowRadius: 6,
+    }]}>
+      <Text style={{ fontSize: 10, color: COLORS.gold, fontWeight: '800' }}>YOU</Text>
+      <Text style={{ fontSize: 11, color: COLORS.white, marginTop: 2 }}>Sample comment 🔥</Text>
     </View>
   );
 }
@@ -342,7 +449,7 @@ export default function ShopScreen() {
       <View style={styles.earnBanner}>
         <Ionicons name="information-circle-outline" size={14} color={COLORS.blue} />
         <Text style={styles.earnText}>
-          Earn points: +50 per clip · +2 per GG · +5 per follower · +10 daily login
+          Earn points: +25 per clip · +2 per GG · +1 per follower · daily login bonus
         </Text>
       </View>
 
@@ -419,6 +526,11 @@ export default function ShopScreen() {
                     <View style={[styles.actionBtn]}>
                       <Text style={styles.actionBtnText}>FREE — EQUIP</Text>
                     </View>
+                  ) : frame.animated ? (
+                    <View style={[styles.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}>
+                      <Ionicons name="flash" size={10} color="#FF2D55" />
+                      <Text style={[styles.actionBtnText, { color: '#FF2D55', marginLeft: 4 }]}>CA${frame.dollarsPrice?.toFixed(2)}</Text>
+                    </View>
                   ) : (
                     <View style={[styles.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}>
                       <Ionicons name="star" size={10} color={COLORS.gold} />
@@ -472,6 +584,11 @@ export default function ShopScreen() {
                     <View style={[styles.actionBtn]}>
                       <Text style={styles.actionBtnText}>FREE</Text>
                     </View>
+                  ) : frame.animated ? (
+                    <View style={[styles.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}>
+                      <Ionicons name="flash" size={10} color="#FF2D55" />
+                      <Text style={[styles.actionBtnText, { color: '#FF2D55', marginLeft: 4 }]}>CA${frame.dollarsPrice?.toFixed(2)}</Text>
+                    </View>
                   ) : (
                     <View style={[styles.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}>
                       <Ionicons name="star" size={10} color={COLORS.gold} />
@@ -486,6 +603,41 @@ export default function ShopScreen() {
       )}
 
       {/* ─── COMMENT FRAMES ─── */}
+      {/* ── GIFT CARDS ── */}
+      {category === 'gift_cards' && (
+        <View style={{ padding: 24, alignItems: 'center' }}>
+          <Ionicons name="gift-outline" size={52} color={COLORS.gold} />
+          <Text style={{ fontSize: 20, fontWeight: '900', color: COLORS.white, marginTop: 14, marginBottom: 8 }}>Gift Cards</Text>
+          <Text style={{ fontSize: 13, color: COLORS.gray, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>
+            Exchange your GA Points for PSN, Xbox, or Steam gift cards. You need to meet activity requirements to be eligible.
+          </Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('GiftCards')}
+            style={{ backgroundColor: COLORS.gold, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 32, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+          >
+            <Ionicons name="gift-outline" size={18} color={COLORS.black} />
+            <Text style={{ fontSize: 15, fontWeight: '900', color: COLORS.black }}>View Gift Cards</Text>
+          </TouchableOpacity>
+          <View style={{ marginTop: 20, backgroundColor: COLORS.card, borderRadius: 14, padding: 14, borderWidth: 0.5, borderColor: COLORS.gray3, width: '100%' }}>
+            <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.gold, marginBottom: 8 }}>Available cards:</Text>
+            {[
+              { label: 'CA$10', pts: '10,000 pts', cond: '30 clips + 150 GGs' },
+              { label: 'CA$25', pts: '22,000 pts', cond: '75 clips + 400 GGs' },
+              { label: 'CA$50', pts: '40,000 pts', cond: '150 clips + 800 GGs + Top 100' },
+              { label: 'CA$100', pts: '75,000 pts', cond: '250 clips + 1,500 GGs + Top 50' },
+            ].map((c, i) => (
+              <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: i < 3 ? 0.5 : 0, borderBottomColor: COLORS.gray3 }}>
+                <Text style={{ color: COLORS.white, fontSize: 13, fontWeight: '700' }}>{c.label}</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ color: COLORS.gold, fontSize: 11, fontWeight: '700' }}>{c.pts}</Text>
+                  <Text style={{ color: COLORS.gray, fontSize: 10 }}>{c.cond}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
       {category === 'comment_frames' && (
         <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
           <View style={[styles.infoBanner, { marginBottom: 12 }]}>
@@ -531,26 +683,16 @@ export default function ShopScreen() {
                   }}
                 >
                   {/* Aperçu : bulle de commentaire avec le contour coloré */}
-                  <View style={{
-                    width: '100%', borderRadius: 10, padding: 10, marginBottom: 8,
-                    borderWidth: frame.id === 'none' ? 1 : 2,
-                    borderColor: frame.id === 'none' ? COLORS.gray3 : frame.color,
-                    backgroundColor: COLORS.black,
-                    shadowColor: frame.glow ? frame.color : 'transparent',
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: frame.glow ? 0.7 : 0,
-                    shadowRadius: 6,
-                  }}>
-                    <Text style={{ fontSize: 10, color: COLORS.gold, fontWeight: '800' }}>YOU</Text>
-                    <Text style={{ fontSize: 11, color: COLORS.white, marginTop: 2 }}>Sample comment 🔥</Text>
-                  </View>
+                  <CommentBubblePreview frame={frame} />
                   <Text style={styles.frameName}>{frame.name}</Text>
                   {frame.exclusive ? (
                     <Text style={styles.framePrice}>🏆 Champion only</Text>
-                  ) : frame.pointsPrice === 0 ? (
+                  ) : frame.pointsPrice === 0 && !frame.animated ? (
                     <Text style={[styles.framePrice, { color: COLORS.green }]}>Free</Text>
                   ) : owned ? (
                     <Text style={[styles.framePrice, { color: equipped ? COLORS.gold : COLORS.gray }]}>{equipped ? '✓ Equipped' : 'Owned'}</Text>
+                  ) : frame.animated ? (
+                    <Text style={[styles.framePrice, { color: '#FF2D55' }]}>⚡ CA${frame.dollarsPrice?.toFixed(2)}</Text>
                   ) : (
                     <Text style={styles.framePrice}>⭐ {frame.pointsPrice} pts</Text>
                   )}

@@ -12,6 +12,7 @@ import {
   addDoc, serverTimestamp, limit, where, deleteDoc, startAfter, increment,
 } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
+import AdminFinanceTab from '../../components/AdminFinanceTab';
 import { db } from '../../config/firebase';
 import { GAMES } from '../../constants/games';
 import { fetchPeriodStats, fetchTopErrors, fetchRecentErrors } from '../../utils/errorLogger';
@@ -23,19 +24,20 @@ const HARDCODED_ADMINS = [
 ];
 
 const TABS = [
-  { id: 'overview', label: 'Stats', icon: 'bar-chart' },
-  { id: 'reports', label: 'Reports', icon: 'flag' },
-  { id: 'videos', label: 'Videos', icon: 'videocam' },
-  { id: 'creators', label: 'Creators', icon: 'rocket' },
-  { id: 'moderation', label: 'Mod', icon: 'shield-checkmark' },
-  { id: 'top10', label: 'Top 10', icon: 'trophy' },
-  { id: 'fraud', label: 'Fraude', icon: 'warning' },
-  { id: 'users', label: 'Users', icon: 'people' },
-  { id: 'announce', label: 'Annonce', icon: 'megaphone' },
-  { id: 'games', label: 'Jeux', icon: 'game-controller' },
-  { id: 'notifs', label: 'Notifs', icon: 'notifications' },
-  { id: 'access', label: 'Acces', icon: 'key' },
-  { id: 'errors', label: 'Errors', icon: 'bug' },
+  { id: 'overview',  label: 'Stats',    icon: 'bar-chart' },
+  { id: 'finance',   label: 'Finance',  icon: 'cash' },
+  { id: 'reports',   label: 'Reports',  icon: 'flag' },
+  { id: 'videos',    label: 'Videos',   icon: 'videocam' },
+  { id: 'creators',  label: 'Creators', icon: 'rocket' },
+  { id: 'moderation',label: 'Mod',      icon: 'shield-checkmark' },
+  { id: 'top10',     label: 'Top 10',   icon: 'trophy' },
+  { id: 'fraud',     label: 'Fraude',   icon: 'warning' },
+  { id: 'users',     label: 'Users',    icon: 'people' },
+  { id: 'announce',  label: 'Annonce',  icon: 'megaphone' },
+  { id: 'games',     label: 'Jeux',     icon: 'game-controller' },
+  { id: 'notifs',    label: 'Notifs',   icon: 'notifications' },
+  { id: 'access',    label: 'Acces',    icon: 'key' },
+  { id: 'errors',    label: 'Errors',   icon: 'bug' },
 ];
 
 // Lecteur vidéo minimal pour la galerie admin — charge uniquement quand monté
@@ -80,8 +82,11 @@ export default function AdminScreen({ navigation, route }) {
     setLoading(true);
     try {
       const [uS,vS,gS,fS,nS,rS] = await Promise.all([
-        getDocs(collection(db,'users')),getDocs(collection(db,'videos')),getDocs(collection(db,'ggs')),
-        getDocs(collection(db,'follows')),getDocs(collection(db,'notifications')),
+        getDocs(query(collection(db,'users'),limit(1000))),
+        getDocs(query(collection(db,'videos'),limit(1000))),
+        getDocs(query(collection(db,'ggs'),limit(5000))),
+        getDocs(query(collection(db,'follows'),limit(5000))),
+        getDocs(query(collection(db,'notifications'),limit(1000))),
         getDocs(query(collection(db,'reports'),where('status','==','pending'))),
       ]);
       const totalGG = vS.docs.reduce((s,d) => s + (d.data().ggCount||0), 0);
@@ -217,7 +222,7 @@ export default function AdminScreen({ navigation, route }) {
       {text:'Cancel',style:'cancel'},
       {text:'Approve',onPress:async()=>{
         try {
-          await updateDoc(doc(db,'users',req.userId),{accountType:req.creatorType==='developer'?'creator':'creator',plan:'legendary'});
+          await updateDoc(doc(db,'users',req.userId),{accountType:req.creatorType==='gameconic'?'gameconic':'creator'});
           await updateDoc(doc(db,'creator_requests',req.id),{status:'approved',resolvedAt:serverTimestamp()});
           await addDoc(collection(db,'notifications'),{userId:req.userId,type:'creator_approved',text:'Your Creator request was approved! 🎉 Welcome aboard.',read:false,createdAt:serverTimestamp()});
           setCreatorReqs(prev=>prev.map(r=>r.id===req.id?{...r,status:'approved'}:r));
@@ -303,7 +308,7 @@ export default function AdminScreen({ navigation, route }) {
         setAllUsers(all);
       }
       // Top GG givers (qui donne le plus de GGs — bots potentiels)
-      const ggsSnap = await getDocs(collection(db,'ggs'));
+      const ggsSnap = await getDocs(query(collection(db,'ggs'),limit(5000)));
       const giverCounts = {};
       ggsSnap.docs.forEach(d=>{
         const uid = d.data().userId;
@@ -325,12 +330,38 @@ export default function AdminScreen({ navigation, route }) {
     } catch(e){}
     setLoading(false);
   };
-  const loadUsers = async () => {
+  const loadUsers = async (search = '') => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db,'users'),orderBy('username'),limit(50)));
+      let snap;
+      if (search.trim().length >= 2) {
+        // Search by username prefix (case sensitive in Firestore)
+        const term = search.trim();
+        const termEnd = term.slice(0,-1) + String.fromCharCode(term.charCodeAt(term.length-1)+1);
+        snap = await getDocs(query(
+          collection(db,'users'),
+          orderBy('username'),
+          where('username','>=',term),
+          where('username','<',termEnd),
+          limit(30)
+        ));
+        if (snap.empty) {
+          // Try lowercase
+          const low = term.toLowerCase();
+          const lowEnd = low.slice(0,-1) + String.fromCharCode(low.charCodeAt(low.length-1)+1);
+          snap = await getDocs(query(
+            collection(db,'users'),
+            orderBy('username'),
+            where('username','>=',low),
+            where('username','<',lowEnd),
+            limit(30)
+          ));
+        }
+      } else {
+        snap = await getDocs(query(collection(db,'users'),orderBy('username'),limit(50)));
+      }
       setUsers(snap.docs.map(d=>({id:d.id,...d.data()})));
-    } catch(e){}
+    } catch(e){ console.log('loadUsers:', e.message); }
     setLoading(false);
   };
   const toggleBan = (u) => {
@@ -396,9 +427,7 @@ export default function AdminScreen({ navigation, route }) {
       ]);
     }
   };
-  const filteredUsers = userSearch
-    ? users.filter(u=>(u.username||'').toLowerCase().includes(userSearch.toLowerCase())||(u.email||'').toLowerCase().includes(userSearch.toLowerCase()))
-    : users;
+  const filteredUsers = users;
 
   // ANNOUNCEMENT
   const [ann, setAnn] = useState({active:false,title:'',message:'',imageUrl:'',buttonText:'OK'});
@@ -485,6 +514,31 @@ export default function AdminScreen({ navigation, route }) {
     setAdminVideos(prev => prev.map(v => v.id === video.id ? { ...v, restricted: false, banned: false } : v));
     setSelectedAdminVideo(null);
     Alert.alert('✅ Restored');
+  };
+
+  const adminDeleteVideo = (video) => {
+    Alert.alert(
+      '🗑️ Delete Video',
+      `Permanently delete "${video.title || 'Untitled'}" by ${video.username}?
+
+This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: '🗑️ Delete', style: 'destructive', onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'videos', video.id));
+            await addDoc(collection(db, 'notifications'), {
+              userId: video.userId, type: 'system', fromUserId: 'SYSTEM', fromUsername: 'Gaming Actions',
+              text: `Your video "${video.title || 'Untitled'}" was permanently removed by the moderation team.`,
+              read: false, createdAt: serverTimestamp(),
+            });
+            setAdminVideos(prev => prev.filter(v => v.id !== video.id));
+            setSelectedAdminVideo(null);
+            Alert.alert('🗑️ Deleted', 'Video permanently removed.');
+          } catch(e) { Alert.alert('Error', e.message); }
+        }},
+      ]
+    );
   };
 
   // GAMES
@@ -982,7 +1036,16 @@ export default function AdminScreen({ navigation, route }) {
         {/* USERS */}
         {tab==='users'&&(
           <>
-            <TextInput value={userSearch} onChangeText={setUserSearch} placeholder="Rechercher..." placeholderTextColor={COLORS.gray} style={st.searchInput}/>
+            <TextInput
+              value={userSearch}
+              onChangeText={(t) => { setUserSearch(t); if (t.length === 0 || t.length >= 2) loadUsers(t); }}
+              placeholder="Search username..."
+              placeholderTextColor={COLORS.gray}
+              style={st.searchInput}
+              autoCapitalize="none"
+              returnKeyType="search"
+              onSubmitEditing={() => loadUsers(userSearch)}
+            />
             <Text style={st.hint}>{filteredUsers.length} utilisateur(s)</Text>
             {filteredUsers.map(u=>(
               <View key={u.id} style={[st.userRow,u.banned&&{borderColor:COLORS.red+'50',backgroundColor:COLORS.redDim},u.isChampion&&{borderColor:COLORS.gold+'60',backgroundColor:'rgba(201,168,76,0.05)'}]}>
@@ -1134,6 +1197,10 @@ export default function AdminScreen({ navigation, route }) {
                           <Text style={{ color: COLORS.green, fontWeight: '700', fontSize: 12 }}>✅ Unhide</Text>
                         </TouchableOpacity>
                       )}
+                      <TouchableOpacity onPress={() => adminDeleteVideo(selectedAdminVideo)}
+                        style={{ backgroundColor: 'rgba(255,45,85,0.15)', borderWidth: 1, borderColor: COLORS.red, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8, marginBottom: 8 }}>
+                        <Text style={{ color: COLORS.red, fontWeight: '700', fontSize: 12 }}>🗑️ Delete</Text>
+                      </TouchableOpacity>
                       <TouchableOpacity onPress={() => setSelectedAdminVideo(null)}
                         style={{ backgroundColor: COLORS.card, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 8 }}>
                         <Text style={{ color: COLORS.gray, fontWeight: '700', fontSize: 12 }}>Fermer</Text>
@@ -1258,6 +1325,10 @@ export default function AdminScreen({ navigation, route }) {
           </>
         )}
 
+
+
+        {/* ── FINANCE TAB ── */}
+        {tab === 'finance' && <AdminFinanceTab navigation={navigation} />}
 
       </ScrollView>
     </KeyboardAvoidingView>

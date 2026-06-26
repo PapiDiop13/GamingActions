@@ -1,9 +1,77 @@
 // src/components/FramedAvatar.js
 import React from 'react';
-import { View, Text, Image, TouchableOpacity } from 'react-native';
+import { View, Text, Image, TouchableOpacity, Animated, Easing } from 'react-native';
 import { COLORS } from '../constants/colors';
-import { ringColorForUser, glowColorForUser } from '../constants/frames';
+import { ringColorForUser, glowColorForUser, getFrameById } from '../constants/frames';
 import { ElectricRing, RotatingElectricRing, PulsingLeaderRing } from './ElectricEffect';
+
+// ── Animated ring for animated frames ─────────────────────────────────────────
+function PulsingRing({ size, color }) {
+  const anim = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 1000, useNativeDriver: false }),
+        Animated.timing(anim, { toValue: 0, duration: 1000, useNativeDriver: false }),
+      ])
+    ).start();
+    return () => anim.stopAnimation();
+  }, []);
+  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.95] });
+  const borderWidth = anim.interpolate({ inputRange: [0, 1], outputRange: [2, 4] });
+  return (
+    <Animated.View style={{
+      position: 'absolute',
+      width: size + 10, height: size + 10,
+      borderRadius: (size + 10) / 2,
+      borderWidth, borderColor: color,
+      opacity,
+      shadowColor: color, shadowOpacity: 0.8, shadowRadius: 8, shadowOffset: { width: 0, height: 0 },
+    }} />
+  );
+}
+
+function SpinningRing({ size, color }) {
+  // Two separate Animated.Values — one for native (rotate), one for JS (border)
+  const spin = React.useRef(new Animated.Value(0)).current;
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.loop(Animated.timing(spin, { toValue: 1, duration: 3000, useNativeDriver: true, easing: Easing.linear })).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 0, duration: 800, useNativeDriver: false }),
+    ])).start();
+    return () => { spin.stopAnimation(); pulse.stopAnimation(); };
+  }, []);
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0.95] });
+  const ringSize = size + 10;
+  return (
+    <>
+      {/* Rotating arc — useNativeDriver: true */}
+      <Animated.View style={{
+        position: 'absolute',
+        width: ringSize, height: ringSize,
+        borderRadius: ringSize / 2,
+        borderWidth: 3,
+        borderColor: color,
+        borderTopColor: 'transparent',
+        borderRightColor: 'transparent',
+        transform: [{ rotate }],
+        shadowColor: color, shadowOpacity: 0.8, shadowRadius: 6, shadowOffset: { width: 0, height: 0 },
+      }} />
+      {/* Pulsing full ring — useNativeDriver: false */}
+      <Animated.View style={{
+        position: 'absolute',
+        width: ringSize, height: ringSize,
+        borderRadius: ringSize / 2,
+        borderWidth: 1.5,
+        borderColor: color,
+        opacity,
+      }} />
+    </>
+  );
+}
 
 const CROWN_MIN_SIZE = 28;
 
@@ -43,6 +111,15 @@ export default function FramedAvatar({ user, size = 36, onPress, showGlow = true
 
       {/* Effet électrique champion — anneau doré rotatif */}
       {isChampion && <RotatingElectricRing size={size} />}
+
+      {/* Animated frames — pulse or spin based on frame id */}
+      {!isChampion && (() => {
+        const frame = getFrameById(user?.equippedFrame);
+        if (!frame?.animated) return null;
+        const spinIds = ['neon_pulse_blue','neon_pulse_pink','galaxy_animated','rainbow_animated','lightning_animated','void_animated','nebula_animated','neon_city_animated','cosmic_animated','blizzard_animated'];
+        if (spinIds.includes(frame.id)) return <SpinningRing size={size} color={frame.color} />;
+        return <PulsingRing size={size} color={frame.color} />;
+      })()}
       {/* Anneau bleu pulsé pour le leader actuel (si pas champion) */}
       {!isChampion && isLeader && <PulsingLeaderRing size={size} />}
 

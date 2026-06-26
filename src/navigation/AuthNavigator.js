@@ -5,6 +5,7 @@ import OnboardingScreen from '../screens/auth/OnboardingScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import SignUpScreen from '../screens/auth/SignUpScreen';
 import CompleteProfileScreen from '../screens/auth/CompleteProfileScreen';
+import ForgotScreen from '../screens/auth/ForgotScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -16,6 +17,7 @@ export default function AuthNavigator() {
       <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="SignUp" component={SignUpScreen} options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen name="Forgot" component={ForgotScreen} options={{ animation: 'slide_from_right' }} />
     </Stack.Navigator>
   );
 }

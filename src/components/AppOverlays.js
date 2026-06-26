@@ -8,6 +8,7 @@ import { signOut } from 'firebase/auth';
 import { db, auth } from '../config/firebase';
 import { COLORS } from '../constants/colors';
 import useAuthStore from '../store/useAuthStore';
+import GAAlert from './GAAlert';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -106,14 +107,15 @@ export default function AppOverlays() {
     goNext();
   };
 
-  if (!visible || slides.length === 0) return null;
+  if (!visible || slides.length === 0) return <GAAlert />;
 
   const slide = slides[currentSlide];
   const isLast = currentSlide === slides.length - 1;
   const showDots = slides.length > 1;
 
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent>
+    <>
+      <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View style={s.backdrop}>
         <Animated.View style={[s.card, { transform: [{ translateX: slideAnim }] }]}>
 
@@ -178,6 +180,8 @@ export default function AppOverlays() {
         </Animated.View>
       </View>
     </Modal>
+    <GAAlert />
+    </>
   );
 }
 
