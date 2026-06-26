@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gaming Actions Legendary</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { --black:#0A0A0F; --dark:#12121A; --card:#1A1A26; --gold:#C9A84C; --gold2:#E8C96B;
+    --white:#FFFFFF; --gray:#888899; --gray2:#444455; --green:#00C853; --red:#FF2D55; --blue:#00D4FF; }
+  body { background: var(--black); color: var(--white); font-family: -apple-system,'SF Pro Display','Inter',sans-serif; min-height: 100vh; }
+  
+  /* NAV */
+  nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(10,10,15,0.95); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(201,168,76,0.15); padding: 14px 32px; display: flex; justify-content: space-between; align-items: center; }
+  .nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .nav-badge { width: 34px; height: 34px; border-radius: 9px; border: 2px solid var(--gold); background: rgba(201,168,76,0.12); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 12px; color: var(--gold); }
+  .nav-title { font-size: 16px; font-weight: 900; letter-spacing: 1px; color: var(--white); }
+  .nav-title span { color: var(--gold); }
+  .nav-user { display: flex; align-items: center; gap: 12px; }
+  .nav-user-name { font-size: 13px; color: var(--gray); font-weight: 600; }
+  .nav-logout { font-size: 12px; color: var(--gray); cursor: pointer; text-decoration: underline; background: none; border: none; }
+  .nav-logout:hover { color: var(--red); }
+  a.back { font-size: 13px; color: var(--gray); text-decoration: none; }
+  a.back:hover { color: var(--gold); }
+
+  /* LAYOUT */
+  .page { padding: 100px 20px 60px; max-width: 520px; margin: 0 auto; }
+
+  /* AUTH SECTION */
+  .auth-card { background: var(--card); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 32px; margin-bottom: 24px; }
+  .auth-card h2 { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+  .auth-card p { font-size: 13px; color: var(--gray); margin-bottom: 20px; line-height: 1.5; }
+  .input { width: 100%; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; padding: 12px 14px; color: var(--white); font-size: 14px; margin-bottom: 10px; outline: none; transition: border-color .2s; }
+  .input:focus { border-color: var(--gold); }
+  .input::placeholder { color: var(--gray2); }
+  .auth-tabs { display: flex; gap: 4px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 4px; margin-bottom: 20px; }
+  .auth-tab { flex: 1; padding: 8px; text-align: center; font-size: 13px; font-weight: 700; color: var(--gray); border-radius: 7px; cursor: pointer; transition: all .2s; border: none; background: none; }
+  .auth-tab.active { background: var(--card); color: var(--white); box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+  .divider { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.08); }
+  .divider span { font-size: 12px; color: var(--gray2); }
+
+  /* BUTTONS */
+  .btn { width: 100%; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 800; cursor: pointer; border: none; transition: all .2s; }
+  .btn-gold { background: var(--gold); color: var(--black); }
+  .btn-gold:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-gold:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .btn-dark { background: rgba(255,255,255,0.07); color: var(--white); border: 1px solid rgba(255,255,255,0.12); margin-top: 8px; }
+  .btn-dark:hover { background: rgba(255,255,255,0.1); }
+  .btn-google { background: #fff; color: #333; display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; }
+  .btn-google:hover { background: #f5f5f5; }
+  .btn-outline-gold { background: transparent; color: var(--gold); border: 1.5px solid var(--gold); margin-top: 8px; }
+  .btn-outline-gold:hover { background: rgba(201,168,76,0.08); }
+  .btn-red { background: rgba(255,45,85,0.12); color: var(--red); border: 1px solid rgba(255,45,85,0.3); margin-top: 8px; }
+  .btn-red:hover { background: rgba(255,45,85,0.2); }
+
+  /* PLAN CARD */
+  .plan-card { background: linear-gradient(135deg, #1A1500 0%, #0D0A00 100%); border: 1.5px solid rgba(201,168,76,0.35); border-radius: 20px; padding: 32px; position: relative; overflow: hidden; margin-bottom: 20px; }
+  .plan-card::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.07) 0%, transparent 60%); }
+  .plan-badge { display: inline-block; background: var(--gold); color: var(--black); font-size: 10px; font-weight: 900; padding: 3px 12px; border-radius: 50px; margin-bottom: 16px; letter-spacing: 1px; }
+  .plan-card h2 { font-size: 26px; font-weight: 900; margin-bottom: 6px; }
+
+  /* TOGGLE */
+  .toggle-wrap { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; background: rgba(255,255,255,0.05); border-radius: 50px; padding: 4px; width: fit-content; }
+  .toggle-option { padding: 7px 18px; border-radius: 50px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all .2s; color: var(--gray); border: none; background: none; white-space: nowrap; }
+  .toggle-option.active { background: var(--gold); color: var(--black); }
+  .price-display { margin-bottom: 20px; }
+  .price-main { font-size: 42px; font-weight: 900; color: var(--gold); }
+  .price-per { font-size: 16px; color: var(--gray); font-weight: 500; }
+  .price-save { display: inline-block; background: rgba(0,200,83,0.15); color: var(--green); border: 1px solid rgba(0,200,83,0.3); border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 800; margin-left: 8px; }
+  .perks { list-style: none; margin-bottom: 24px; }
+  .perks li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: rgba(255,255,255,0.85); margin-bottom: 9px; }
+  .perks li::before { content: '✓'; color: var(--gold); font-weight: 900; flex-shrink: 0; }
+
+  /* DASHBOARD */
+  .dashboard { background: var(--card); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 28px; margin-bottom: 20px; }
+  .dashboard h2 { font-size: 18px; font-weight: 800; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+  .info-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .info-row:last-child { border-bottom: none; }
+  .info-label { font-size: 13px; color: var(--gray); }
+  .info-value { font-size: 13px; font-weight: 700; color: var(--white); }
+  .status-active { color: var(--green); }
+  .status-pastdue { color: var(--red); }
+
+  /* ALERTS */
+  .alert { border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; font-size: 13px; font-weight: 600; display: none; }
+  .alert-success { background: rgba(0,200,83,0.1); border: 1px solid rgba(0,200,83,0.3); color: var(--green); }
+  .alert-error { background: rgba(255,45,85,0.1); border: 1px solid rgba(255,45,85,0.3); color: var(--red); }
+  .alert-info { background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.25); color: var(--blue); }
+
+  /* LOADING */
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(0,0,0,0.25); border-top-color: var(--black); border-radius: 50%; animation: spin .65s linear infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* FOOTER NOTE */
+  .footer-note { font-size: 11px; color: var(--gray2); text-align: center; margin-top: 16px; line-height: 1.6; }
+
+  @media (max-width: 480px) { .page { padding: 90px 14px 40px; } .plan-card, .auth-card, .dashboard { padding: 22px; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-logo" href="/">
+    <div class="nav-badge">GA</div>
+    <div class="nav-title">GAMING <span>ACTIONS</span></div>
+  </a>
+  <div class="nav-user" id="nav-user" style="display:none">
+    <span class="nav-user-name" id="nav-username"></span>
+    <button class="nav-logout" onclick="handleLogout()">Sign out</button>
+  </div>
+  <a class="back" href="/" id="nav-back">← Home</a>
+</nav>
+
+<div class="page">
+
+  <!-- Success banner -->
+  <div class="alert alert-success" id="alert-success">🎉 Welcome to Legendary! Your account has been upgraded. Open the app to see your perks.</div>
+  <div class="alert alert-error" id="alert-error"></div>
+  <div class="alert alert-info" id="alert-info"></div>
+
+  <!-- AUTH SECTION — shown when not logged in -->
+  <div id="section-auth">
+    <div class="auth-card">
+      <h2>Sign in to Gaming Actions</h2>
+      <p>Use your Gaming Actions account to manage your Legendary subscription.</p>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-signin" onclick="switchTab('signin')">Sign In</button>
+        <button class="auth-tab" id="tab-signup" onclick="switchTab('signup')">Create Account</button>
+      </div>
+
+      <div id="alert-auth" class="alert alert-error"></div>
+
+      <button class="btn btn-google" onclick="signInWithGoogle()">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+        Continue with Google
+      </button>
+
+      <div class="divider"><span>or</span></div>
+
+      <input class="input" type="email" id="auth-email" placeholder="Email address" autocomplete="email" />
+      <input class="input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" />
+      <div id="auth-name-wrap" style="display:none">
+        <input class="input" type="text" id="auth-name" placeholder="Username" autocomplete="username" />
+      </div>
+
+      <button class="btn btn-gold" id="auth-btn" onclick="handleAuth()">Sign In</button>
+      <button class="btn btn-dark" onclick="handleForgot()" id="forgot-btn">Forgot password?</button>
+    </div>
+  </div>
+
+  <!-- PLAN SECTION — shown when logged in & not subscribed -->
+  <div id="section-plan" style="display:none">
+    <div class="plan-card">
+      <div class="plan-badge">👑 LEGENDARY</div>
+      <h2>Go Legendary</h2>
+      <p style="font-size:13px;color:var(--gray);margin-bottom:20px">The ultimate Gaming Actions experience</p>
+
+      <!-- Toggle mensuel / annuel -->
+      <div class="toggle-wrap">
+        <button class="toggle-option active" id="toggle-monthly" onclick="selectPlan('monthly')">Monthly</button>
+        <button class="toggle-option" id="toggle-yearly" onclick="selectPlan('yearly')">Yearly <span style="font-size:10px;background:rgba(0,200,83,0.2);color:var(--green);padding:2px 6px;border-radius:10px;margin-left:2px">-37%</span></button>
+      </div>
+
+      <div class="price-display">
+        <div id="price-monthly" class="">
+          <span class="price-main">CA$1.99</span><span class="price-per"> / month</span>
+        </div>
+        <div id="price-yearly" style="display:none">
+          <span class="price-main">CA$14.99</span><span class="price-per"> / year</span>
+          <span class="price-save">2 months FREE</span>
+        </div>
+      </div>
+
+      <ul class="perks">
+        <li>Free access to all Legendary-tier cosmetics (backgrounds, banners, titles)</li>
+        <li>Exclusive "Elite Member" & "VIP" profile titles</li>
+        <li>Gold "LEGENDARY" badge on your profile & in comments</li>
+        <li>Bonus GA Points on daily login</li>
+        <li>Priority ranking visibility in the community</li>
+        <li>Early access to new features</li>
+      </ul>
+
+      <button class="btn btn-gold" id="checkout-btn" onclick="startCheckout()">
+        Subscribe — CA$1.99/month
+      </button>
+      <p class="footer-note">🔒 Secure payment via Stripe · Cancel anytime · Instant activation in the app</p>
+    </div>
+  </div>
+
+  <!-- DASHBOARD — shown when logged in & subscribed -->
+  <div id="section-dashboard" style="display:none">
+    <div class="dashboard">
+      <h2>👑 Your Legendary Subscription</h2>
+
+      <div class="info-row">
+        <span class="info-label">Status</span>
+        <span class="info-value status-active" id="dash-status">Active</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Plan</span>
+        <span class="info-value" id="dash-plan">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Next billing</span>
+        <span class="info-value" id="dash-renewal">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Source</span>
+        <span class="info-value" id="dash-source">—</span>
+      </div>
+    </div>
+
+    <button class="btn btn-outline-gold" onclick="openPortal()">Manage / Cancel Subscription</button>
+    <button class="btn btn-dark" onclick="handleLogout()">Sign Out</button>
+    <p class="footer-note" id="dash-note"></p>
+  </div>
+
+  <!-- FREE USER dashboard -->
+  <div id="section-free" style="display:none">
+    <div class="dashboard">
+      <h2>👤 Your Account</h2>
+      <div class="info-row">
+        <span class="info-label">Email</span>
+        <span class="info-value" id="dash-email-free">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Plan</span>
+        <span class="info-value" style="color:var(--gray)">Free</span>
+      </div>
+    </div>
+    <button class="btn btn-gold" onclick="showPlan()">Upgrade to Legendary 👑</button>
+    <button class="btn btn-dark" onclick="handleLogout()">Sign Out</button>
+  </div>
+
+</div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
+import {
+  getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  GoogleAuthProvider, signInWithPopup, signOut, sendPasswordResetEmail, onAuthStateChanged,
+} from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
+import { getFirestore, doc, getDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDHYlFVDkF85KknGDiqatsCSOzW2bkMyDU",
+  authDomain: "gamingactions-app.firebaseapp.com",
+  projectId: "gamingactions-app",
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const googleProvider = new GoogleAuthProvider();
+const CHECKOUT_URL = "https://createcheckoutsession-z2yfr44pvq-uc.a.run.app";
+const PORTAL_URL = "https://createportalsession-z2yfr44pvq-uc.a.run.app";
+
+let currentUser = null;
+let currentPlan = 'monthly';
+
+// ── URL params ──────────────────────────────────────────────────────────────
+const params = new URLSearchParams(window.location.search);
+if (params.get('success') === 'true') showAlert('success', '🎉 Welcome to Legendary! Your account has been upgraded. Open the app to see your perks.');
+
+// ── Auth state ───────────────────────────────────────────────────────────────
+onAuthStateChanged(auth, async (user) => {
+  currentUser = user;
+  if (user) {
+    document.getElementById('nav-user').style.display = 'flex';
+    document.getElementById('nav-username').textContent = user.displayName || user.email;
+    document.getElementById('nav-back').style.display = 'none';
+    document.getElementById('section-auth').style.display = 'none';
+    // Load user data from Firestore
+    const snap = await getDoc(doc(db, 'users', user.uid));
+    const data = snap.exists() ? snap.data() : {};
+    renderUserState(user, data);
+  } else {
+    document.getElementById('nav-user').style.display = 'none';
+    document.getElementById('nav-back').style.display = 'block';
+    document.getElementById('section-auth').style.display = 'block';
+    document.getElementById('section-plan').style.display = 'none';
+    document.getElementById('section-dashboard').style.display = 'none';
+    document.getElementById('section-free').style.display = 'none';
+  }
+});
+
+function renderUserState(user, data) {
+  const plan = data.plan || 'free';
+  const source = data.subscriptionSource || '';
+  const status = data.stripeStatus || '';
+  const expiresAt = data.subscriptionExpiresAt;
+
+  if (plan === 'legendary') {
+    // Show dashboard
+    document.getElementById('section-dashboard').style.display = 'block';
+    document.getElementById('section-plan').style.display = 'none';
+    document.getElementById('section-free').style.display = 'none';
+
+    document.getElementById('dash-status').textContent = status === 'past_due' ? '⚠️ Payment issue' : '✅ Active';
+    document.getElementById('dash-status').className = 'info-value ' + (status === 'past_due' ? 'status-pastdue' : 'status-active');
+
+    // Plan type
+    const isYearly = data.stripeSubscriptionId && data.planInterval === 'year';
+    document.getElementById('dash-plan').textContent = 'Legendary ' + (source === 'stripe_web' ? (isYearly ? '(Yearly)' : '(Monthly)') : '(App Store)');
+
+    // Renewal date
+    if (expiresAt) {
+      const d = expiresAt.toDate ? expiresAt.toDate() : new Date(expiresAt * 1000);
+      document.getElementById('dash-renewal').textContent = d.toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
+    } else {
+      document.getElementById('dash-renewal').textContent = '—';
+    }
+
+    document.getElementById('dash-source').textContent = source === 'stripe_web' ? '🌐 Gaming Actions Website' : '📱 App Store / Google Play';
+
+    if (source !== 'stripe_web') {
+      document.getElementById('dash-note').textContent = 'Subscribed via the app — manage in your device settings.';
+      document.querySelector('.btn-outline-gold').style.display = 'none';
+    }
+
+  } else {
+    // Free user — show account info then plan
+    document.getElementById('section-free').style.display = 'block';
+    document.getElementById('section-plan').style.display = 'none';
+    document.getElementById('section-dashboard').style.display = 'none';
+    document.getElementById('dash-email-free').textContent = user.email;
+  }
+}
+
+// ── Show plan from free section ──────────────────────────────────────────────
+window.showPlan = function() {
+  document.getElementById('section-free').style.display = 'none';
+  document.getElementById('section-plan').style.display = 'block';
+};
+
+// ── Toggle plan ──────────────────────────────────────────────────────────────
+window.selectPlan = function(plan) {
+  currentPlan = plan;
+  document.getElementById('toggle-monthly').classList.toggle('active', plan === 'monthly');
+  document.getElementById('toggle-yearly').classList.toggle('active', plan === 'yearly');
+  document.getElementById('price-monthly').style.display = plan === 'monthly' ? 'block' : 'none';
+  document.getElementById('price-yearly').style.display = plan === 'yearly' ? 'block' : 'none';
+  const btn = document.getElementById('checkout-btn');
+  btn.textContent = plan === 'yearly' ? 'Subscribe — CA$14.99/year' : 'Subscribe — CA$1.99/month';
+};
+
+// ── Auth tab switch ──────────────────────────────────────────────────────────
+window.switchTab = function(tab) {
+  document.getElementById('tab-signin').classList.toggle('active', tab === 'signin');
+  document.getElementById('tab-signup').classList.toggle('active', tab === 'signup');
+  document.getElementById('auth-name-wrap').style.display = tab === 'signup' ? 'block' : 'none';
+  document.getElementById('auth-btn').textContent = tab === 'signup' ? 'Create Account' : 'Sign In';
+  document.getElementById('forgot-btn').style.display = tab === 'signup' ? 'none' : 'block';
+  clearAlerts();
+};
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+window.handleAuth = async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const isSignup = document.getElementById('tab-signup').classList.contains('active');
+  const btn = document.getElementById('auth-btn');
+  if (!email || !password) { showAuthAlert('Please fill in all fields.'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>' + (isSignup ? 'Creating...' : 'Signing in...');
+  clearAlerts();
+
+  try {
+    if (isSignup) {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+    } else {
+      await signInWithEmailAndPassword(auth, email, password);
+    }
+  } catch (e) {
+    let msg = e.message;
+    if (e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = 'Invalid email or password.';
+    if (e.code === 'auth/email-already-in-use') msg = 'This email is already registered. Sign in instead.';
+    if (e.code === 'auth/weak-password') msg = 'Password must be at least 6 characters.';
+    showAuthAlert(msg);
+    btn.disabled = false;
+    btn.textContent = isSignup ? 'Create Account' : 'Sign In';
+  }
+};
+
+window.signInWithGoogle = async function() {
+  try {
+    await signInWithPopup(auth, googleProvider);
+  } catch (e) {
+    if (e.code !== 'auth/popup-closed-by-user') showAuthAlert(e.message);
+  }
+};
+
+window.handleForgot = async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  if (!email) { showAuthAlert('Enter your email first.'); return; }
+  try {
+    await sendPasswordResetEmail(auth, email);
+    showAlert('info', '📧 Password reset email sent. Check your inbox.');
+  } catch (e) { showAuthAlert(e.message); }
+};
+
+window.handleLogout = async function() {
+  await signOut(auth);
+};
+
+// ── Checkout ──────────────────────────────────────────────────────────────────
+window.startCheckout = async function() {
+  if (!currentUser) return;
+  const btn = document.getElementById('checkout-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Loading...';
+  clearAlerts();
+
+  try {
+    const resp = await fetch(CHECKOUT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: currentUser.uid,
+        email: currentUser.email,
+        plan: currentPlan,
+        successUrl: window.location.origin + '/legendary?success=true',
+        cancelUrl: window.location.href,
+      }),
+    });
+    const data = await resp.json();
+    if (data.url) { window.location.href = data.url; }
+    else throw new Error(data.error || 'Could not create session');
+  } catch (e) {
+    showAlert('error', 'Error: ' + e.message);
+    btn.disabled = false;
+    selectPlan(currentPlan); // reset button text
+  }
+};
+
+// ── Portal ────────────────────────────────────────────────────────────────────
+window.openPortal = async function() {
+  if (!currentUser) return;
+  const btn = document.querySelector('.btn-outline-gold');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Loading...';
+  try {
+    const resp = await fetch(PORTAL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: currentUser.uid, returnUrl: window.location.href }),
+    });
+    const data = await resp.json();
+    if (data.url) window.location.href = data.url;
+    else throw new Error(data.error);
+  } catch (e) {
+    showAlert('error', 'Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Manage / Cancel Subscription';
+  }
+};
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+function showAlert(type, msg) {
+  const el = document.getElementById('alert-' + type);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function showAuthAlert(msg) {
+  const el = document.getElementById('alert-auth');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function clearAlerts() {
+  ['alert-success','alert-error','alert-info','alert-auth'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
+</script>
+</body>
+</html>

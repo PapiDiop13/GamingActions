@@ -129,10 +129,17 @@ export default function SubscriptionScreen({ navigation }) {
       setLoading(false);
       return;
     }
+    // Redirige vers le site web pour le paiement Stripe
     Alert.alert(
-      '🔜 Coming Soon',
-      'Legendary subscriptions will be available for purchase very soon!\n\nStay tuned for the update! 🏆',
-      [{ text: 'Got it 👌' }]
+      '👑 Go Legendary',
+      'Subscribe via our website for CA$1.99/month.\n\nYour Legendary status will be active instantly in the app after payment.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Subscribe on Web 🌐', onPress: () => {
+          const { Linking } = require('react-native');
+          Linking.openURL('https://gamingactions.app/legendary');
+        }},
+      ]
     );
   };
 
@@ -243,7 +250,9 @@ export default function SubscriptionScreen({ navigation }) {
             <View style={s.paymentInfo}>
               <Ionicons name={Platform.OS === 'ios' ? 'logo-apple' : 'logo-google-playstore'} size={14} color={COLORS.gray} />
               <Text style={s.paymentInfoText}>
-                {Platform.OS === 'ios' ? 'Managed by App Store · Cancel anytime in Settings' : 'Managed by Google Play · Cancel anytime'}
+                {userProfile?.subscriptionSource === 'stripe_web'
+            ? 'Subscribed via gamingactions.app — manage on the website'
+            : Platform.OS === 'ios' ? 'Managed by App Store · Cancel anytime in Settings' : 'Managed by Google Play · Cancel anytime'}
               </Text>
             </View>
 

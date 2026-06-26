@@ -1911,3 +1911,236 @@ export const broadcastPush = onRequest(
     res.status(200).json({ ok: true, sent, failed, total: docs.length });
   }
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STRIPE WEBHOOK — Gestion des abonnements Legendary via le site web
+// ─────────────────────────────────────────────────────────────────────────────
+import Stripe from "stripe";
+
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+const STRIPE_PRICE_ID_MONTHLY = "price_1Tmex2097oI4jieSjbbA3ds3";
+const STRIPE_PRICE_ID_YEARLY  = "price_1TmfVo097oI4jieSliHF5NNi";
+
+const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+
+// Webhook Stripe — reçoit les événements de paiement
+export const stripeWebhook = onRequest(
+  { cors: true, region: "us-central1" },
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"] as string;
+    let event: Stripe.Event;
+
+    try {
+      // Vérifie la signature du webhook
+      const rawBody = (req as any).rawBody || Buffer.from(JSON.stringify(req.body));
+      if (STRIPE_WEBHOOK_SECRET) {
+        event = stripe.webhooks.constructEvent(rawBody, sig, STRIPE_WEBHOOK_SECRET);
+      } else {
+        event = req.body as Stripe.Event;
+      }
+    } catch (err: any) {
+      logger.error("Stripe webhook signature error:", err.message);
+      res.status(400).send(`Webhook Error: ${err.message}`);
+      return;
+    }
+
+    logger.info("Stripe event received:", event.type);
+
+    try {
+      switch (event.type) {
+
+        // ── Abonnement créé ou activé ──────────────────────────────────────
+        case "customer.subscription.created":
+        case "customer.subscription.updated": {
+          const sub = event.data.object as Stripe.Subscription;
+          const customerId = sub.customer as string;
+          const status = sub.status; // 'active' | 'past_due' | 'canceled' etc.
+          const currentPeriodEnd = (sub as any).current_period_end;
+          const priceId = sub.items.data[0]?.price?.id;
+
+          if (priceId !== STRIPE_PRICE_ID_MONTHLY && priceId !== STRIPE_PRICE_ID_YEARLY) break;
+
+          // Trouve le user par stripeCustomerId
+          const userSnap = await db.collection("users")
+            .where("stripeCustomerId", "==", customerId)
+            .limit(1).get();
+
+          if (userSnap.empty) {
+            logger.warn("No user found for stripeCustomerId:", customerId);
+            break;
+          }
+
+          const uid = userSnap.docs[0].id;
+          const isActive = status === "active" || status === "trialing";
+
+          await db.collection("users").doc(uid).update({
+            plan: isActive ? "legendary" : "free",
+            stripeSubscriptionId: sub.id,
+            stripeCustomerId: customerId,
+            stripeStatus: status,
+            subscriptionSource: "stripe_web",
+            subscriptionExpiresAt: currentPeriodEnd
+              ? admin.firestore.Timestamp.fromMillis(currentPeriodEnd * 1000)
+              : null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          logger.info(`User ${uid} plan updated to ${isActive ? "legendary" : "free"} (${status})`);
+          break;
+        }
+
+        // ── Abonnement annulé ──────────────────────────────────────────────
+        case "customer.subscription.deleted": {
+          const sub = event.data.object as Stripe.Subscription;
+          const customerId = sub.customer as string;
+
+          const userSnap = await db.collection("users")
+            .where("stripeCustomerId", "==", customerId)
+            .limit(1).get();
+
+          if (userSnap.empty) break;
+
+          const uid = userSnap.docs[0].id;
+          await db.collection("users").doc(uid).update({
+            plan: "free",
+            stripeStatus: "canceled",
+            stripeSubscriptionId: null,
+            subscriptionExpiresAt: null,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          logger.info(`User ${uid} subscription canceled → plan: free`);
+          break;
+        }
+
+        // ── Paiement réussi ────────────────────────────────────────────────
+        case "invoice.payment_succeeded": {
+          const invoice = event.data.object as Stripe.Invoice;
+          const customerId = invoice.customer as string;
+          const subId = (invoice as any).subscription as string;
+          if (!subId) break;
+
+          const sub = await stripe.subscriptions.retrieve(subId);
+          const priceId = sub.items.data[0]?.price?.id;
+          if (priceId !== STRIPE_PRICE_ID_MONTHLY && priceId !== STRIPE_PRICE_ID_YEARLY) break;
+
+          const userSnap = await db.collection("users")
+            .where("stripeCustomerId", "==", customerId)
+            .limit(1).get();
+          if (userSnap.empty) break;
+
+          const uid = userSnap.docs[0].id;
+          const currentPeriodEnd = (sub as any).current_period_end;
+          await db.collection("users").doc(uid).update({
+            plan: "legendary",
+            stripeStatus: "active",
+            subscriptionExpiresAt: admin.firestore.Timestamp.fromMillis(currentPeriodEnd * 1000),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          logger.info(`Payment succeeded for user ${uid} — Legendary renewed`);
+          break;
+        }
+
+        // ── Paiement échoué ────────────────────────────────────────────────
+        case "invoice.payment_failed": {
+          const invoice = event.data.object as Stripe.Invoice;
+          const customerId = invoice.customer as string;
+
+          const userSnap = await db.collection("users")
+            .where("stripeCustomerId", "==", customerId)
+            .limit(1).get();
+          if (userSnap.empty) break;
+
+          const uid = userSnap.docs[0].id;
+          await db.collection("users").doc(uid).update({
+            stripeStatus: "past_due",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          logger.warn(`Payment failed for user ${uid}`);
+          break;
+        }
+      }
+    } catch (err: any) {
+      logger.error("Stripe webhook processing error:", err);
+      res.status(500).json({ error: err.message });
+      return;
+    }
+
+    res.status(200).json({ received: true });
+  }
+);
+
+// Crée une Stripe Checkout Session — appelée depuis le site web
+export const createCheckoutSession = onRequest(
+  { cors: true, region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).send("Method Not Allowed"); return; }
+
+    const { uid, email, successUrl, cancelUrl, plan } = req.body;
+    if (!uid || !email) { res.status(400).json({ error: "uid and email required" }); return; }
+
+    try {
+      // Cherche ou crée le customer Stripe
+      const userRef = db.collection("users").doc(uid);
+      const userDoc = await userRef.get();
+      const userData = userDoc.data() || {};
+
+      let customerId = userData.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email,
+          metadata: { firebaseUid: uid },
+        });
+        customerId = customer.id;
+        await userRef.update({ stripeCustomerId: customerId });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        payment_method_types: ["card"],
+        line_items: [{ price: plan === "yearly" ? STRIPE_PRICE_ID_YEARLY : STRIPE_PRICE_ID_MONTHLY, quantity: 1 }],
+        mode: "subscription",
+        success_url: successUrl || "https://gamingactions.app/legendary?success=true",
+        cancel_url: cancelUrl || "https://gamingactions.app/legendary?canceled=true",
+        metadata: { firebaseUid: uid },
+        subscription_data: {
+          metadata: { firebaseUid: uid },
+        },
+      });
+
+      res.status(200).json({ sessionId: session.id, url: session.url });
+    } catch (err: any) {
+      logger.error("createCheckoutSession error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// Crée un Stripe Customer Portal — pour gérer/annuler l'abonnement depuis le web
+export const createPortalSession = onRequest(
+  { cors: true, region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).send("Method Not Allowed"); return; }
+
+    const { uid, returnUrl } = req.body;
+    if (!uid) { res.status(400).json({ error: "uid required" }); return; }
+
+    try {
+      const userDoc = await db.collection("users").doc(uid).get();
+      const customerId = userDoc.data()?.stripeCustomerId;
+      if (!customerId) { res.status(404).json({ error: "No Stripe customer found" }); return; }
+
+      const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: returnUrl || "https://gamingactions.app/legendary",
+      });
+
+      res.status(200).json({ url: session.url });
+    } catch (err: any) {
+      logger.error("createPortalSession error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
