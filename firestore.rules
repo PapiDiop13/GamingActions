@@ -20,19 +20,18 @@ service cloud.firestore {
     }
 
     // ── Users ─────────────────────────────────────────────────────────────────
-    // Lecture : tout user connecté (pour profils publics)
+    // Lecture publique : leaderboard web (champs non sensibles : username, avatar, ggReceived, plan, isChampion, streakLevel)
+    // Lecture auth   : profil complet (app mobile)
     // Écriture : uniquement son propre profil OU admin
-    // Les champs sensibles (gaPoints, streakPoints, ggReceived, plan, banned)
-    // ne peuvent être modifiés que par le serveur (Admin SDK) ou l'admin.
     match /users/{userId} {
-      allow read: if isAuth();
+      allow read: if true; // lecture publique pour leaderboard web + app
       allow create: if isOwner(userId);
       allow update: if isOwner(userId) || isAdmin();
     }
 
     // ── Videos ───────────────────────────────────────────────────────────────
     match /videos/{videoId} {
-      allow read: if isAuth();
+      allow read: if true; // lecture publique pour leaderboard web + feed app
       allow create: if isAuth() && notBanned() && request.resource.data.userId == request.auth.uid;
       allow update: if isAuth() && (
         resource.data.userId == request.auth.uid || isAdmin()

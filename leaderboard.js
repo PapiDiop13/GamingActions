@@ -105,14 +105,14 @@ onSnapshot(playersQ, function(snap) {
   if (!el) return;
   el.innerHTML = '';
   if (snap.empty) {
-    el.innerHTML = '<li class="lb-loading">No players yet</li>';
+    el.innerHTML = '<li class="lb-loading">No players yet — be the first! 🎮</li>';
     return;
   }
   snap.docs.forEach(function(d, i) { el.appendChild(playerItem(d, i)); });
 }, function(err) {
-  console.error('Players error:', err);
+  console.error('Players error:', err.code, err.message);
   const el = document.getElementById('lb-players');
-  if (el) el.innerHTML = '<li class="lb-loading">Error loading</li>';
+  if (el) el.innerHTML = '<li class="lb-loading" style="color:#888">Rankings loading... open the app to see live data 🎮</li>';
 });
 
 // Top Clips
@@ -122,12 +122,12 @@ onSnapshot(clipsQ, function(snap) {
   if (!el) return;
   el.innerHTML = '';
   if (snap.empty) {
-    el.innerHTML = '<li class="lb-loading">No clips yet</li>';
+    el.innerHTML = '<li class="lb-loading">No clips yet — upload your first! 🎬</li>';
     return;
   }
   snap.docs.forEach(function(d, i) { el.appendChild(clipItem(d, i)); });
 }, function(err) {
-  console.error('Clips error:', err);
+  console.error('Clips error:', err.code, err.message);
   const el = document.getElementById('lb-clips');
-  if (el) el.innerHTML = '<li class="lb-loading">Error loading</li>';
+  if (el) el.innerHTML = '<li class="lb-loading" style="color:#888">Clips loading... open the app to see live data 🎬</li>';
 });
