@@ -1,7 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPortalSession = exports.createCheckoutSession = exports.stripeWebhook = exports.broadcastPush = exports.onMentionNotif = exports.onVideoCreated = exports.notifYourRank = exports.migrateCloudinaryToMux = exports.muxWebhook = exports.muxGetUploadUrl = exports.exportDuplicates = exports.importVideoUpdates = exports.exportVideos = exports.exportGamesGenres = exports.adminCleanup = exports.reshuffleFeedOrder = exports.checkExpiredSubscriptions = exports.dailyLeaderBonus = exports.decayStreakPoints = exports.updateCurrentLeader = exports.assignMonthlyChampion = exports.notifWeekend = exports.notifRankingHeat = exports.notifUploadNudge = exports.notifInactiveUsers = exports.cleanOrphanData = exports.reconcileUserStats = exports.reconcileGGCounts = exports.onCommentCreated = exports.onVideoDeleted = exports.onFollowWritten = exports.onGGWritten = void 0;
-const admin = require("firebase-admin");
+const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const https_1 = require("firebase-functions/v2/https");
@@ -1737,15 +1773,15 @@ exports.broadcastPush = (0, https_1.onRequest)({ region: "us-central1", timeoutS
 // ─────────────────────────────────────────────────────────────────────────────
 // STRIPE WEBHOOK — Gestion des abonnements Legendary via le site web
 // ─────────────────────────────────────────────────────────────────────────────
-const stripe_1 = require("stripe");
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
+const stripe_1 = __importDefault(require("stripe"));
 const STRIPE_PRICE_ID_MONTHLY = "price_1Tmex2097oI4jieSjbbA3ds3";
 const STRIPE_PRICE_ID_YEARLY = "price_1TmfVo097oI4jieSliHF5NNi";
-const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 // Webhook Stripe — reçoit les événements de paiement
 exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
     var _a, _b, _c, _d;
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+    const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
     const sig = req.headers["stripe-signature"];
     let event;
     try {
@@ -1875,6 +1911,12 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
 });
 // Crée une Stripe Checkout Session — appelée depuis le site web
 exports.createCheckoutSession = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_SECRET_KEY) {
+        res.status(500).json({ error: "Stripe key not configured" });
+        return;
+    }
+    const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
     if (req.method !== "POST") {
         res.status(405).send("Method Not Allowed");
         return;
@@ -1920,6 +1962,8 @@ exports.createCheckoutSession = (0, https_1.onRequest)({ cors: true, region: "us
 // Crée un Stripe Customer Portal — pour gérer/annuler l'abonnement depuis le web
 exports.createPortalSession = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
     var _a;
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
     if (req.method !== "POST") {
         res.status(405).send("Method Not Allowed");
         return;

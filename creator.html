@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gaming Actions — Creator Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --black: #0A0A0F; --dark: #12121A; --card: #1A1A26; --card2: #202030;
+    --gold: #C9A84C; --gold2: #E8C96B; --white: #FFFFFF;
+    --gray: #888899; --gray2: #444455; --gray3: #2A2A3A;
+    --red: #FF2D55; --blue: #00D4FF; --green: #00C853; --purple: #7C4DFF;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--black); color: var(--white); min-height: 100vh; }
+
+  /* ── AUTH ─────────────────────────────── */
+  #auth-screen { min-height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.08) 0%, transparent 60%); }
+  .auth-card { background:var(--card); border:1px solid var(--gray3); border-radius:20px; padding:40px 36px; width:100%; max-width:400px; }
+  .auth-logo { display:flex; align-items:center; gap:12px; margin-bottom:32px; }
+  .auth-logo-text { font-size:20px; font-weight:900; }
+  .auth-logo-sub { font-size:11px; color:var(--gray); text-transform:uppercase; letter-spacing:1px; }
+  .auth-title { font-size:24px; font-weight:800; margin-bottom:6px; }
+  .auth-sub { color:var(--gray); font-size:13px; margin-bottom:28px; }
+  .auth-label { font-size:10px; color:var(--gray); letter-spacing:1px; text-transform:uppercase; margin-bottom:6px; display:block; }
+  .auth-input { width:100%; background:var(--dark); border:1px solid var(--gray3); border-radius:10px; padding:12px 14px; font-size:14px; color:var(--white); outline:none; margin-bottom:14px; transition:border-color .2s; }
+  .auth-input:focus { border-color:var(--gold); }
+  .btn-gold { width:100%; background:var(--gold); color:var(--black); font-size:14px; font-weight:900; border:none; border-radius:10px; padding:14px; cursor:pointer; letter-spacing:0.5px; transition:opacity .15s; }
+  .btn-gold:hover { opacity:.88; }
+  .btn-google { width:100%; background:var(--dark); color:var(--white); font-size:14px; font-weight:700; border:1px solid var(--gray3); border-radius:10px; padding:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:20px; transition:border-color .2s; }
+  .btn-google:hover { border-color:var(--gray); }
+  .divider { display:flex; align-items:center; gap:12px; margin:16px 0; }
+  .divider-line { flex:1; height:1px; background:var(--gray3); }
+  .divider-text { font-size:12px; color:var(--gray); }
+  .auth-error { color:var(--red); font-size:13px; margin-bottom:12px; display:none; }
+
+  /* ── NOT CREATOR ──────────────────────── */
+  #not-creator { display:none; min-height:100vh; align-items:center; justify-content:center; flex-direction:column; gap:16px; text-align:center; padding:32px; }
+  #not-creator h2 { font-size:22px; font-weight:900; }
+  #not-creator p { color:var(--gray); font-size:14px; max-width:340px; }
+
+  /* ── APP ──────────────────────────────── */
+  #app { display:none; min-height:100vh; }
+  .layout { display:flex; min-height:100vh; }
+
+  /* ── SIDEBAR ──────────────────────────── */
+  .sidebar { width:220px; flex-shrink:0; background:var(--dark); border-right:1px solid var(--gray3); display:flex; flex-direction:column; position:fixed; top:0; left:0; height:100vh; z-index:200; transition:transform .25s; }
+  .sidebar-logo { padding:20px 18px 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--gray3); }
+  .sidebar-logo-text { font-size:14px; font-weight:900; }
+  .sidebar-logo-badge { font-size:9px; background:rgba(201,168,76,0.15); color:var(--gold); border:1px solid rgba(201,168,76,0.3); border-radius:4px; padding:2px 5px; font-weight:800; letter-spacing:0.5px; margin-top:1px; }
+  .sidebar-nav { flex:1; padding:12px 10px; overflow-y:auto; }
+  .nav-label { font-size:9px; color:var(--gray2); letter-spacing:1.5px; text-transform:uppercase; padding:8px 8px 4px; }
+  .nav-item { display:flex; align-items:center; gap:10px; padding:10px; border-radius:10px; cursor:pointer; font-size:13px; font-weight:600; color:var(--gray); transition:all .15s; margin-bottom:2px; }
+  .nav-item:hover { background:var(--card); color:var(--white); }
+  .nav-item.active { background:rgba(201,168,76,0.12); color:var(--gold); }
+  .nav-item svg { width:17px; height:17px; flex-shrink:0; }
+  .sidebar-footer { padding:16px 12px; border-top:1px solid var(--gray3); }
+  .sidebar-user { display:flex; align-items:center; gap:10px; }
+  .sidebar-avatar { width:36px; height:36px; border-radius:50%; background:var(--card2); overflow:hidden; border:1.5px solid var(--gold); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; color:var(--gold); }
+  .sidebar-avatar img { width:100%; height:100%; object-fit:cover; }
+  .sidebar-user-info { flex:1; overflow:hidden; }
+  .sidebar-username { font-size:13px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sidebar-role { font-size:10px; color:var(--gold); font-weight:700; }
+  .btn-signout { background:none; border:none; cursor:pointer; color:var(--gray); padding:4px; border-radius:6px; }
+  .btn-signout:hover { color:var(--red); }
+
+  /* ── MOBILE NAV ───────────────────────── */
+  .mobile-header { display:none; position:fixed; top:0; left:0; right:0; z-index:300; background:var(--dark); border-bottom:1px solid var(--gray3); padding:12px 16px; align-items:center; gap:12px; }
+  .burger { background:none; border:none; cursor:pointer; color:var(--white); padding:4px; display:flex; flex-direction:column; gap:4px; }
+  .burger span { display:block; width:20px; height:2px; background:var(--white); border-radius:2px; transition:all .2s; }
+  .mobile-header-title { font-size:15px; font-weight:900; flex:1; }
+  .sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:150; }
+  .sidebar-overlay.open { display:block; }
+
+  /* ── MAIN ─────────────────────────────── */
+  .main { margin-left:220px; flex:1; padding:28px 32px; max-width:calc(100vw - 220px); }
+  .page { display:none; }
+  .page.active { display:block; }
+  .page-header { margin-bottom:24px; }
+  .page-title { font-size:22px; font-weight:900; margin-bottom:4px; }
+  .page-sub { font-size:13px; color:var(--gray); }
+
+  /* ── STAT CARDS ───────────────────────── */
+  .stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
+  .stat-card { background:var(--card); border:1px solid var(--gray3); border-radius:14px; padding:18px; transition:border-color .2s; }
+  .stat-card:hover { border-color:var(--gray2); }
+  .stat-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:14px; font-size:18px; }
+  .stat-value { font-size:26px; font-weight:900; margin-bottom:2px; }
+  .stat-label { font-size:11px; color:var(--gray); text-transform:uppercase; letter-spacing:0.5px; }
+
+  /* ── CARDS ────────────────────────────── */
+  .card { background:var(--card); border:1px solid var(--gray3); border-radius:14px; padding:20px; margin-bottom:16px; }
+  .card-title { font-size:14px; font-weight:800; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+
+  /* ── CHART ────────────────────────────── */
+  .chart-grid { display:grid; grid-template-columns:1.6fr 1fr; gap:14px; margin-bottom:16px; }
+  .chart-wrap { position:relative; height:220px; }
+
+  /* ── TABLE ────────────────────────────── */
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  thead th { text-align:left; font-size:10px; color:var(--gray); letter-spacing:1px; text-transform:uppercase; padding:8px 12px; border-bottom:1px solid var(--gray3); white-space:nowrap; }
+  tbody tr { border-bottom:1px solid rgba(42,42,58,0.5); transition:background .1s; }
+  tbody tr:last-child { border-bottom:none; }
+  tbody tr:hover { background:rgba(255,255,255,0.02); }
+  tbody td { padding:12px; vertical-align:middle; }
+  .td-thumb { width:48px; height:34px; border-radius:6px; background:var(--dark); overflow:hidden; object-fit:cover; display:block; }
+  .td-thumb-wrap { display:flex; align-items:center; gap:10px; }
+  .td-title { font-weight:700; font-size:13px; max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .td-sub { font-size:11px; color:var(--gray); margin-top:2px; }
+  .badge { display:inline-flex; align-items:center; padding:2px 7px; border-radius:5px; font-size:10px; font-weight:800; letter-spacing:0.5px; }
+  .badge-gold { background:rgba(201,168,76,0.15); color:var(--gold); border:1px solid rgba(201,168,76,0.3); }
+  .badge-green { background:rgba(0,200,83,0.12); color:var(--green); border:1px solid rgba(0,200,83,0.3); }
+  .badge-gray { background:rgba(136,136,153,0.12); color:var(--gray); border:1px solid rgba(136,136,153,0.2); }
+  .badge-blue { background:rgba(0,212,255,0.12); color:var(--blue); border:1px solid rgba(0,212,255,0.3); }
+  .badge-red { background:rgba(255,45,85,0.12); color:var(--red); border:1px solid rgba(255,45,85,0.3); }
+  .btn-icon { background:none; border:1px solid var(--gray3); border-radius:7px; cursor:pointer; color:var(--gray); padding:5px 7px; display:inline-flex; align-items:center; gap:4px; transition:all .15s; font-size:11px; font-weight:600; }
+  .btn-icon:hover { border-color:var(--red); color:var(--red); }
+  .btn-icon svg { width:13px; height:13px; }
+
+  /* ── FAN GRID ─────────────────────────── */
+  .fan-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; }
+  .fan-card { background:var(--dark); border:1px solid var(--gray3); border-radius:12px; padding:16px; display:flex; flex-direction:column; align-items:center; text-align:center; }
+  .fan-card:hover { border-color:var(--gray2); }
+  .fan-avatar { width:50px; height:50px; border-radius:50%; background:var(--card2); overflow:hidden; border:2px solid var(--gray3); margin-bottom:10px; display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:800; color:var(--gold); }
+  .fan-avatar img { width:100%; height:100%; object-fit:cover; }
+  .fan-name { font-size:12px; font-weight:800; margin-bottom:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fan-date { font-size:10px; color:var(--gray); margin-bottom:10px; }
+
+  /* ── EARNINGS ─────────────────────────── */
+  .earnings-hero { background:linear-gradient(135deg,rgba(201,168,76,0.12) 0%,rgba(201,168,76,0.04) 100%); border:1px solid rgba(201,168,76,0.25); border-radius:16px; padding:24px 28px; display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:16px; }
+  .earnings-bal { font-size:42px; font-weight:900; color:var(--gold); line-height:1; }
+  .earnings-bal-label { font-size:12px; color:var(--gray); margin-bottom:6px; text-transform:uppercase; letter-spacing:1px; }
+  .earnings-note { font-size:11px; color:var(--gray); margin-top:6px; }
+  .btn-withdraw { background:var(--gold); color:var(--black); font-size:13px; font-weight:900; border:none; border-radius:10px; padding:12px 20px; cursor:pointer; white-space:nowrap; transition:opacity .15s; }
+  .btn-withdraw:hover { opacity:.88; }
+  .btn-withdraw:disabled { opacity:.4; cursor:not-allowed; }
+  .earnings-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
+  .e-stat { background:var(--card); border:1px solid var(--gray3); border-radius:12px; padding:16px; }
+  .e-stat-val { font-size:20px; font-weight:900; margin-bottom:2px; }
+  .e-stat-lab { font-size:10px; color:var(--gray); text-transform:uppercase; letter-spacing:0.5px; }
+
+  /* ── FANBOX ───────────────────────────── */
+  .fanbox-messages-list { display:flex; flex-direction:column; gap:8px; max-height:520px; overflow-y:auto; padding-right:4px; }
+  .msg-row { display:flex; gap:10px; align-items:flex-start; }
+  .msg-avatar { width:34px; height:34px; border-radius:50%; background:var(--card2); overflow:hidden; flex-shrink:0; border:1.5px solid var(--gray3); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800; }
+  .msg-avatar img { width:100%; height:100%; object-fit:cover; }
+  .msg-bubble { flex:1; background:var(--dark); border:1px solid var(--gray3); border-radius:12px; border-top-left-radius:4px; padding:10px 12px; }
+  .msg-bubble.creator-msg { border-color:rgba(201,168,76,0.3); background:rgba(201,168,76,0.05); }
+  .msg-bubble.deleted-msg { opacity:.4; font-style:italic; }
+  .msg-sender { font-size:11px; font-weight:800; margin-bottom:4px; }
+  .msg-text { font-size:13px; line-height:1.5; word-break:break-word; }
+  .msg-meta { font-size:10px; color:var(--gray); margin-top:5px; display:flex; align-items:center; gap:10px; }
+  .msg-action { background:none; border:none; cursor:pointer; color:var(--gray2); font-size:10px; padding:0; transition:color .15s; }
+  .msg-action:hover { color:var(--red); }
+  .fanbox-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .fanbox-count { font-size:12px; color:var(--gray); }
+
+  /* ── ANNOUNCEMENTS ────────────────────── */
+  .ann-preview { border-radius:12px; overflow:hidden; margin-bottom:16px; background:var(--dark); border:1px solid var(--gray3); }
+  .ann-preview img { width:100%; max-height:200px; object-fit:cover; display:block; }
+  .ann-preview-body { padding:12px 14px; }
+  .ann-preview-title { font-size:15px; font-weight:800; margin-bottom:4px; }
+  .ann-preview-msg { font-size:13px; color:var(--gray); }
+  .toggle-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .toggle-label { font-size:14px; font-weight:700; }
+  .toggle { position:relative; width:44px; height:24px; }
+  .toggle input { opacity:0; width:0; height:0; }
+  .toggle-slider { position:absolute; inset:0; background:var(--gray3); border-radius:24px; cursor:pointer; transition:.3s; }
+  .toggle-slider:before { content:''; position:absolute; width:18px; height:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:.3s; }
+  .toggle input:checked + .toggle-slider { background:var(--gold); }
+  .toggle input:checked + .toggle-slider:before { transform:translateX(20px); }
+  .form-group { margin-bottom:14px; }
+  .form-group label { display:block; font-size:10px; color:var(--gray); letter-spacing:1px; text-transform:uppercase; margin-bottom:6px; }
+  .form-input { width:100%; background:var(--dark); border:1px solid var(--gray3); border-radius:10px; padding:11px 14px; font-size:14px; color:var(--white); outline:none; transition:border-color .2s; }
+  .form-input:focus { border-color:var(--gold); }
+  textarea.form-input { resize:vertical; min-height:80px; font-family:inherit; }
+  .btn-save { background:var(--gold); color:var(--black); font-size:13px; font-weight:900; border:none; border-radius:10px; padding:11px 22px; cursor:pointer; transition:opacity .15s; }
+  .btn-save:hover { opacity:.88; }
+  .save-success { font-size:12px; color:var(--green); margin-left:12px; opacity:0; transition:opacity .3s; }
+
+  /* ── MODAL ────────────────────────────── */
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000; display:none; align-items:center; justify-content:center; }
+  .modal-backdrop.open { display:flex; }
+  .modal-card { background:var(--card); border:1px solid var(--gray3); border-radius:18px; padding:28px; width:100%; max-width:420px; position:relative; margin:16px; }
+  .modal-title { font-size:17px; font-weight:900; margin-bottom:4px; }
+  .modal-sub { font-size:12px; color:var(--gray); margin-bottom:22px; }
+  .modal-close { position:absolute; top:16px; right:18px; background:none; border:none; cursor:pointer; color:var(--gray); font-size:22px; }
+  .method-btns { display:flex; gap:10px; margin-bottom:16px; }
+  .method-btn { flex:1; padding:10px; border-radius:10px; border:1px solid var(--gray3); background:var(--dark); color:var(--gray); font-size:13px; font-weight:700; cursor:pointer; transition:all .15s; text-align:center; }
+  .method-btn.active { border-color:var(--gold); color:var(--gold); background:rgba(201,168,76,0.08); }
+  .modal-note { background:rgba(0,212,255,0.06); border:1px solid rgba(0,212,255,0.2); border-radius:8px; padding:10px 12px; font-size:11px; color:var(--gray); line-height:1.6; margin:14px 0; }
+
+  /* ── ACTIVITY ─────────────────────────── */
+  .activity-list { display:flex; flex-direction:column; gap:10px; }
+  .activity-item { display:flex; align-items:center; gap:12px; }
+  .activity-text { font-size:13px; flex:1; }
+  .activity-time { font-size:11px; color:var(--gray); white-space:nowrap; }
+
+  /* ── LOADING / EMPTY ──────────────────── */
+  .spinner { display:inline-block; width:28px; height:28px; border:3px solid var(--gray3); border-top-color:var(--gold); border-radius:50%; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .loading-wrap { display:flex; align-items:center; justify-content:center; padding:60px; }
+  .empty-state { text-align:center; padding:50px 0; color:var(--gray); font-size:13px; }
+
+  /* ── RESPONSIVE ───────────────────────── */
+  @media (max-width:900px) {
+    .sidebar { transform:translateX(-100%); }
+    .sidebar.open { transform:translateX(0); }
+    .mobile-header { display:flex; }
+    .main { margin-left:0; max-width:100vw; padding:80px 16px 24px; }
+    .stat-grid { grid-template-columns:repeat(2,1fr); }
+    .chart-grid { grid-template-columns:1fr; }
+    .earnings-stats { grid-template-columns:1fr 1fr; }
+    .earnings-hero { flex-direction:column; align-items:flex-start; }
+  }
+  @media (max-width:480px) {
+    .stat-grid { grid-template-columns:1fr 1fr; }
+    .earnings-stats { grid-template-columns:1fr; }
+  }
+  ::-webkit-scrollbar { width:5px; height:5px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--gray3); border-radius:99px; }
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ════════════════════════════════════════════ -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div style="width:48px;height:48px;border-radius:12px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.3);display:flex;align-items:center;justify-content:center;font-size:24px;">🎮</div>
+      <div>
+        <div class="auth-logo-text">Gaming Actions</div>
+        <div class="auth-logo-sub">Creator Dashboard</div>
+      </div>
+    </div>
+    <h2 class="auth-title">Welcome back 👋</h2>
+    <p class="auth-sub">Sign in with your creator account.</p>
+    <button class="btn-google" id="btn-google">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21c10.5 0 20-7.6 20-21 0-1.4-.2-2.7-.5-4z"/><path fill="#34A853" d="M6.3 14.7l7 5.1C15.1 16.6 19.2 14 24 14c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 5.1 29.6 3 24 3c-7.7 0-14.4 4.4-17.7 11.7z"/><path fill="#FBBC05" d="M24 45c5.9 0 10.9-2 14.5-5.4l-6.7-5.5C30 36 27.2 37 24 37c-6 0-11.1-4.1-12.9-9.6l-7 5.4C7.7 40.7 15.3 45 24 45z"/><path fill="#EA4335" d="M44.5 20H24v8.5h11.8c-1 3-3.2 5.5-6.1 7.1l6.7 5.5C40.5 37.7 45 31.5 45 24c0-1.4-.2-2.7-.5-4z"/></svg>
+      Continue with Google
+    </button>
+    <div class="divider"><div class="divider-line"></div><span class="divider-text">or</span><div class="divider-line"></div></div>
+    <div id="auth-error" class="auth-error"></div>
+    <label class="auth-label">EMAIL</label>
+    <input id="email-input" class="auth-input" type="email" placeholder="your@email.com" autocomplete="email" />
+    <label class="auth-label">PASSWORD</label>
+    <input id="password-input" class="auth-input" type="password" placeholder="••••••••" autocomplete="current-password" />
+    <button class="btn-gold" id="btn-email-login">SIGN IN</button>
+  </div>
+</div>
+
+<!-- ═══ NOT A CREATOR ═════════════════════════════════════ -->
+<div id="not-creator">
+  <div style="font-size:48px">🚫</div>
+  <h2>Creator access only</h2>
+  <p>This dashboard is reserved for Gaming Actions creators. Your account doesn't have creator privileges yet.</p>
+  <button class="btn-gold" style="width:auto;padding:12px 24px" id="btn-nc-signout">Sign out</button>
+</div>
+
+<!-- ═══ APP ═══════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- Mobile header -->
+  <div class="mobile-header">
+    <button class="burger" id="burger-btn">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="mobile-header-title">🎮 Creator Dashboard</div>
+    <button class="btn-signout" id="btn-signout-mobile" title="Sign out">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    </button>
+  </div>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <div style="width:36px;height:36px;border-radius:9px;background:rgba(201,168,76,0.15);border:1px solid rgba(201,168,76,0.3);display:flex;align-items:center;justify-content:center;font-size:18px;">🎮</div>
+        <div>
+          <div class="sidebar-logo-text">Gaming Actions</div>
+          <div class="sidebar-logo-badge">CREATOR</div>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-label">Dashboard</div>
+        <div class="nav-item active" data-page="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Overview
+        </div>
+        <div class="nav-item" data-page="videos">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          Videos
+        </div>
+        <div class="nav-label" style="margin-top:8px">Fanbase</div>
+        <div class="nav-item" data-page="fans">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Fans
+        </div>
+        <div class="nav-item" data-page="fanbox">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          FanBox
+        </div>
+        <div class="nav-label" style="margin-top:8px">Finance</div>
+        <div class="nav-item" data-page="earnings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          Earnings
+        </div>
+        <!-- Admin-only -->
+        <div id="nav-admin-section" style="display:none">
+          <div class="nav-label" style="margin-top:8px">Admin</div>
+          <div class="nav-item" data-page="announcements">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.69 3.38 2 2 0 0 1 3.68 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.65a16 16 0 0 0 6.29 6.29l1.41-1.42a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            Announcements
+          </div>
+        </div>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <div class="sidebar-avatar" id="sb-avatar"></div>
+          <div class="sidebar-user-info">
+            <div class="sidebar-username" id="sb-name">—</div>
+            <div class="sidebar-role" id="sb-role">👑 Creator</div>
+          </div>
+          <button class="btn-signout" id="btn-signout" title="Sign out">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+
+      <!-- OVERVIEW -->
+      <div class="page active" id="page-overview">
+        <div class="page-header">
+          <div class="page-title">Overview</div>
+          <div class="page-sub" id="overview-greeting">Welcome back!</div>
+        </div>
+        <div class="stat-grid" id="stat-grid">
+          <div class="loading-wrap" style="grid-column:1/-1"><div class="spinner"></div></div>
+        </div>
+        <div class="chart-grid">
+          <div class="card">
+            <div class="card-title">📊 Top Clips by GGs</div>
+            <div class="chart-wrap"><canvas id="chart-clips"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-title">🔔 Recent Activity</div>
+            <div id="activity-list" class="activity-list">
+              <div class="loading-wrap"><div class="spinner"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VIDEOS -->
+      <div class="page" id="page-videos">
+        <div class="page-header">
+          <div class="page-title">My Videos</div>
+          <div class="page-sub">All your clips — GGs, views, exclusive status</div>
+        </div>
+        <div class="card">
+          <div id="videos-content"><div class="loading-wrap"><div class="spinner"></div></div></div>
+        </div>
+      </div>
+
+      <!-- FANS -->
+      <div class="page" id="page-fans">
+        <div class="page-header">
+          <div class="page-title">My Fans</div>
+          <div class="page-sub" id="fans-sub">Your Fanbase subscribers</div>
+        </div>
+        <div id="fans-content"><div class="loading-wrap"><div class="spinner"></div></div></div>
+      </div>
+
+      <!-- FANBOX -->
+      <div class="page" id="page-fanbox">
+        <div class="page-header">
+          <div class="page-title">FanBox 🔒</div>
+          <div class="page-sub">Real-time group chat — moderate from the web</div>
+        </div>
+        <div class="card">
+          <div class="fanbox-toolbar">
+            <span class="fanbox-count" id="fanbox-count"></span>
+            <button class="btn-icon" id="btn-refresh-fanbox">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.39"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div id="fanbox-messages"><div class="loading-wrap"><div class="spinner"></div></div></div>
+        </div>
+      </div>
+
+      <!-- EARNINGS -->
+      <div class="page" id="page-earnings">
+        <div class="page-header">
+          <div class="page-title">Earnings</div>
+          <div class="page-sub">Your Fanbase revenue and withdrawal history</div>
+        </div>
+        <div id="earnings-content"><div class="loading-wrap"><div class="spinner"></div></div></div>
+      </div>
+
+      <!-- ANNOUNCEMENTS (admin only) -->
+      <div class="page" id="page-announcements">
+        <div class="page-header">
+          <div class="page-title">Announcements 📣</div>
+          <div class="page-sub">Post an overlay announcement that appears when users open the app</div>
+        </div>
+        <div id="announcements-content"><div class="loading-wrap"><div class="spinner"></div></div></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Withdrawal Modal -->
+<div class="modal-backdrop" id="withdraw-modal">
+  <div class="modal-card">
+    <button class="modal-close" id="modal-close-btn">×</button>
+    <div class="modal-title">Request Withdrawal</div>
+    <div class="modal-sub" id="modal-sub">Available: CA$0.00 · Min: CA$25</div>
+    <label class="auth-label">AMOUNT (CAD)</label>
+    <input class="auth-input" id="w-amount" type="number" min="25" placeholder="25" style="margin-bottom:16px" />
+    <label class="auth-label">PAYMENT METHOD</label>
+    <div class="method-btns">
+      <button class="method-btn active" data-method="paypal">PayPal</button>
+      <button class="method-btn" data-method="interac">Interac</button>
+    </div>
+    <label class="auth-label" id="method-label">PAYPAL EMAIL</label>
+    <input class="auth-input" id="w-info" type="email" placeholder="your@paypal.com" style="margin-bottom:4px" />
+    <div class="modal-note">Withdrawals processed manually within 5–7 business days. Minimum CA$25.</div>
+    <div id="withdraw-error" style="color:var(--red);font-size:12px;margin-bottom:10px;display:none"></div>
+    <button class="btn-gold" id="btn-submit-withdraw">REQUEST WITHDRAWAL</button>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp }           from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut }
+  from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
+import { getFirestore, collection, query, where, orderBy, limit, getDocs, getDoc, doc,
+  onSnapshot, updateDoc, deleteDoc, addDoc, setDoc, serverTimestamp }
+  from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
+
+// ── Firebase init ─────────────────────────────────────────────────────────────
+const firebaseApp = initializeApp({
+  apiKey:            'AIzaSyDHYlFVDkF85KknGDiqatsCSOzW2bkMyDU',
+  authDomain:        'gamingactions-app.firebaseapp.com',
+  projectId:         'gamingactions-app',
+  storageBucket:     'gamingactions-app.firebasestorage.app',
+  messagingSenderId: '878199468974',
+  appId:             '1:878199468974:web:ba90762a320f3e2eda0e3f',
+});
+const auth = getAuth(firebaseApp);
+const db   = getFirestore(firebaseApp);
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const ADMIN_EMAILS = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
+const MEMBER_COLORS = ['#FF6B6B','#FFD93D','#6BCB77','#4D96FF','#FF6FF2','#F77F00','#00C9A7','#C77DFF','#48CAE4','#F4A261'];
+
+// ── Globals ───────────────────────────────────────────────────────────────────
+let currentUser  = null;
+let userProfile  = {};
+let fanboxUnsub  = null;
+let clipChart    = null;
+let currentBalance = 0;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const fmtK = n => n >= 1000 ? `${(n/1000).toFixed(1)}K` : `${n||0}`;
+const fmtDate = ts => {
+  if (!ts) return '—';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('en-CA', { year:'numeric', month:'short', day:'numeric' });
+};
+const fmtTime = ts => {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = Date.now() - d.getTime();
+  if (diff < 60000)    return 'just now';
+  if (diff < 3600000)  return `${Math.floor(diff/60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff/3600000)}h ago`;
+  return d.toLocaleDateString('en-CA', { month:'short', day:'numeric' });
+};
+const memberColor = uid => {
+  let h=0; for (let i=0;i<uid.length;i++) h=uid.charCodeAt(i)+((h<<5)-h);
+  return MEMBER_COLORS[Math.abs(h)%MEMBER_COLORS.length];
+};
+const escHtml = s => String(s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+document.getElementById('btn-google').addEventListener('click', async () => {
+  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  catch(e) { showAuthErr(e.code === 'auth/popup-closed-by-user' ? '' : 'Google sign-in failed. Try email.'); }
+});
+document.getElementById('btn-email-login').addEventListener('click', doEmailLogin);
+document.getElementById('password-input').addEventListener('keydown', e => { if (e.key==='Enter') doEmailLogin(); });
+
+async function doEmailLogin() {
+  const email = document.getElementById('email-input').value.trim();
+  const pass  = document.getElementById('password-input').value;
+  if (!email || !pass) { showAuthErr('Please fill all fields.'); return; }
+  try { await signInWithEmailAndPassword(auth, email, pass); }
+  catch { showAuthErr('Invalid email or password.'); }
+}
+function showAuthErr(msg) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg; el.style.display = msg ? 'block' : 'none';
+}
+
+const doSignOut = () => signOut(auth);
+document.getElementById('btn-signout').addEventListener('click', doSignOut);
+document.getElementById('btn-signout-mobile').addEventListener('click', doSignOut);
+document.getElementById('btn-nc-signout').addEventListener('click', doSignOut);
+
+// ── Auth state ────────────────────────────────────────────────────────────────
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    show('auth-screen'); hide('app'); hide('not-creator'); return;
+  }
+  currentUser = user;
+  const snap = await getDoc(doc(db, 'users', user.uid));
+  userProfile = snap.exists() ? snap.data() : {};
+
+  const isCreator = userProfile.accountType === 'creator';
+  const isAdmin   = ADMIN_EMAILS.includes(user.email) || userProfile.isAdmin;
+
+  if (!isCreator && !isAdmin) {
+    hide('auth-screen'); hide('app'); show('not-creator'); return;
+  }
+
+  hide('auth-screen'); hide('not-creator'); show('app');
+
+  // Sidebar
+  const sbName = document.getElementById('sb-name');
+  const sbRole = document.getElementById('sb-role');
+  const sbAv   = document.getElementById('sb-avatar');
+  sbName.textContent = userProfile.username || user.email?.split('@')[0] || 'Creator';
+  sbRole.textContent = isAdmin ? '⚡ Admin + Creator' : '👑 Creator';
+  if (userProfile.avatar) sbAv.innerHTML = `<img src="${escHtml(userProfile.avatar)}" alt="" />`;
+  else sbAv.textContent = (userProfile.username||'C')[0].toUpperCase();
+
+  // Show admin nav
+  if (isAdmin) document.getElementById('nav-admin-section').style.display = 'block';
+
+  loadOverview();
+});
+
+function show(id) { const el=document.getElementById(id); el.style.display=''; if(id==='not-creator') el.style.display='flex'; }
+function hide(id) { document.getElementById(id).style.display='none'; }
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    item.classList.add('active');
+    const page = item.dataset.page;
+    document.getElementById(`page-${page}`).classList.add('active');
+    closeSidebar();
+    // Stop FanBox listener when leaving
+    if (page !== 'fanbox' && fanboxUnsub) { fanboxUnsub(); fanboxUnsub=null; }
+    if (page === 'overview')      loadOverview();
+    if (page === 'videos')        loadVideos();
+    if (page === 'fans')          loadFans();
+    if (page === 'fanbox')        loadFanBox();
+    if (page === 'earnings')      loadEarnings();
+    if (page === 'announcements') loadAnnouncements();
+  });
+});
+
+// Mobile sidebar
+const sidebar = document.getElementById('sidebar');
+const overlay = document.getElementById('sidebar-overlay');
+document.getElementById('burger-btn').addEventListener('click', () => {
+  sidebar.classList.add('open'); overlay.classList.add('open');
+});
+function closeSidebar() {
+  sidebar.classList.remove('open'); overlay.classList.remove('open');
+}
+overlay.addEventListener('click', closeSidebar);
+
+// ── OVERVIEW ──────────────────────────────────────────────────────────────────
+async function loadOverview() {
+  const hour = new Date().getHours();
+  const greet = hour<12 ? 'Good morning' : hour<18 ? 'Good afternoon' : 'Good evening';
+  document.getElementById('overview-greeting').textContent =
+    `${greet}, ${userProfile.username||'Creator'} 👾`;
+
+  const [vSnap, fSnap, notifSnap] = await Promise.all([
+    getDocs(query(collection(db,'videos'), where('userId','==',currentUser.uid), orderBy('ggCount','desc'))),
+    getDocs(query(collection(db,'fanbase_subscriptions'), where('creatorId','==',currentUser.uid))),
+    getDocs(query(collection(db,'notifications'), where('userId','==',currentUser.uid), orderBy('createdAt','desc'), limit(8))),
+  ]);
+
+  const videos   = vSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const totalGGs = videos.reduce((s,v)=>s+(v.ggCount||0),0);
+
+  document.getElementById('stat-grid').innerHTML = `
+    ${sCard('🎮','var(--gold)','rgba(201,168,76,0.12)', fmtK(totalGGs), 'Total GGs')}
+    ${sCard('🎬','var(--blue)','rgba(0,212,255,0.12)',  videos.length, 'Clips')}
+    ${sCard('👥','var(--green)','rgba(0,200,83,0.12)', fmtK(userProfile.followers||0), 'Followers')}
+    ${sCard('⭐','var(--purple)','rgba(124,77,255,0.12)', fSnap.size, 'Fans')}
+  `;
+
+  // Chart
+  if (clipChart) clipChart.destroy();
+  const top5 = videos.slice(0,5);
+  const ctx  = document.getElementById('chart-clips').getContext('2d');
+  clipChart  = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels:   top5.map(v => (v.title||'Clip').slice(0,16)+(v.title?.length>16?'…':'')),
+      datasets: [{ data: top5.map(v=>v.ggCount||0), backgroundColor:'rgba(201,168,76,0.65)', borderColor:'#C9A84C', borderWidth:1, borderRadius:6 }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>`${c.parsed.y} GGs`}} },
+      scales: {
+        x:{ ticks:{color:'#888899',font:{size:10}}, grid:{color:'#2A2A3A'} },
+        y:{ ticks:{color:'#888899',font:{size:10}}, grid:{color:'#2A2A3A'}, beginAtZero:true },
+      }
+    }
+  });
+
+  // Activity
+  const ICONS = { gg:'🎮', follow:'👥', comment:'💬', subscriber:'⭐' };
+  const notifs = notifSnap.docs.map(d=>d.data());
+  const actEl  = document.getElementById('activity-list');
+  actEl.innerHTML = notifs.length
+    ? notifs.map(n=>`
+        <div class="activity-item">
+          <span style="font-size:16px">${ICONS[n.type]||'🔔'}</span>
+          <span class="activity-text">${escHtml(n.message||n.body||'New notification')}</span>
+          <span class="activity-time">${fmtTime(n.createdAt)}</span>
+        </div>`).join('')
+    : '<p style="color:var(--gray);font-size:13px">No recent activity yet.</p>';
+}
+function sCard(icon,color,bg,value,label) {
+  return `<div class="stat-card">
+    <div class="stat-icon" style="background:${bg}">${icon}</div>
+    <div class="stat-value" style="color:${color}">${value}</div>
+    <div class="stat-label">${label}</div>
+  </div>`;
+}
+
+// ── VIDEOS ────────────────────────────────────────────────────────────────────
+async function loadVideos() {
+  const el = document.getElementById('videos-content');
+  el.innerHTML = '<div class="loading-wrap"><div class="spinner"></div></div>';
+  const snap = await getDocs(query(collection(db,'videos'), where('userId','==',currentUser.uid), orderBy('createdAt','desc')));
+  const videos = snap.docs.map(d=>({id:d.id,...d.data()}));
+  if (!videos.length) { el.innerHTML = '<div class="empty-state">No videos yet.</div>'; return; }
+  const TYPE = { flashtuto:'Tuto', flashinfo:'Info', gameindev:'Dev', highlight:'Highlight' };
+  el.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>Clip</th><th>GGs</th><th>Views</th><th>Type</th><th>Exclusive</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>${videos.map(v=>`
+      <tr>
+        <td><div class="td-thumb-wrap">
+          ${v.thumbnail
+            ? `<img class="td-thumb" src="${escHtml(v.thumbnail)}" alt="" />`
+            : `<div class="td-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--gray)">🎮</div>`}
+          <div><div class="td-title">${escHtml(v.title||'Untitled')}</div><div class="td-sub">${fmtDate(v.createdAt)}</div></div>
+        </div></td>
+        <td><strong>${fmtK(v.ggCount||0)}</strong></td>
+        <td>${fmtK(v.viewCount||0)}</td>
+        <td><span class="badge badge-blue">${escHtml(TYPE[v.contentType]||v.contentType||'—')}</span></td>
+        <td>${v.isFanbaseExclusive
+          ? '<span class="badge badge-gold">⭐ Exclusive</span>'
+          : '<span class="badge badge-gray">Public</span>'}</td>
+        <td style="color:var(--gray);white-space:nowrap">${fmtDate(v.createdAt)}</td>
+        <td>
+          <button class="btn-icon" onclick="window._deleteVideo('${v.id}')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+            Delete
+          </button>
+        </td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+window._deleteVideo = async id => {
+  if (!confirm('Delete this video? This cannot be undone.')) return;
+  await deleteDoc(doc(db,'videos',id)); loadVideos();
+};
+
+// ── FANS ──────────────────────────────────────────────────────────────────────
+async function loadFans() {
+  const el = document.getElementById('fans-content');
+  el.innerHTML = '<div class="loading-wrap"><div class="spinner"></div></div>';
+  const snap = await getDocs(query(collection(db,'fanbase_subscriptions'), where('creatorId','==',currentUser.uid)));
+  document.getElementById('fans-sub').textContent =
+    `${snap.size} subscriber${snap.size!==1?'s':''} · CA$${(snap.size*3.49).toFixed(2)}/mo (your 70% cut)`;
+  if (!snap.size) {
+    el.innerHTML = '<div class="card"><div class="empty-state">No fans yet — share your Fanbase! 🚀</div></div>'; return;
+  }
+  const fans = [];
+  for (const d of snap.docs) {
+    const sub = d.data();
+    try {
+      const u = await getDoc(doc(db,'users',sub.subscriberId));
+      if (u.exists()) fans.push({ subId:d.id, subscribedAt:sub.subscribedAt, ...u.data() });
+    } catch {}
+  }
+  el.innerHTML = `<div class="fan-grid">${fans.map(f=>`
+    <div class="fan-card">
+      <div class="fan-avatar">
+        ${f.avatar ? `<img src="${escHtml(f.avatar)}" alt="" />` : escHtml((f.username||'?')[0].toUpperCase())}
+      </div>
+      <div class="fan-name">@${escHtml(f.username||'Fan')}</div>
+      <div class="fan-date">Since ${fmtDate(f.subscribedAt)}</div>
+      <button class="btn-icon" onclick="window._removeFan('${f.subId}','${escHtml(f.username||'')}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Remove
+      </button>
+    </div>`).join('')}</div>`;
+}
+window._removeFan = async (subId, username) => {
+  if (!confirm(`Remove @${username} from your Fanbase?`)) return;
+  await deleteDoc(doc(db,'fanbase_subscriptions',subId)); loadFans();
+};
+
+// ── FANBOX ────────────────────────────────────────────────────────────────────
+function loadFanBox() {
+  // Kill previous listener before creating a new one
+  if (fanboxUnsub) { fanboxUnsub(); fanboxUnsub = null; }
+
+  const el      = document.getElementById('fanbox-messages');
+  const countEl = document.getElementById('fanbox-count');
+  el.innerHTML  = '<div class="loading-wrap"><div class="spinner"></div></div>';
+
+  const q = query(
+    collection(db,'fanbox_messages',currentUser.uid,'messages'),
+    orderBy('createdAt','desc'), limit(60)
+  );
+  fanboxUnsub = onSnapshot(q, snap => {
+    const msgs = snap.docs.map(d=>({id:d.id,...d.data()})).reverse();
+    countEl.textContent = `${msgs.length} message${msgs.length!==1?'s':''}`;
+    if (!msgs.length) {
+      el.innerHTML = '<div style="text-align:center;padding:60px;color:var(--gray);font-size:13px">💬 No messages yet. Your fans will appear here.</div>';
+      return;
+    }
+    el.innerHTML = `<div class="fanbox-messages-list">${msgs.map(m => {
+      const isCreatorMsg = m.userId === currentUser.uid;
+      const color = isCreatorMsg ? '#C9A84C' : memberColor(m.userId);
+      if (m.deleted) return `<div class="msg-row">
+        <div class="msg-avatar" style="border-color:${color}">${escHtml((m.username||'?')[0].toUpperCase())}</div>
+        <div class="msg-bubble deleted-msg"><span class="msg-text" style="color:var(--gray)">Message deleted</span></div>
+      </div>`;
+      return `<div class="msg-row">
+        <div class="msg-avatar" style="border-color:${color}">
+          ${m.avatar ? `<img src="${escHtml(m.avatar)}" alt="" />` : escHtml((m.username||'?')[0].toUpperCase())}
+        </div>
+        <div class="msg-bubble ${isCreatorMsg?'creator-msg':''}">
+          <div class="msg-sender" style="color:${color}">${isCreatorMsg?'👑 ':''}${escHtml(m.username||'Fan')}</div>
+          <div class="msg-text">${escHtml(m.text||'')}</div>
+          <div class="msg-meta">
+            ${fmtTime(m.createdAt)}
+            ${!isCreatorMsg ? `
+              <button class="msg-action" onclick="window._fbDelete('${m.id}')">🗑 Delete</button>
+              <button class="msg-action" style="color:var(--gray2)" onclick="window._fbMute('${m.userId}','${escHtml(m.username||'Fan')}',60)">🔇 1h</button>
+              <button class="msg-action" style="color:var(--gray2)" onclick="window._fbMute('${m.userId}','${escHtml(m.username||'Fan')}',1440)">🔇 24h</button>
+            ` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+    el.scrollTop = el.scrollHeight;
+  }, () => {
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--red)">Could not load FanBox.</div>';
+  });
+
+  // Refresh button — remove any previous listener by replacing the node
+  const oldBtn = document.getElementById('btn-refresh-fanbox');
+  const newBtn = oldBtn.cloneNode(true);
+  oldBtn.parentNode.replaceChild(newBtn, oldBtn);
+  newBtn.addEventListener('click', () => { loadFanBox(); });
+}
+
+window._fbDelete = async msgId => {
+  if (!confirm('Delete this message?')) return;
+  await updateDoc(doc(db,'fanbox_messages',currentUser.uid,'messages',msgId), { deleted:true });
+};
+window._fbMute = async (userId, username, minutes) => {
+  if (!confirm(`Mute @${username} for ${minutes<60?minutes+'min':(minutes/60)+'h'}?`)) return;
+  const until = new Date(Date.now() + minutes*60000);
+  await setDoc(doc(db,'fanbox_mutes',`${currentUser.uid}_${userId}`), {
+    until, creatorId:currentUser.uid, userId
+  });
+  alert(`✅ @${username} muted for ${minutes<60?minutes+' min':(minutes/60)+'h'}.`);
+};
+
+// ── EARNINGS ──────────────────────────────────────────────────────────────────
+async function loadEarnings() {
+  const el = document.getElementById('earnings-content');
+  el.innerHTML = '<div class="loading-wrap"><div class="spinner"></div></div>';
+  const [earSnap, wdSnap, fSnap] = await Promise.all([
+    getDoc(doc(db,'creator_earnings',currentUser.uid)),
+    getDocs(query(collection(db,'withdrawal_requests'), where('creatorId','==',currentUser.uid), orderBy('createdAt','desc'))),
+    getDocs(query(collection(db,'fanbase_subscriptions'), where('creatorId','==',currentUser.uid))),
+  ]);
+  const earn    = earSnap.exists() ? earSnap.data() : {};
+  const balance = earn.balance || 0;
+  const total   = earn.totalEarned || 0;
+  const subs    = fSnap.size;
+  currentBalance = balance;
+  const wds     = wdSnap.docs.map(d=>({id:d.id,...d.data()}));
+
+  const STATUS_BADGE = { paid:'badge-green', processing:'badge-blue', pending:'badge-gray', rejected:'badge-red' };
+
+  el.innerHTML = `
+    <div class="earnings-hero">
+      <div>
+        <div class="earnings-bal-label">Available Balance</div>
+        <div class="earnings-bal">CA$${balance.toFixed(2)}</div>
+        <div class="earnings-note">70% of CA$4.99/month per subscriber • ${subs} active fans</div>
+      </div>
+      <button class="btn-withdraw" id="btn-withdraw" ${balance<25?'disabled title="Need CA$25 minimum"':''}>
+        ${balance<25?`CA$${(25-balance).toFixed(2)} to go`:'Withdraw Funds'}
+      </button>
+    </div>
+    <div class="earnings-stats">
+      <div class="e-stat"><div class="e-stat-val" style="color:var(--green)">CA$${total.toFixed(2)}</div><div class="e-stat-lab">Total Earned</div></div>
+      <div class="e-stat"><div class="e-stat-val" style="color:var(--purple)">${subs}</div><div class="e-stat-lab">Active Subscribers</div></div>
+      <div class="e-stat"><div class="e-stat-val" style="color:var(--gold)">CA$${(subs*3.49).toFixed(2)}</div><div class="e-stat-lab">Monthly Revenue</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Withdrawal History</div>
+      ${!wds.length ? '<div class="empty-state">No withdrawal requests yet.</div>' : `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Details</th><th>Status</th></tr></thead>
+        <tbody>${wds.map(w=>`
+          <tr>
+            <td style="color:var(--gray)">${fmtDate(w.createdAt)}</td>
+            <td><strong>CA$${(w.amount||0).toFixed(2)}</strong></td>
+            <td>${w.method==='paypal'?'PayPal':'Interac'}</td>
+            <td style="color:var(--gray);font-size:12px">${escHtml(w.paymentInfo||'—')}</td>
+            <td><span class="badge ${STATUS_BADGE[w.status]||'badge-gray'}">${(w.status||'pending').toUpperCase()}</span></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`}
+    </div>`;
+
+  document.getElementById('btn-withdraw')?.addEventListener('click', () => {
+    document.getElementById('modal-sub').textContent = `Available: CA$${balance.toFixed(2)} · Min: CA$25`;
+    document.getElementById('w-amount').value = Math.max(25, Math.floor(balance));
+    document.getElementById('withdraw-modal').classList.add('open');
+  });
+}
+
+// Withdrawal modal
+document.getElementById('modal-close-btn').addEventListener('click', () => {
+  document.getElementById('withdraw-modal').classList.remove('open');
+});
+let wMethod = 'paypal';
+document.querySelectorAll('.method-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    wMethod = btn.dataset.method;
+    document.querySelectorAll('.method-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const lbl = document.getElementById('method-label');
+    const inp = document.getElementById('w-info');
+    if (wMethod==='paypal') { lbl.textContent='PAYPAL EMAIL'; inp.type='email'; inp.placeholder='your@paypal.com'; }
+    else { lbl.textContent='INTERAC EMAIL OR PHONE'; inp.type='text'; inp.placeholder='email or +1 xxx xxx xxxx'; }
+  });
+});
+document.getElementById('btn-submit-withdraw').addEventListener('click', async () => {
+  const amount = parseFloat(document.getElementById('w-amount').value);
+  const info   = document.getElementById('w-info').value.trim();
+  const errEl  = document.getElementById('withdraw-error');
+  errEl.style.display = 'none';
+  if (!amount || amount < 25) { errEl.textContent='Minimum CA$25.'; errEl.style.display='block'; return; }
+  if (amount > currentBalance) { errEl.textContent='Insufficient balance.'; errEl.style.display='block'; return; }
+  if (!info) { errEl.textContent='Please enter payment details.'; errEl.style.display='block'; return; }
+  try {
+    await addDoc(collection(db,'withdrawal_requests'), {
+      creatorId:currentUser.uid, amount, method:wMethod, paymentInfo:info,
+      status:'pending', createdAt:serverTimestamp()
+    });
+    document.getElementById('withdraw-modal').classList.remove('open');
+    loadEarnings();
+    alert('✅ Request submitted! Processed within 5–7 business days.');
+  } catch(e) { errEl.textContent='Error: '+e.message; errEl.style.display='block'; }
+});
+
+// ── ANNOUNCEMENTS (admin) ─────────────────────────────────────────────────────
+async function loadAnnouncements() {
+  const el = document.getElementById('announcements-content');
+  el.innerHTML = '<div class="loading-wrap"><div class="spinner"></div></div>';
+  let ann = { active:false, title:'', message:'', imageUrl:'', buttonText:'OK' };
+  try {
+    const snap = await getDoc(doc(db,'app_config','announcement'));
+    if (snap.exists()) ann = { ...ann, ...snap.data() };
+  } catch {}
+
+  el.innerHTML = `
+    <div class="card" style="max-width:620px">
+      <div class="card-title">📣 App-wide Announcement</div>
+      <p style="font-size:12px;color:var(--gray);margin-bottom:18px;line-height:1.6">
+        This overlay appears to all users when they open the app. Toggle <strong style="color:var(--white)">Active</strong> to show or hide it instantly.
+      </p>
+
+      <div class="toggle-row">
+        <span class="toggle-label" style="color:${ann.active?'var(--green)':'var(--gray)'}">
+          ${ann.active ? '🟢 Live — shown to all users' : '⚫ Inactive'}
+        </span>
+        <label class="toggle">
+          <input type="checkbox" id="ann-active" ${ann.active?'checked':''} />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>TITLE</label>
+        <input class="form-input" id="ann-title" type="text" value="${escHtml(ann.title||'')}" placeholder="Big news! 🎮" maxlength="80" />
+      </div>
+      <div class="form-group">
+        <label>MESSAGE</label>
+        <textarea class="form-input" id="ann-message" placeholder="Write your announcement here..." maxlength="500">${escHtml(ann.message||'')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>IMAGE URL <span style="color:var(--gray);font-weight:400">(optional)</span></label>
+        <input class="form-input" id="ann-img" type="url" value="${escHtml(ann.imageUrl||'')}" placeholder="https://..." />
+      </div>
+      <div class="form-group">
+        <label>BUTTON TEXT</label>
+        <input class="form-input" id="ann-btn" type="text" value="${escHtml(ann.buttonText||'OK')}" placeholder="OK" maxlength="30" />
+      </div>
+
+      ${ann.imageUrl||ann.title ? `
+        <div style="margin-bottom:16px">
+          <div style="font-size:10px;color:var(--gray);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">PREVIEW</div>
+          <div class="ann-preview">
+            ${ann.imageUrl ? `<img src="${escHtml(ann.imageUrl)}" alt="" onerror="this.style.display='none'" />` : ''}
+            <div class="ann-preview-body">
+              ${ann.title ? `<div class="ann-preview-title">${escHtml(ann.title)}</div>` : ''}
+              ${ann.message ? `<div class="ann-preview-msg">${escHtml(ann.message)}</div>` : ''}
+            </div>
+          </div>
+        </div>` : ''}
+
+      <div style="display:flex;align-items:center;gap:0">
+        <button class="btn-save" id="btn-save-ann">Save & Publish</button>
+        <span class="save-success" id="ann-ok">✅ Saved!</span>
+      </div>
+    </div>`;
+
+  document.getElementById('btn-save-ann').addEventListener('click', async () => {
+    const payload = {
+      active:     document.getElementById('ann-active').checked,
+      title:      document.getElementById('ann-title').value.trim(),
+      message:    document.getElementById('ann-message').value.trim(),
+      imageUrl:   document.getElementById('ann-img').value.trim(),
+      buttonText: document.getElementById('ann-btn').value.trim() || 'OK',
+      updatedAt:  serverTimestamp(),
+    };
+    try {
+      await setDoc(doc(db,'app_config','announcement'), payload);
+      const ok = document.getElementById('ann-ok');
+      ok.style.opacity='1'; setTimeout(()=>ok.style.opacity='0', 2500);
+      // Reload to refresh preview
+      setTimeout(loadAnnouncements, 300);
+    } catch(e) { alert('Error saving: '+e.message); }
+  });
+}
+</script>
+</body>
+</html>

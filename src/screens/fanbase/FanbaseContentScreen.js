@@ -169,7 +169,7 @@ export default function FanbaseContentScreen({ navigation, route }) {
           </View>
         </View>
         {canSee && (
-          <TouchableOpacity onPress={() => navigation.navigate('FanBox', { creator })}>
+          <TouchableOpacity onPress={() => navigation.navigate('FanBox', { creatorId, creatorName: creator.username })}>
             <Ionicons name="chatbubbles-outline" size={22} color={GREEN} />
           </TouchableOpacity>
         )}
@@ -252,7 +252,7 @@ export default function FanbaseContentScreen({ navigation, route }) {
               )}
 
               {/* FanBox */}
-              <TouchableOpacity onPress={() => navigation.navigate('FanBox', { creator })} style={styles.fanboxBtn}>
+              <TouchableOpacity onPress={() => navigation.navigate('FanBox', { creatorId, creatorName: creator.username })} style={styles.fanboxBtn}>
                 <Ionicons name="chatbubbles-outline" size={18} color={COLORS.black} />
                 <Text style={styles.fanboxBtnText}>Ouvrir le FanBox</Text>
               </TouchableOpacity>

@@ -11,15 +11,25 @@ const Stack = createNativeStackNavigator();
 
 export default function AppNavigator() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const isLoading = useAuthStore((state) => state.isLoading);
-  const userProfile = useAuthStore((state) => state.userProfile);
-  const user = useAuthStore((state) => state.user);
+  const isLoading      = useAuthStore((state) => state.isLoading);
+  const isGuest        = useAuthStore((state) => state.isGuest);
+  const userProfile    = useAuthStore((state) => state.userProfile);
+  const user           = useAuthStore((state) => state.user);
 
   if (isLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: '#0A0A0F', justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#C9A84C" />
       </View>
+    );
+  }
+
+  // Mode visiteur : accès au feed + profils, mais aucune action interactive
+  if (isGuest) {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Main" component={MainNavigator} />
+      </Stack.Navigator>
     );
   }
 

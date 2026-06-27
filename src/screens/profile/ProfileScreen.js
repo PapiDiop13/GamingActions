@@ -541,11 +541,19 @@ export default function ProfileScreen({ navigation, route }) {
   };
 
   const handleShare = async () => {
-    await Share.share({ 
+    await Share.share({
       message: `Check out ${user?.username} on Gaming Actions! 🎮\nhttps://gamingactions.app/user/${user?.username}`,
       url: `https://gamingactions.app/user/${user?.username}`,
     });
   };
+
+  // ─── QR Code modal ────────────────────────────────────────────────────────
+  const [showQR, setShowQR] = useState(false);
+  const profileUrl = `https://gamingactions.app/user/${user?.username}`;
+  // QR généré via API externe (pas de lib native nécessaire)
+  // gold sur fond sombre, haute correction d'erreur pour overlay avatar
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(profileUrl)}&bgcolor=0A0A0F&color=C9A84C&margin=2&ecc=H`;
+
   // Compute bg color for container
   const _bgId = user?.equippedProfileBg;
   const _bg = _bgId ? PROFILE_BACKGROUNDS.find(b => b.id === _bgId) : null;
@@ -565,6 +573,66 @@ export default function ProfileScreen({ navigation, route }) {
       <GGInfoPopup visible={showGGPopup} onClose={() => setShowGGPopup(false)} navigation={navigation} />
       <GAPointsPopup visible={showPointsPopup} onClose={() => setShowPointsPopup(false)} navigation={navigation} />
 
+      {/* ── Modal QR Code ── */}
+      <Modal visible={showQR} transparent animationType="fade" onRequestClose={() => setShowQR(false)}>
+        <TouchableWithoutFeedback onPress={() => setShowQR(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center' }}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={{ backgroundColor: '#0A0A0F', borderRadius: 24, padding: 28, alignItems: 'center', borderWidth: 1, borderColor: COLORS.gold + '40' }}>
+                <Text style={{ color: COLORS.white, fontWeight: '800', fontSize: 16, marginBottom: 4 }}>
+                  @{user?.username}
+                </Text>
+                <Text style={{ color: COLORS.gray, fontSize: 12, marginBottom: 20 }}>
+                  Scan to view profile
+                </Text>
+
+                {/* QR avec avatar au centre */}
+                <View style={{ width: 220, height: 220 }}>
+                  <Image
+                    source={{ uri: qrImageUrl }}
+                    style={{ width: 220, height: 220, borderRadius: 12 }}
+                    resizeMode="contain"
+                  />
+                  {/* Avatar centré par-dessus le QR */}
+                  <View style={{
+                    position: 'absolute',
+                    top: '50%', left: '50%',
+                    marginTop: -22, marginLeft: -22,
+                    width: 44, height: 44, borderRadius: 22,
+                    backgroundColor: '#0A0A0F',
+                    borderWidth: 2, borderColor: COLORS.gold,
+                    overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {user?.avatar ? (
+                      <Image source={{ uri: user.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} />
+                    ) : (
+                      <Image
+                        source={require('../../../assets/icon.png')}
+                        style={{ width: 36, height: 36, borderRadius: 18 }}
+                        resizeMode="contain"
+                      />
+                    )}
+                  </View>
+                </View>
+
+                <Text style={{ color: COLORS.gray, fontSize: 11, marginTop: 18, textAlign: 'center', maxWidth: 200 }}>
+                  gamingactions.app/user/{user?.username}
+                </Text>
+
+                {/* Bouton share */}
+                <TouchableOpacity
+                  onPress={() => { setShowQR(false); handleShare(); }}
+                  style={{ marginTop: 20, flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.gold, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 14 }}
+                >
+                  <Ionicons name="share-outline" size={16} color={COLORS.black} />
+                  <Text style={{ color: COLORS.black, fontWeight: '800', fontSize: 14, marginLeft: 8 }}>Share Link</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
       {/* Header */}
       <View style={styles.header}>
       {navigation.canGoBack() ? (
@@ -574,12 +642,12 @@ export default function ProfileScreen({ navigation, route }) {
 ) : <View style={{ width: 22 }} />}
         <Text style={styles.headerTitle}>{user?.username || 'Profile'}</Text>
         <View style={styles.headerRight}>
-          {/* Bouton Share masqué — sera réactivé avec le deep linking / QR code */}
-          {false && (
-            <TouchableOpacity onPress={handleShare} style={{ marginRight: 14 }}>
-              <Ionicons name="share-outline" size={22} color={COLORS.white} />
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity onPress={() => setShowQR(true)} style={{ marginRight: 14 }}>
+            <Ionicons name="qr-code-outline" size={22} color={COLORS.white} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleShare} style={{ marginRight: 14 }}>
+            <Ionicons name="share-outline" size={22} color={COLORS.white} />
+          </TouchableOpacity>
           {isOwn && (
             <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
               <Ionicons name="settings-outline" size={22} color={COLORS.white} />

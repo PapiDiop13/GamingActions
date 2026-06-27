@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gaming Actions</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0A0A0F;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+    .logo {
+      width: 96px;
+      height: 96px;
+      border-radius: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 0 32px rgba(201,168,76,0.4);
+    }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+    p  { font-size: 15px; color: #aaa; margin-bottom: 32px; }
+    .badge {
+      display: block;
+      width: 180px;
+      margin: 8px auto;
+      border-radius: 10px;
+      transition: opacity .2s;
+    }
+    .badge:hover { opacity: .85; }
+    .open-btn {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 14px 32px;
+      background: #C9A84C;
+      color: #000;
+      font-weight: 700;
+      font-size: 16px;
+      border-radius: 14px;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+    }
+    .open-btn:hover { opacity: .9; }
+    #status { margin-top: 16px; font-size: 13px; color: #666; }
+  </style>
+</head>
+<body>
+  <img class="logo" src="/assets/icon.png" alt="Gaming Actions" onerror="this.style.display='none'" />
+  <h1>Gaming Actions</h1>
+  <p>Share clips. Compete. Earn.</p>
+
+  <!-- App Store badges -->
+  <a id="ios-badge" href="https://apps.apple.com/app/gaming-actions/id6743394850" target="_blank">
+    <img class="badge" src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" />
+  </a>
+  <a id="android-badge" href="https://play.google.com/store/apps/details?id=com.gamingactions.app" target="_blank">
+    <img class="badge" src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" style="width:210px;margin-top:4px;" />
+  </a>
+
+  <p id="status">Opening Gaming Actions...</p>
+
+  <script>
+    (function () {
+      var path    = window.location.pathname;          // e.g. /clip/abc123  or  /user/papa
+      var parts   = path.split('/').filter(Boolean);   // ['clip','abc123']
+      var type    = parts[0];  // 'clip' | 'user'
+      var id      = parts[1];  // videoId or username
+
+      // Build universal + custom-scheme URLs
+      var webUrl    = 'https://gamingactions.app' + path;
+      var schemeUrl = 'ga:/' + path;  // custom scheme fallback
+
+      var ios     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      var android = /Android/i.test(navigator.userAgent);
+
+      // Show only the relevant store badge
+      if (ios)     document.getElementById('android-badge').style.display = 'none';
+      if (android) document.getElementById('ios-badge').style.display = 'none';
+
+      // Try to open the app via custom scheme, fallback to store after 2.5s
+      function tryOpenApp() {
+        var storeUrl = ios
+          ? 'https://apps.apple.com/app/gaming-actions/id6743394850'
+          : 'https://play.google.com/store/apps/details?id=com.gamingactions.app';
+
+        // Attempt deep link via custom scheme
+        window.location.href = schemeUrl;
+
+        // If app not installed, redirect to store after delay
+        var fallbackTimer = setTimeout(function () {
+          document.getElementById('status').textContent = 'Get the app to view this content.';
+          window.location.href = storeUrl;
+        }, 2500);
+
+        // If user comes back to tab, app opened successfully — cancel store redirect
+        window.addEventListener('blur', function () {
+          clearTimeout(fallbackTimer);
+          document.getElementById('status').textContent = 'Opened in Gaming Actions!';
+        }, { once: true });
+      }
+
+      // On mobile: auto-attempt after short delay (let page render first)
+      if (ios || android) {
+        setTimeout(tryOpenApp, 400);
+      } else {
+        // Desktop — just show the badges
+        document.getElementById('status').textContent = 'Download Gaming Actions on your phone to view this content.';
+      }
+    })();
+  </script>
+</body>
+</html>

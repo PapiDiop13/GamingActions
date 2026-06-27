@@ -4,7 +4,7 @@ import {
   onDocumentDeleted,
 } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onRequest } from "firebase-functions/v2/https";
+import { onRequest, onCall } from "firebase-functions/v2/https";
 import { logger } from "firebase-functions/v2";
 import { Expo } from "expo-server-sdk";
 
@@ -1917,17 +1917,17 @@ export const broadcastPush = onRequest(
 // ─────────────────────────────────────────────────────────────────────────────
 import Stripe from "stripe";
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || "";
 const STRIPE_PRICE_ID_MONTHLY = "price_1Tmex2097oI4jieSjbbA3ds3";
 const STRIPE_PRICE_ID_YEARLY  = "price_1TmfVo097oI4jieSliHF5NNi";
 
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
 
 // Webhook Stripe — reçoit les événements de paiement
 export const stripeWebhook = onRequest(
   { cors: true, region: "us-central1" },
   async (req, res) => {
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+    const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
     const sig = req.headers["stripe-signature"] as string;
     let event: Stripe.Event;
 
@@ -2076,6 +2076,9 @@ export const stripeWebhook = onRequest(
 export const createCheckoutSession = onRequest(
   { cors: true, region: "us-central1" },
   async (req, res) => {
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_SECRET_KEY) { res.status(500).json({ error: "Stripe key not configured" }); return; }
+    const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
     if (req.method !== "POST") { res.status(405).send("Method Not Allowed"); return; }
 
     const { uid, email, successUrl, cancelUrl, plan } = req.body;
@@ -2122,6 +2125,8 @@ export const createCheckoutSession = onRequest(
 export const createPortalSession = onRequest(
   { cors: true, region: "us-central1" },
   async (req, res) => {
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
     if (req.method !== "POST") { res.status(405).send("Method Not Allowed"); return; }
 
     const { uid, returnUrl } = req.body;

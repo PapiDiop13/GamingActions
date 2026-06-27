@@ -215,6 +215,30 @@ service cloud.firestore {
       allow write: if isAuth();
     }
 
+    // ── FanBox messages ───────────────────────────────────────────────────────
+    // Abonnés + créateur peuvent lire et écrire.
+    // Soft-delete (update deleted:true) : auteur du msg OU créateur.
+    match /fanbox_messages/{creatorId}/messages/{msgId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && notBanned()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid
+        || request.auth.uid == creatorId
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ── FanBox mutes ──────────────────────────────────────────────────────────
+    // Seul le créateur (ou admin) peut écrire un mute.
+    // L'user muté peut lire son propre doc pour afficher la bannière.
+    match /fanbox_mutes/{muteId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && (
+        request.resource.data.creatorId == request.auth.uid || isAdmin()
+      );
+    }
+
     // ── Moderation ────────────────────────────────────────────────────────────
     match /moderation_logs/{logId} {
       allow read: if isAdmin();

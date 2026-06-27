@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Platform,
   KeyboardAvoidingView, TextInput, ScrollView, Modal,
-  TouchableWithoutFeedback, Image, Animated,
+  TouchableWithoutFeedback, Image, Animated, Share, Vibration, PanResponder,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEvent } from 'expo';
@@ -65,6 +65,11 @@ export default function VideoPlayerScreen({ navigation, route }) {
   }, []);
 
   const [showComments, setShowComments] = useState(false);
+
+  // ─── Double tap + étoiles ─────────────────────────────────────────────────
+  const lastTapRef = useRef(0);
+  const [ggParticles, setGGParticles] = useState([]);
+  const particleIdRef = useRef(0);
 
   const liveVideo = useFeedStore(s => s.videos.find(v => v.id === video?.id));
 
@@ -170,8 +175,90 @@ export default function VideoPlayerScreen({ navigation, route }) {
 
   const isOwnVideo = video?.userId === user?.uid;
 
+  // ─── Explosion d'étoiles au double tap ───────────────────────────────────
+  const triggerGGParticles = (tapX, tapY) => {
+    const id = particleIdRef.current++;
+    const count = 8;
+    const particles = Array.from({ length: count }, (_, i) => {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+      const dist  = 55 + Math.random() * 45;
+      return {
+        key: `${id}_${i}`,
+        tx: Math.cos(angle) * dist,
+        ty: Math.sin(angle) * dist,
+        anim: new Animated.Value(0),
+        emoji: i % 3 === 0 ? '✨' : '⭐',
+        size: 16 + Math.floor(Math.random() * 14),
+      };
+    });
+    // étoile centrale plus grosse
+    const centerAnim = new Animated.Value(0);
+    const group = { id, x: tapX, y: tapY, particles, centerAnim };
+    setGGParticles(prev => [...prev, group]);
+
+    Animated.parallel([
+      Animated.timing(centerAnim, { toValue: 1, duration: 750, useNativeDriver: true }),
+      ...particles.map(p =>
+        Animated.timing(p.anim, { toValue: 1, duration: 680 + Math.random() * 120, useNativeDriver: true })
+      ),
+    ]).start(() => {
+      setGGParticles(prev => prev.filter(g => g.id !== id));
+    });
+  };
+
+  // Ref vers handleBack pour le PanResponder (créé une seule fois)
+  const handleBackRef = useRef(null);
+  handleBackRef.current = handleBack;
+
+  // ─── Swipe vers le bas pour fermer ───────────────────────────────────────
+  const swipePanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        g.dy > 12 && Math.abs(g.dy) > Math.abs(g.dx) * 1.5,
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 90 && g.vy > 0.25) handleBackRef.current?.();
+      },
+    })
+  ).current;
+
+  // ─── Double tap : détection + GG + étoiles ───────────────────────────────
+  // On utilise un délai 320ms sur le single tap pour que le double tap
+  // soit détecté AVANT que le single tap s'exécute — évite le conflit pause/play
+  const tapTimeoutRef = useRef(null);
+
+  const handleVideoTap = (evt) => {
+    const now = Date.now();
+    const { locationX, locationY } = evt.nativeEvent;
+
+    if (now - lastTapRef.current < 320) {
+      // Double tap confirmé — annule le single tap en attente
+      if (tapTimeoutRef.current) { clearTimeout(tapTimeoutRef.current); tapTimeoutRef.current = null; }
+      lastTapRef.current = 0; // reset pour éviter triple tap
+      if (!isOwnVideo) {
+        Vibration.vibrate(40);
+        triggerGGParticles(locationX, locationY);
+        if (liveVideo) {
+          toggleGG(video?.id, user?.uid, liveVideo);
+        } else if (!localHasGG) {
+          setLocalHasGG(true);
+          setLocalGGCount(c => c + 1);
+          toggleGGDirect(video?.id, video?.userId, user?.uid, false, localGGCount)
+            .then(r => { if (r) { setLocalHasGG(r.hasGG); setLocalGGCount(r.ggCount); } })
+            .catch(() => {});
+        }
+      }
+    } else {
+      // Single tap — on attend 320ms pour voir si un 2e tap arrive
+      lastTapRef.current = now;
+      tapTimeoutRef.current = setTimeout(() => {
+        tapTimeoutRef.current = null;
+        showControlsTemporarily();
+      }, 320);
+    }
+  };
+
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...swipePanResponder.panHandlers}>
       <CommentsSheet
         visible={showComments}
         onClose={() => setShowComments(false)}
@@ -188,7 +275,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
             </View>
         }
 
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={showControlsTemporarily} />
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleVideoTap} />
 
         {showControls && (
           <>
@@ -216,6 +303,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
                   hasGG={hasGG}
                   count={ggCount}
                   onPress={async () => {
+                    Vibration.vibrate(40);
                     if (liveVideo) {
                       toggleGG(video?.id, user?.uid, liveVideo);
                     } else {
@@ -240,6 +328,15 @@ export default function VideoPlayerScreen({ navigation, route }) {
                 <TouchableOpacity onPress={() => setShowComments(true)} style={[styles.sideAction, { marginTop: 20 }]}>
                   <Ionicons name="chatbubble-outline" size={22} color={COLORS.white} />
                   <Text style={styles.sideActionText}>{commentCount}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => Share.share({
+                    message: `Check out this clip on Gaming Actions! 🎮\nhttps://gamingactions.app/clip/${video?.id}`,
+                    url: `https://gamingactions.app/clip/${video?.id}`,
+                  })}
+                  style={[styles.sideAction, { marginTop: 20 }]}
+                >
+                  <Ionicons name="share-social-outline" size={22} color={COLORS.white} />
                 </TouchableOpacity>
               </View>
             )}
@@ -283,6 +380,36 @@ export default function VideoPlayerScreen({ navigation, route }) {
             </View>
           </>
         )}
+
+        {/* ── Explosion d'étoiles double tap ── */}
+        {ggParticles.map(group => {
+          const centerScale = group.centerAnim.interpolate({ inputRange: [0, 0.25, 0.6, 1], outputRange: [0.3, 1.8, 1.2, 0] });
+          const centerOpacity = group.centerAnim.interpolate({ inputRange: [0, 0.1, 0.7, 1], outputRange: [0, 1, 1, 0] });
+          return (
+            <View key={group.id} style={{ position: 'absolute', left: group.x, top: group.y }} pointerEvents="none">
+              {/* Étoile centrale */}
+              <Animated.Text style={{
+                position: 'absolute', fontSize: 36, marginLeft: -18, marginTop: -18,
+                transform: [{ scale: centerScale }], opacity: centerOpacity,
+              }}>⭐</Animated.Text>
+              {/* Particules qui explosent */}
+              {group.particles.map(p => {
+                const scale   = p.anim.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 1.4, 0.2] });
+                const opacity = p.anim.interpolate({ inputRange: [0, 0.15, 0.75, 1], outputRange: [0, 1, 1, 0] });
+                const tx      = p.anim.interpolate({ inputRange: [0, 1], outputRange: [0, p.tx] });
+                const ty      = p.anim.interpolate({ inputRange: [0, 1], outputRange: [0, p.ty] });
+                return (
+                  <Animated.Text key={p.key} style={{
+                    position: 'absolute', fontSize: p.size,
+                    marginLeft: -p.size / 2, marginTop: -p.size / 2,
+                    transform: [{ translateX: tx }, { translateY: ty }, { scale }],
+                    opacity,
+                  }}>{p.emoji}</Animated.Text>
+                );
+              })}
+            </View>
+          );
+        })}
       </View>
     </View>
   );

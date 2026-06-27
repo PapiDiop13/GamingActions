@@ -29,10 +29,11 @@ export default function AnnouncementOverlay() {
               (w, h) => {
                 const ratio = h / w;
                 const displayW = IMG_W;
-                const displayH = Math.min(displayW * ratio, SH * 0.45); // max 45% écran
+                // max 70% écran pour images portrait, sinon ratio naturel
+                const displayH = Math.min(displayW * ratio, SH * 0.70);
                 setImgSize({ width: displayW, height: displayH });
               },
-              () => {} // fallback: garde 180px
+              () => setImgSize({ width: IMG_W, height: IMG_W * 0.6 })
             );
           }
         }
@@ -51,7 +52,7 @@ export default function AnnouncementOverlay() {
               <Image
                 source={{ uri: data.imageUrl }}
                 style={[s.image, { width: imgSize.width, height: imgSize.height }]}
-                resizeMode="cover"
+                resizeMode="contain"
               />
             ) : null}
             {data.title ? <Text style={s.title}>{data.title}</Text> : null}

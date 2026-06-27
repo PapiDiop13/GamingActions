@@ -34,7 +34,11 @@ const useAuthStore = create((set, get) => ({
   userProfile: null,
   isLoading: true,
   isAuthenticated: false,
+  isGuest: false,   // mode visiteur sans compte
   error: null,
+
+  enterGuestMode: () => set({ isGuest: true, isLoading: false }),
+  exitGuestMode:  () => set({ isGuest: false }),
 
   init: () => {
     let profileUnsub = null;

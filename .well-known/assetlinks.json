@@ -3,6 +3,6 @@
   "target": {
     "namespace": "android_app",
     "package_name": "com.gamingactions.app",
-    "sha256_cert_fingerprints": ["REPLACE_WITH_YOUR_SHA256_FINGERPRINT"]
+    "sha256_cert_fingerprints": ["05:3D:6A:FC:A7:86:7A:E9:6F:22:B1:AB:6E:8E:1C:6F:E4:A9:49:C8:2B:67:F0:9A:52:7C:92:78:64:37:88:95"]
   }
 }]

@@ -19,6 +19,7 @@ import { recordView } from '../../utils/feedAlgo';
 import { CONSOLES, GENRES } from '../../constants/data';
 import { GAMES } from '../../constants/games';
 import useUserStore from '../../store/useUserStore';
+import useGuestGuard from '../../hooks/useGuestGuard';
 import { collection, query, where, orderBy, onSnapshot, getDoc, getDocs, doc, updateDoc, deleteDoc, increment, arrayUnion, arrayRemove, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { getVideoUrl, getThumbnailUrl } from '../../config/mux';
@@ -427,6 +428,7 @@ function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isAc
   const { toggleGG, incrementView } = useFeedStore();
   const { user } = useAuthStore();
   const { toggleFollow, isFollowing } = useUserStore();
+  const guestGuard = useGuestGuard(navigation);
   const [showComments, setShowComments] = useState(false);
   const [showGGList, setShowGGList] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -677,7 +679,7 @@ const isOwnVideo = item.userId === user?.uid;
         </View>
         {item.userId !== user?.uid && (
           <TouchableOpacity
-            onPress={() => toggleFollow(user?.uid, item.userId, userProfile?.username)}
+            onPress={() => guestGuard(() => toggleFollow(user?.uid, item.userId, userProfile?.username))}
             style={[cardS.followBtn, isFollowing(item.userId) && { borderColor: COLORS.gray3 }]}
           >
             <Text style={[cardS.followBtnText, isFollowing(item.userId) && { color: COLORS.gray }]}>
@@ -770,7 +772,7 @@ const isOwnVideo = item.userId === user?.uid;
         <GGButton
           hasGG={item.hasGG}
           count={item.ggCount || 0}
-          onPress={() => toggleGG(item.id, user?.uid, item)}
+          onPress={() => guestGuard(() => toggleGG(item.id, user?.uid, item))}
           onShowList={() => setShowGGList(true)}
           disabled={item.userId === user?.uid}
         />
@@ -790,7 +792,7 @@ const isOwnVideo = item.userId === user?.uid;
       <View style={{ height: PREVIEW_H, backgroundColor: COLORS.dark, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 }}>
         {/* Gros bouton Comments — ouvre l'overlay, bien visible et touchable */}
         <TouchableOpacity
-          onPress={() => setShowComments(true)}
+          onPress={() => guestGuard(() => setShowComments(true))}
           style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }}
           activeOpacity={0.7}
         >

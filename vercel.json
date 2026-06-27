@@ -1,6 +1,19 @@
 {
+  "headers": [
+    {
+      "source": "/.well-known/(.*)",
+      "headers": [
+        { "key": "Content-Type", "value": "application/json" },
+        { "key": "Cache-Control", "value": "no-cache, no-store" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/legendary", "destination": "/legendary.html" },
-    { "source": "/legendary/", "destination": "/legendary.html" }
+    { "source": "/legendary/", "destination": "/legendary.html" },
+    { "source": "/clip/:id", "destination": "/deeplink.html" },
+    { "source": "/user/:username", "destination": "/deeplink.html" },
+    { "source": "/creator", "destination": "/creator.html" },
+    { "source": "/creator/", "destination": "/creator.html" }
   ]
 }

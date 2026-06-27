@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../constants/colors';
+import useAuthStore from '../store/useAuthStore';
 
 import FeedScreen from '../screens/feed/FeedScreen';
 import CommentsScreen from '../screens/feed/CommentsScreen';
@@ -190,6 +191,9 @@ function UploadStack() {
 }
 
 function CustomTabBar({ state, descriptors, navigation }) {
+  const isGuest    = useAuthStore((s) => s.isGuest);
+  const exitGuest  = useAuthStore((s) => s.exitGuestMode);
+
   const iconMap = {
     Feed: ['home', 'home-outline'],
     Tips: ['game-controller', 'game-controller-outline'],
@@ -203,12 +207,24 @@ function CustomTabBar({ state, descriptors, navigation }) {
   const activeStackIndex = activeState?.index ?? 0;
   if (activeStackIndex > 0) return null;
 
+  const showGuestAlert = () => Alert.alert(
+    'Rejoins Gaming Actions 🎮',
+    'Crée un compte gratuit pour accéder à toutes les fonctionnalités.',
+    [
+      { text: 'Pas maintenant', style: 'cancel' },
+      { text: 'Créer un compte', onPress: () => { exitGuest(); navigation.navigate('Auth'); } },
+    ]
+  );
+
   return (
     <View style={styles.tabBar}>
       {state.routes.map((route, index) => {
         const isFocused = state.index === index;
         const isUpload = route.name === 'Upload';
+        const isRestricted = isGuest && ['Tips', 'Shop', 'Upload'].includes(route.name);
+
         const onPress = () => {
+          if (isRestricted) { showGuestAlert(); return; }
           const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
           if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
         };

@@ -7,6 +7,7 @@ import { OAuthProvider, signInWithCredential, signInWithEmailAndPassword, sendEm
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
+
 import { auth, db } from '../../config/firebase';
 import { friendlyError, logError } from '../../utils/errorLogger';
 
@@ -16,7 +17,7 @@ export default function LoginScreen({ navigation }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuthStore();
+  const { signIn, enterGuestMode } = useAuthStore();
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) return setError('Please fill all fields');
@@ -184,6 +185,9 @@ export default function LoginScreen({ navigation }) {
         <TouchableOpacity onPress={() => navigation.replace('SignUp')} style={styles.signUpLink}>
           <Text style={styles.signUpText}>New here? <Text style={{ color: COLORS.gold, fontWeight: '700' }}>Create account</Text></Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={enterGuestMode} style={styles.guestBtn}>
+          <Text style={styles.guestText}>Continue as visitor 👀</Text>
+        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -207,6 +211,8 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontSize: 14, color: COLORS.white, marginLeft: 8 },
   signInBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 8, marginBottom: 20 },
   signInText: { fontSize: 15, fontWeight: '900', color: COLORS.black, letterSpacing: 1 },
-  signUpLink: { alignItems: 'center' },
+  signUpLink: { alignItems: 'center', marginBottom: 12 },
   signUpText: { fontSize: 13, color: COLORS.gray },
+  guestBtn:   { alignItems: 'center', paddingVertical: 10 },
+  guestText:  { fontSize: 13, color: COLORS.gray, opacity: 0.6 },
 });
