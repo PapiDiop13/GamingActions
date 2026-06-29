@@ -375,30 +375,30 @@ export function PulsingLeaderRing({ size = 64, thickness = 3 }) {
   }, []);
 
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  const BLUE   = '#00D4FF';
-  const BLUE2  = '#0099CC';
+  const RED    = '#FF2D2D';
+  const RED2   = '#FF7A00';
   const ring   = size + 8;
   const inner  = size + 2;
   const halo   = size + 18;
 
   return (
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
-      {/* Halo bleu pulsé */}
+      {/* Halo rouge pulsé */}
       <Animated.View style={{
         position: 'absolute', width: halo, height: halo, borderRadius: halo / 2,
-        backgroundColor: BLUE, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.28] }),
+        backgroundColor: RED, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.28] }),
       }} />
-      {/* Anneau extérieur rotatif bleu */}
+      {/* Anneau extérieur rotatif rouge */}
       <Animated.View style={{
         position: 'absolute', width: ring, height: ring, borderRadius: ring / 2,
-        borderWidth: thickness, borderColor: BLUE, borderStyle: 'dashed',
+        borderWidth: thickness, borderColor: RED, borderStyle: 'dashed',
         transform: [{ rotate }],
-        shadowColor: BLUE, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 8,
+        shadowColor: RED, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 8,
       }} />
-      {/* Anneau intérieur pulsé */}
+      {/* Anneau intérieur pulsé orange */}
       <Animated.View style={{
         position: 'absolute', width: inner, height: inner, borderRadius: inner / 2,
-        borderWidth: 1.5, borderColor: BLUE2,
+        borderWidth: 1.5, borderColor: RED2,
         opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
       }} />
     </View>
@@ -426,24 +426,122 @@ export function ChampionBadge({ small = false }) {
   );
 }
 
-// ─── LeaderBadge — badge rouge enflammé "LEADER" ─────────────────────────────
+// ─── LeaderBadge — badge rouge flamme animé "#1 LEADER" ──────────────────────
 export function LeaderBadge({ small = false }) {
-  const RED = '#FF3B30';
-  const fs = small ? 7 : 8.5;
-  const px = small ? 5 : 7;
-  const py = small ? 1 : 2;
+  const flame = useRef(new Animated.Value(0)).current;
+  const flicker = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // Pulsation principale (scale + opacity)
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(flame, { toValue: 1, duration: 600, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+        Animated.timing(flame, { toValue: 0, duration: 600, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+      ])
+    ).start();
+    // Scintillement rapide (bord)
+    Animated.loop(
+      Animated.sequence([
+        Animated.delay(400),
+        Animated.timing(flicker, { toValue: 1, duration: 80, useNativeDriver: true }),
+        Animated.timing(flicker, { toValue: 0, duration: 120, useNativeDriver: true }),
+        Animated.delay(300),
+        Animated.timing(flicker, { toValue: 1, duration: 60, useNativeDriver: true }),
+        Animated.timing(flicker, { toValue: 0, duration: 100, useNativeDriver: true }),
+        Animated.delay(900),
+      ])
+    ).start();
+  }, []);
+
+  const RED    = '#FF2D2D';
+  const ORANGE = '#FF7A00';
+  const fs  = small ? 7 : 9;
+  const px  = small ? 5 : 8;
+  const py  = small ? 2 : 3;
+
+  const scale   = flame.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  const opacity = flame.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] });
+  const borderC = flicker.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }); // used for glow pulse
+
   return (
-    <View style={{
+    <Animated.View style={{
       flexDirection: 'row', alignItems: 'center',
       paddingHorizontal: px, paddingVertical: py,
-      borderRadius: 5, marginLeft: 5,
-      backgroundColor: 'rgba(255,59,48,0.18)',
-      borderWidth: 1, borderColor: RED,
-      shadowColor: RED, shadowOffset: { width: 0, height: 0 },
-      shadowRadius: 6, shadowOpacity: 0.8,
+      borderRadius: 6, marginLeft: 5,
+      backgroundColor: 'rgba(255,45,45,0.15)',
+      borderWidth: 1.5, borderColor: RED,
+      shadowColor: ORANGE, shadowOffset: { width: 0, height: 0 },
+      shadowRadius: 10, shadowOpacity: 0.95,
+      opacity, transform: [{ scale }],
     }}>
-      <Text style={{ fontSize: fs + 2, marginRight: 2 }}>🔥</Text>
-      <Text style={{ fontSize: fs, fontWeight: '900', color: RED, letterSpacing: 0.5 }}>LEADER</Text>
+      <Text style={{ fontSize: small ? fs + 1 : fs + 3, marginRight: 2, lineHeight: small ? 12 : 16 }}>🔥</Text>
+      <Text style={{ fontSize: fs, fontWeight: '900', color: RED, letterSpacing: 0.8 }}>#1 LEADER</Text>
+    </Animated.View>
+  );
+}
+
+// ─── LeaderElectricBorder — bordure bleu électrique pour les vidéos du leader ──
+export function LeaderElectricBorder({ width: W, height: H, radius = 8 }) {
+  const pulse = useRef(new Animated.Value(0.6)).current;
+  const flash = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.35, duration: 700, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+    Animated.loop(
+      Animated.sequence([
+        Animated.delay(600),
+        Animated.timing(flash, { toValue: 1, duration: 60, useNativeDriver: true }),
+        Animated.timing(flash, { toValue: 0, duration: 180, useNativeDriver: true }),
+        Animated.delay(400),
+        Animated.timing(flash, { toValue: 1, duration: 50, useNativeDriver: true }),
+        Animated.timing(flash, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.delay(1600),
+      ])
+    ).start();
+  }, []);
+
+  const BLUE  = '#00D4FF';
+  const BLUE2 = '#00AADD';
+
+  if (!W || !H) return null;
+
+  const cornerArcs = [
+    { x1: 0,        y1: H * 0.15, x2: W * 0.15, y2: 0,        seed: 3  },
+    { x1: W * 0.85, y1: 0,        x2: W,         y2: H * 0.15, seed: 7  },
+    { x1: 0,        y1: H * 0.85, x2: W * 0.15,  y2: H,        seed: 11 },
+    { x1: W * 0.85, y1: H,        x2: W,          y2: H * 0.85, seed: 17 },
+  ];
+
+  return (
+    <View style={[StyleSheet.absoluteFill, { borderRadius: radius }]} pointerEvents="none">
+      <Animated.View style={{
+        position: 'absolute', inset: 0, borderRadius: radius,
+        borderWidth: 2.5, borderColor: BLUE,
+        opacity: pulse,
+        shadowColor: BLUE, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 8,
+      }} />
+      <Animated.View style={{
+        position: 'absolute', inset: 0, borderRadius: radius,
+        borderWidth: 1, borderColor: BLUE2,
+        opacity: flash,
+      }} />
+      {cornerArcs.map((arc, i) => (
+        <Animated.View key={i} style={{ opacity: flash }}>
+          <LightningArc x1={arc.x1} y1={arc.y1} x2={arc.x2} y2={arc.y2} seed={arc.seed} color={BLUE} thin />
+        </Animated.View>
+      ))}
+      {[[0,0],[W,0],[0,H],[W,H]].map(([x,y], i) => (
+        <Animated.View key={`cd-${i}`} style={{
+          position: 'absolute', left: x - 2, top: y - 2,
+          width: 4, height: 4, borderRadius: 2,
+          backgroundColor: BLUE, opacity: flash,
+        }} />
+      ))}
     </View>
   );
 }

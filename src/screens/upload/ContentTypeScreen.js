@@ -5,24 +5,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 
-const GAMER_TYPES = [
-  {
-    id: 'clip',
-    icon: 'game-controller-outline',
-    title: 'Gaming Clip',
-    desc: 'Share your best gameplay moments. Get GG\'d by the community.',
-    color: COLORS.gold,
-  },
-];
+const CLIP_TYPE = {
+  id: 'clip',
+  icon: 'game-controller-outline',
+  title: 'Gaming Clip',
+  desc: 'Share your best gameplay moments. Get GG\'d by the community.',
+  color: COLORS.gold,
+};
+
+const GAMER_TYPES = [CLIP_TYPE];
 
 const CREATOR_TYPES = [
-  {
-    id: 'clip',
-    icon: 'game-controller-outline',
-    title: 'Gaming Clip',
-    desc: 'Share your best gameplay moments. Get GG\'d by the community.',
-    color: COLORS.gold,
-  },
+  CLIP_TYPE,
   {
     id: 'flashtuto',
     icon: 'bulb-outline',

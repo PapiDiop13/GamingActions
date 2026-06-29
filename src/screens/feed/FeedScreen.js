@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Dimensions, ScrollView, TextInput, Alert,
-  Platform, Animated, Modal, Image,
+  Platform, Animated, Easing, Modal, Image,
   TouchableWithoutFeedback, KeyboardAvoidingView, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -10,7 +10,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Notifications from 'expo-notifications';
 import { COLORS } from '../../constants/colors';
+import { PROFILE_BADGES } from '../../constants/cosmetics';
 import useFeedStore from '../../store/useFeedStore';
 import useAuthStore from '../../store/useAuthStore';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
@@ -25,12 +27,68 @@ import { db } from '../../config/firebase';
 import { getVideoUrl, getThumbnailUrl } from '../../config/mux';
 import ConsoleIcon from '../../components/ConsoleIcon';
 import { ringColorForUser, glowColorForUser, getFrameById, getVideoFrameById, commentFrameStyle } from '../../constants/frames';
-import { ElectricBorder, ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
+import { ElectricBorder, LeaderElectricBorder, ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
 import FramedAvatar from '../../components/FramedAvatar';
 import CommentsSheet, { CommentBubble } from '../../components/CommentsSheet';
 
 
 const { width: SW, height: SH } = Dimensions.get('window');
+
+// Streak levels for header display
+const SL_LABELS = {
+  goat:      'G.O.A.T',
+  legendary: 'LEGENDARY',
+  elite:     'ELITE',
+  diamond:   'DIAMOND',
+  platinum:  'PLATINUM',
+  gold:      'GOLD',
+  silver:    'SILVER',
+  bronze:    'BRONZE',
+  noob:      'NOOB',
+};
+const SL_COLORS = {
+  goat:      '#FF2D55',
+  legendary: '#C9A84C',
+  elite:     '#BF5AF2',
+  diamond:   '#00D4FF',
+  platinum:  '#A0E8FF',
+  gold:      '#FFD700',
+  silver:    '#C0C0C0',
+  bronze:    '#CD7F32',
+  noob:      '#555555',
+};
+
+// ── Animated glow/shimmer border for animated video frames ─────────────────────
+function VideoGlowFrame({ color, width, isShimmer }) {
+  const pulse = React.useRef(new Animated.Value(0.4)).current;
+  const sweep = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const pulseLoop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1.0, duration: 750, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.4, duration: 750, useNativeDriver: true }),
+    ]));
+    pulseLoop.start();
+    let sweepLoop;
+    if (isShimmer) {
+      sweepLoop = Animated.loop(Animated.timing(sweep, { toValue: 1, duration: 1000, useNativeDriver: true, easing: Easing.linear }));
+      sweepLoop.start();
+    }
+    return () => { pulseLoop.stop(); sweepLoop?.stop(); };
+  }, [color, isShimmer]);
+  const tx = sweep.interpolate({ inputRange: [0, 1], outputRange: [-90, (width || 400) + 90] });
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} pointerEvents="none">
+      <Animated.View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: color, opacity: pulse, shadowColor: color, shadowOpacity: 1, shadowRadius: 14 }} />
+      <Animated.View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, backgroundColor: color, opacity: pulse, shadowColor: color, shadowOpacity: 1, shadowRadius: 14 }} />
+      <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 3, backgroundColor: color, opacity: pulse, shadowColor: color, shadowOpacity: 1, shadowRadius: 14 }} />
+      <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: 3, backgroundColor: color, opacity: pulse, shadowColor: color, shadowOpacity: 1, shadowRadius: 14 }} />
+      {isShimmer && (
+        <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, width: 90, backgroundColor: color, opacity: 0.13, transform: [{ translateX: tx }, { skewX: '-12deg' }] }} />
+      )}
+    </View>
+  );
+}
+
 // Tab bar height (matches MainNavigator CustomTabBar)
 const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 80 : 60;
 const HEADER_H = Platform.OS === 'ios' ? 110 : 90;
@@ -65,15 +123,13 @@ function GGButton({ hasGG, count, onPress, onShowList, disabled = false }) {
   const glowOpacity = useRef(new Animated.Value(0)).current;
   const handlePress = () => {
     Animated.sequence([
-      Animated.spring(scale, { toValue: 1.15, useNativeDriver: true, speed: 60, bounciness: 20 }),
-      Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 30 }),
+      Animated.spring(scale, { toValue: 1.35, useNativeDriver: true, speed: 40, bounciness: 18 }),
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }),
     ]).start();
-    if (!hasGG) {
-      Animated.sequence([
-        Animated.timing(glowOpacity, { toValue: 1, duration: 100, useNativeDriver: true }),
-        Animated.timing(glowOpacity, { toValue: 0, duration: 600, useNativeDriver: true }),
-      ]).start();
-    }
+    Animated.sequence([
+      Animated.timing(glowOpacity, { toValue: 1, duration: 80, useNativeDriver: true }),
+      Animated.timing(glowOpacity, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ]).start();
     onPress();
   };
   return (
@@ -324,7 +380,7 @@ function PreviewComments({ videoId, isActive, onOpenSheet }) {
   }, [isActive, videoId]);
 
   // Show top 2 top-level comments in preview (replies shown as count only)
-  const topLevel = comments.filter(c => !c.parentId);
+  const topLevel = comments.filter(c => !c.parentId && !c.deleted);
   const replyMap = {};
   comments.filter(c => c.parentId).forEach(r => {
     if (!replyMap[r.parentId]) replyMap[r.parentId] = [];
@@ -385,38 +441,93 @@ const UE_MAP_FEED = {
   ue_red_glow:       { color: '#FF2D55', glow: true,  anim: false },
   ue_green_glow:     { color: '#39FF14', glow: true,  anim: false },
   ue_gold_glow:      { color: '#FFD700', glow: true,  anim: false },
+  ue_shadow:         { color: '#BC13FE', glow: true,  anim: false },
   ue_fire_text:      { color: '#FF3D00', glow: false, anim: true  },
-  ue_galaxy_text:    { color: '#7C4DFF', glow: false, anim: true  },
-  ue_rainbow_text:   { color: '#FF0080', glow: false, anim: true  },
   ue_lightning_text: { color: '#FFD700', glow: false, anim: true  },
+  ue_ice_text:       { color: '#A0E8FF', glow: true,  anim: true  },
+  ue_toxic_anim:     { color: '#39FF14', glow: true,  anim: true  },
+  ue_chrome:         { color: '#C0C0C0', glow: false, anim: true  },
+  ue_glitch:         { color: '#FF0080', glow: false, anim: true  },
+  ue_mirror:         { color: '#C0C0C0', glow: false, anim: true  },
+  ue_aurora_text:    { color: '#00FF88', glow: true,  anim: true  },
+  ue_galaxy_text:    { color: '#7C4DFF', glow: false, anim: true  },
+  ue_prism:          { color: '#FF0080', glow: true,  anim: true  },
+  ue_stardust:       { color: '#FFD700', glow: true,  anim: true  },
+  // Shimmer/reflet effects
+  ue_sakura_text:    { color: '#FF69B4', glow: true,  anim: true,  shimmer: true },
+  ue_holo_text:      { color: '#FF0080', glow: true,  anim: true,  shimmer: true },
+  ue_fire_reflet:    { color: '#FF4500', glow: true,  anim: true,  shimmer: true },
+  ue_void_reflet:    { color: '#BC13FE', glow: true,  anim: true,  shimmer: true },
+  ue_gold_reflet:    { color: '#FFD700', glow: true,  anim: true,  shimmer: true },
+  ue_ice_reflet:     { color: '#A0E8FF', glow: true,  anim: true,  shimmer: true },
+  ue_toxic_reflet:   { color: '#39FF14', glow: true,  anim: true,  shimmer: true },
+  ue_rose_reflet:    { color: '#FF69B4', glow: false, anim: true,  shimmer: true },
+  ue_cosmic_reflet:  { color: '#E040FB', glow: true,  anim: true,  shimmer: true },
+  ue_lightning_reflet: { color: '#FFD700', glow: true, anim: true, shimmer: true },
 };
 
+// Max username width: leaves room for badges + follow button
+const USERNAME_MAX_W = SW < 375 ? SW * 0.38 : SW * 0.42;
+const USERNAME_FS = SW < 375 ? 11 : 13;
+
 function FeedAnimatedUsername({ username, ueId, baseStyle }) {
-  const ue = ueId ? UE_MAP_FEED[ueId] : null;
-  const color = ue?.color || '#FFFFFF';
-  const glow  = ue?.glow  || false;
-  const isAnim = ue?.anim || false;
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  const ue      = ueId ? UE_MAP_FEED[ueId] : null;
+  const color   = ue?.color   || '#FFFFFF';
+  const glow    = ue?.glow    || false;
+  const isAnim  = ue?.anim    || false;
+  const isShimmer = ue?.shimmer || false;
+
+  const pulse = React.useRef(new Animated.Value(1)).current;
+  const sweep = React.useRef(new Animated.Value(0)).current;
+
   React.useEffect(() => {
-    if (!isAnim) { pulse.setValue(0); return; }
-    const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 700, useNativeDriver: false }),
+    pulse.stopAnimation(); sweep.stopAnimation();
+    if (!isAnim) { pulse.setValue(1); return; }
+    const pa = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 0.6, duration: 650, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1.0, duration: 650, useNativeDriver: true }),
     ]));
-    a.start();
-    return () => a.stop();
-  }, [isAnim, ueId]);
-  const shadowR = pulse.interpolate({ inputRange: [0,1], outputRange: [3, 11] });
-  const opacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.75, 1] });
+    pa.start();
+    let sweepLoop;
+    if (isShimmer) {
+      sweepLoop = Animated.loop(
+        Animated.timing(sweep, { toValue: 1, duration: 900, useNativeDriver: true, easing: Easing.linear })
+      );
+      sweepLoop.start();
+    }
+    return () => { pa.stop(); sweepLoop?.stop(); };
+  }, [isAnim, isShimmer, ueId]);
+
+  const sweepTx = sweep.interpolate({ inputRange: [0, 1], outputRange: [-50, USERNAME_MAX_W + 50] });
+  const nameStyle = [baseStyle, { maxWidth: USERNAME_MAX_W, fontSize: USERNAME_FS }];
+
+  if (isShimmer) {
+    // Shimmer: colored glow text + a bright white arc sweeping across
+    return (
+      <View style={{ maxWidth: USERNAME_MAX_W, overflow: 'hidden' }}>
+        <Animated.Text numberOfLines={1} ellipsizeMode="tail" style={[...nameStyle, {
+          color, opacity: pulse,
+          textShadowColor: color, textShadowRadius: 10, textShadowOffset: { width: 0, height: 0 },
+        }]}>{username}</Animated.Text>
+        <Animated.View style={{
+          position: 'absolute', top: 0, bottom: 0, width: 30,
+          backgroundColor: color,
+          opacity: 0.5,
+          transform: [{ translateX: sweepTx }, { skewX: '-10deg' }],
+        }} pointerEvents="none" />
+      </View>
+    );
+  }
   if (isAnim) {
     return (
-      <Animated.Text style={[baseStyle, { color, opacity,
-        textShadowColor: color, textShadowRadius: shadowR, textShadowOffset: { width:0, height:0 },
+      <Animated.Text numberOfLines={1} ellipsizeMode="tail" style={[...nameStyle, {
+        color, opacity: pulse,
+        textShadowColor: color, textShadowRadius: 9, textShadowOffset: { width: 0, height: 0 },
       }]}>{username}</Animated.Text>
     );
   }
   return (
-    <Text style={[baseStyle, {
+    <Text numberOfLines={1} ellipsizeMode="tail" style={[...nameStyle, {
       color,
       textShadowColor: glow ? color : 'transparent',
       textShadowRadius: glow ? 6 : 0,
@@ -424,18 +535,24 @@ function FeedAnimatedUsername({ username, ueId, baseStyle }) {
   );
 }
 
-function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isActive, shouldLoad = true }) {
+function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, userProfiles = {}, isActive, shouldLoad = true }) {
   const { toggleGG, incrementView } = useFeedStore();
   const { user } = useAuthStore();
+  // Merge live profile data (isCurrentLeader, isChampion, cosmetics) for this video's creator
+  const creatorProfile = item.userId === user?.uid ? userProfile : (userProfiles[item.userId] || {});
+  const enrichedItem = { ...item, ...creatorProfile };
   const { toggleFollow, isFollowing } = useUserStore();
   const guestGuard = useGuestGuard(navigation);
   const [showComments, setShowComments] = useState(false);
   const [showGGList, setShowGGList] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const isLegendary = item.plan === 'legendary';
-  const ADMIN_EMAILS = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
-  const isAdminInFeed = !!userProfile?.isAdmin || ADMIN_EMAILS.includes(user?.email?.toLowerCase());
+  const lastTapRef = useRef(0);
+  const tapTimerRef = useRef(null);
+  // Cleanup tap timer on unmount to prevent setState on unmounted component
+  useEffect(() => () => { if (tapTimerRef.current) clearTimeout(tapTimerRef.current); }, []);
+  const isLegendary = enrichedItem.plan === 'legendary';
+  const isAdminInFeed = !!userProfile?.isAdmin;
 
   const handleAdminAction = async () => {
     const opts = [];
@@ -457,10 +574,8 @@ function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isAc
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: async () => {
           try {
-            const { deleteDoc, doc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
-            const { db: fdb } = await import('../../config/firebase');
-            await deleteDoc(doc(fdb, 'videos', item.id));
-            await addDoc(collection(fdb, 'notifications'), {
+            await deleteDoc(doc(db, 'videos', item.id));
+            await addDoc(collection(db, 'notifications'), {
               userId: item.userId, type: 'system', fromUserId: 'SYSTEM', fromUsername: 'Gaming Actions',
               text: 'Your video was permanently removed by the moderation team.',
               read: false, createdAt: serverTimestamp(),
@@ -482,9 +597,7 @@ function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isAc
             { text: 'Cancel', style: 'cancel' },
             { text: 'Unhide', onPress: async () => {
               try {
-                const { updateDoc, doc } = await import('firebase/firestore');
-                const { db: fdb } = await import('../../config/firebase');
-                await updateDoc(doc(fdb, 'videos', item.id), { restricted: false, banned: false });
+                await updateDoc(doc(db, 'videos', item.id), { restricted: false, banned: false });
                 Alert.alert('✅ Video restored');
               } catch(e) { Alert.alert('Error', e.message); }
             }},
@@ -498,24 +611,22 @@ function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isAc
 
   const applyAdminAction = async (action, reason) => {
     try {
-      const { updateDoc, doc, serverTimestamp, addDoc, collection, increment } = await import('firebase/firestore');
-      const { db: fdb } = await import('../../config/firebase');
       if (action === 'hide') {
-        await updateDoc(doc(fdb, 'videos', item.id), {
+        await updateDoc(doc(db, 'videos', item.id), {
           restricted: true, restrictedAt: serverTimestamp(),
           restrictedReason: reason, restrictedBy: 'admin',
         });
         Alert.alert('🚫 Video hidden', `Reason: ${reason}`);
       } else if (action === 'ban') {
-        await updateDoc(doc(fdb, 'videos', item.id), {
+        await updateDoc(doc(db, 'videos', item.id), {
           restricted: true, banned: true,
           restrictedAt: serverTimestamp(), restrictedReason: reason, restrictedBy: 'admin',
         });
         // Strike au user
-        const userRef = doc(fdb, 'users', item.userId);
+        const userRef = doc(db, 'users', item.userId);
         await updateDoc(userRef, { strikes: increment(1) });
         // Notif in-app au user
-        await addDoc(collection(fdb, 'notifications'), {
+        await addDoc(collection(db, 'notifications'), {
           userId: item.userId, type: 'system', fromUserId: 'SYSTEM',
           fromUsername: 'Gaming Actions',
           text: `⛔ Your video "${item.title || 'Untitled'}" was removed for violating our Community Guidelines: ${reason}. Strike added to your account.`,
@@ -526,12 +637,22 @@ function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, isAc
     } catch(e) { Alert.alert('Error', e.message); }
   };
 const isOwnVideo = item.userId === user?.uid;
+  // Fetch creator profile eagerly if missing (ensures badges/frames show on first render)
+  const { fetchUserProfiles } = useFeedStore();
+  useEffect(() => {
+    if (item.userId && !userProfiles[item.userId] && item.userId !== user?.uid) {
+      fetchUserProfiles([item.userId]);
+    }
+  }, [item.userId]);
+
   // Frame vidéo : chaque vidéo conserve la frame choisie à l'upload.
   const videoFrameId = item.videoFrame || 'none';
   const videoFrame = getVideoFrameById(videoFrameId);
-  const isChampionFrame = videoFrameId === 'vf_champion' || (item.isChampion && item.isLegendaryFrame);
-  const hasVideoFrame = (videoFrame && videoFrame.id !== 'none') || item.isLegendaryFrame || isChampionFrame;
-  const videoFrameColor = isChampionFrame ? '#C9A84C' : (videoFrame && videoFrame.id !== 'none') ? videoFrame.color : '#C9A84C';
+  const isChampionFrame = videoFrameId === 'vf_champion' || (enrichedItem.isChampion && enrichedItem.isLegendaryFrame);
+  // Leader auto-gets blue electric border if they're #1 and NOT the champion
+  const isLeaderFrame = enrichedItem.isCurrentLeader && !enrichedItem.isChampion;
+  const hasVideoFrame = (videoFrame && videoFrame.id !== 'none') || enrichedItem.isLegendaryFrame || isChampionFrame || isLeaderFrame;
+  const videoFrameColor = isChampionFrame ? '#C9A84C' : isLeaderFrame ? '#00D4FF' : (videoFrame && videoFrame.id !== 'none') ? videoFrame.color : '#C9A84C';
   // Compteur de commentaires LIVE — compte les vrais commentaires dans Firestore
   // (corrige le bug "0 comments" dû à l'incohérence commentCount/commentsCount).
   // On ne s'abonne que pour le clip actif/proche pour limiter les lectures.
@@ -581,7 +702,7 @@ const isOwnVideo = item.userId === user?.uid;
       if (shouldPlay) player.play();
       else player.pause();
     } catch (e) {}
-  }, [isActive, isPaused]);
+  }, [isActive, isPaused, player]);
 
   // ── 5-second view tracking ──────────────────────────────────────────────────
   // A clip counts as "viewed" only after 5 continuous seconds active in the feed.
@@ -614,18 +735,18 @@ const isOwnVideo = item.userId === user?.uid;
 
       {/* CREATOR — en haut de la vidéo */}
       <View style={{ height: CREATOR_H, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }}>
-        <FramedAvatar user={item.userId === user?.uid ? { ...item, ...userProfile } : item} size={32} onPress={onNavigateProfile} />
+        <FramedAvatar user={enrichedItem} size={32} onPress={onNavigateProfile} />
         <View style={{ marginLeft: 8, flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
             <FeedAnimatedUsername
-              username={item.username}
-              ueId={item.equippedUsernameEffect}
+              username={enrichedItem.username || item.username}
+              ueId={enrichedItem.equippedUsernameEffect || item.equippedUsernameEffect}
               baseStyle={cardS.creatorName}
             />
             {isLegendary && <View style={cardS.legBadge}><Text style={cardS.legBadgeText}>LEG</Text></View>}
             {item.accountType === 'gameconic' && <View style={[cardS.legBadge, { backgroundColor: COLORS.red }]}><Text style={cardS.legBadgeText}>ICON</Text></View>}
             {item.accountType === 'creator' && <View style={[cardS.legBadge, { backgroundColor: COLORS.blue }]}><Text style={[cardS.legBadgeText, { color: COLORS.dark }]}>CR</Text></View>}
-            {item.isChampion ? <ChampionBadge small /> : item.isCurrentLeader ? <LeaderBadge small /> : null}
+            {(() => { const excl = ['creator','gameconic']; if (enrichedItem.isChampion && !excl.includes(enrichedItem.accountType)) return <ChampionBadge small />; if (enrichedItem.isCurrentLeader && !excl.includes(enrichedItem.accountType)) return <LeaderBadge small />; return null; })()}
           </View>
           {/* Profile badge cosmétique */}
           {(() => {
@@ -666,12 +787,12 @@ const isOwnVideo = item.userId === user?.uid;
             const sl = item.streakLevel;
             if (!sl || sl === 'noob') return null;
             if (item.hideStreakLevel) return null;
-            const SL_COLORS = { bronze: '#CD7F32', silver: '#C0C0C0', gold: '#FFD700', goat: '#FF2D55' };
-            const c = SL_COLORS[sl] || COLORS.gray;
+            const c = SL_COLORS[sl] || '#555555';
+            const lbl = SL_LABELS[sl] || sl.toUpperCase();
             return (
               <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
                 <View style={{ backgroundColor: c, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
-                  <Text style={{ fontSize: 8, fontWeight: '900', color: '#1A1A2E', letterSpacing: 0.5 }}>{sl.toUpperCase()}</Text>
+                  <Text style={{ fontSize: 8, fontWeight: '900', color: '#1A1A2E', letterSpacing: 0.5 }}>{lbl}</Text>
                 </View>
               </View>
             );
@@ -689,10 +810,11 @@ const isOwnVideo = item.userId === user?.uid;
         )}
       </View>
 
-      {/* VIDEO */}
+      {/* VIDEO — outer wrapper allows animated glow to escape overflow:hidden */}
+      <View style={{ height: VIDEO_H, width: '100%' }}>
       <View style={[
-        { height: VIDEO_H, width: '100%', backgroundColor: '#060610', overflow: 'hidden' },
-        hasVideoFrame && { borderTopWidth: 2, borderLeftWidth: 2, borderRightWidth: 2, borderColor: videoFrameColor },
+        { ...StyleSheet.absoluteFillObject, backgroundColor: '#060610', overflow: 'hidden' },
+        hasVideoFrame && !videoFrame?.animated && !isChampionFrame && !isLeaderFrame && { borderTopWidth: 2, borderLeftWidth: 2, borderRightWidth: 2, borderColor: videoFrameColor },
       ]}>
         {item.videoUrl ? (
           <>
@@ -721,7 +843,24 @@ const isOwnVideo = item.userId === user?.uid;
           </View>
         )}
 
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setIsPaused(p => !p)}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => {
+          const now = Date.now();
+          if (now - lastTapRef.current < 320) {
+            // double tap — annule le timer de pause
+            if (tapTimerRef.current) { clearTimeout(tapTimerRef.current); tapTimerRef.current = null; }
+            lastTapRef.current = 0;
+            // double tap GG si pas sa propre vidéo
+            if (item.userId !== user?.uid) {
+              guestGuard(() => toggleGG(item.id, user?.uid, item));
+            }
+          } else {
+            lastTapRef.current = now;
+            tapTimerRef.current = setTimeout(() => {
+              tapTimerRef.current = null;
+              setIsPaused(p => !p);
+            }, 320);
+          }
+        }}>
           {(!isActive || isPaused) && (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}>
@@ -740,7 +879,8 @@ const isOwnVideo = item.userId === user?.uid;
           </TouchableOpacity>
         </View>
 
-        {hasVideoFrame && !isChampionFrame && (
+        {/* Static corner pieces for non-animated frames */}
+        {hasVideoFrame && !isChampionFrame && !isLeaderFrame && !videoFrame?.animated && (
           <>
             <View style={{ position: 'absolute', top: 6, left: 6, width: 14, height: 14, borderTopWidth: 2, borderLeftWidth: 2, borderColor: videoFrameColor }} />
             <View style={{ position: 'absolute', top: 6, right: 6, width: 14, height: 14, borderTopWidth: 2, borderRightWidth: 2, borderColor: videoFrameColor }} />
@@ -748,10 +888,14 @@ const isOwnVideo = item.userId === user?.uid;
             <View style={{ position: 'absolute', bottom: 6, right: 6, width: 14, height: 14, borderBottomWidth: 2, borderRightWidth: 2, borderColor: videoFrameColor }} />
           </>
         )}
-        {isChampionFrame && (
-          <ElectricBorder width={SW} height={VIDEO_H} radius={0} />
-        )}
+        {isChampionFrame && <ElectricBorder width={SW} height={VIDEO_H} radius={0} />}
+        {isLeaderFrame && <LeaderElectricBorder width={SW} height={VIDEO_H} radius={0} />}
       </View>
+      {/* Animated glow frame — OUTSIDE overflow:hidden so shadows render correctly */}
+      {hasVideoFrame && !isChampionFrame && !isLeaderFrame && videoFrame?.animated && (
+        <VideoGlowFrame color={videoFrameColor} width={SW} isShimmer={!!videoFrame?.shimmer} />
+      )}
+      </View>{/* end outer video wrapper */}
 
       {/* META */}
       <View style={{ height: META_H, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 4, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3, justifyContent: 'space-between' }}>
@@ -810,7 +954,7 @@ const isOwnVideo = item.userId === user?.uid;
         </TouchableOpacity>
         {/* 2 most-liked comments — tap opens overlay */}
         <View style={{ flex: 1, paddingHorizontal: 14, paddingTop: 8 }}>
-          <PreviewComments videoId={item.id} isActive={isActive} onOpenSheet={() => setShowComments(true)} />
+          <PreviewComments videoId={item.id} isActive={isActive} onOpenSheet={() => guestGuard(() => setShowComments(true))} />
         </View>
       </View>
 
@@ -823,6 +967,9 @@ const isOwnVideo = item.userId === user?.uid;
 // Memoize VideoCard — only re-render when its own active/load state or item changes.
 // Without this, changing activeIndex re-renders EVERY card in the feed (laggy scroll).
 const VideoCard = React.memo(VideoCardInner, (prev, next) => {
+  const uid = prev.item.userId;
+  const prevCreator = prev.userProfiles?.[uid] || {};
+  const nextCreator = next.userProfiles?.[uid] || {};
   return prev.item.id === next.item.id
     && prev.isActive === next.isActive
     && prev.shouldLoad === next.shouldLoad
@@ -830,7 +977,13 @@ const VideoCard = React.memo(VideoCardInner, (prev, next) => {
     && prev.item.hasGG === next.item.hasGG
     && prev.item.commentCount === next.item.commentCount
     && prev.item.viewCount === next.item.viewCount
-    && prev.userProfile?.uid === next.userProfile?.uid;
+    && prev.userProfile?.uid === next.userProfile?.uid
+    && prevCreator.isCurrentLeader === nextCreator.isCurrentLeader
+    && prevCreator.isChampion === nextCreator.isChampion
+    && prevCreator.avatar === nextCreator.avatar
+    // Fallback: also check item-level fields in case userProfiles ref didn't change
+    && prev.item.isCurrentLeader === next.item.isCurrentLeader
+    && prev.item.isChampion === next.item.isChampion;
 });
 
 const cardS = StyleSheet.create({
@@ -855,8 +1008,11 @@ export const setUploadState = (state) => {
 };
 
 function UploadIndicator() {
-  const [state, setState] = useState({ isUploading: false, progress: 0 });
+  // Initialise depuis uploadStore — au cas où setUploadState a été appelé avant le montage
+  const [state, setState] = useState({ isUploading: uploadStore.isUploading, progress: uploadStore.progress });
   useEffect(() => {
+    // Synchronise l'état au montage (peut avoir changé entre useState et useEffect)
+    setState({ isUploading: uploadStore.isUploading, progress: uploadStore.progress });
     uploadStore.listeners.push(setState);
     return () => { uploadStore.listeners = uploadStore.listeners.filter(l => l !== setState); };
   }, []);
@@ -876,9 +1032,10 @@ function UploadIndicator() {
 }
 
 export default function FeedScreen({ navigation }) {
-  const { user, userProfile } = useAuthStore();
+  const { user, userProfile, isGuest } = useAuthStore();
+  const guestGuard = useGuestGuard(navigation);
   const { fetchFollowing } = useUserStore();
-  const { getFilteredVideos, activeTab, setActiveTab, setFilter, fetchVideos, cleanup, videos, userProfiles, isLoading, filterConsole, filterGenre, filterGame } = useFeedStore();  const [displayVideos, setDisplayVideos] = useState([]);
+  const { getFilteredVideos, activeTab, setActiveTab, setFilter, fetchVideos, fetchFollowingVideos, fetchFilteredVideos, fetchUserProfiles, cleanup, videos, userProfiles, isLoading, filterConsole, filterGenre, filterGame } = useFeedStore();  const [displayVideos, setDisplayVideos] = useState([]);
   const [filterModal, setFilterModal] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -899,7 +1056,12 @@ export default function FeedScreen({ navigation }) {
       where('userId', '==', user.uid),
       where('read', '==', false)
     );
-    const unsub = onSnapshot(q, (snap) => setUnreadCount(snap.size));
+    const unsub = onSnapshot(q, (snap) => {
+      const count = snap.size;
+      setUnreadCount(count);
+      // Sync app icon badge to real unread count
+      Notifications.setBadgeCountAsync(count).catch(() => {});
+    });
     return () => unsub();
   }, [user?.uid]);
 
@@ -910,6 +1072,9 @@ export default function FeedScreen({ navigation }) {
       // so even after Expo reload, the session IDs exclude already-seen clips.
       fetchVideos(user?.uid, false);
       if (user?.uid) fetchFollowing(user.uid);
+      // Re-fetch creator profiles on focus so badges/cosmetics are up-to-date
+      const uids = [...new Set(useFeedStore.getState().videos.map(v => v.userId).filter(Boolean))];
+      if (uids.length > 0) fetchUserProfiles(uids);
       return () => { setActiveIndex(-1); };
     }, [user?.uid])
   );
@@ -921,14 +1086,15 @@ export default function FeedScreen({ navigation }) {
 
   useEffect(() => {
     const filtered = getFilteredVideos();
+    // Eagerly fetch creator profiles so isCurrentLeader/isChampion/cosmetics are available
+    const uids = [...new Set(filtered.map(v => v.userId).filter(Boolean))];
+    if (uids.length > 0) fetchUserProfiles(uids);
     if (displayVideos.length === 0) {
-      setDisplayVideos(shuffle(filtered));
+      setDisplayVideos(activeTab === 'following' ? filtered : shuffle(filtered));
     } else if (filtered.length > displayVideos.length) {
       setDisplayVideos(prev => {
         const existingIds = new Set(prev.map(v => v.id));
         const newOnes = filtered.filter(v => !existingIds.has(v.id));
-        // Take fresh values from store (store is source of truth for hasGG/ggCount).
-        // Fall back to local value only if the video isn't in the store yet.
         return [...prev.map(v => {
           const updated = filtered.find(f => f.id === v.id);
           if (!updated) return v;
@@ -950,7 +1116,7 @@ export default function FeedScreen({ navigation }) {
         };
       }));
     }
-  }, [videos, userProfiles]);
+  }, [videos, userProfiles, activeTab]);
 
   const onViewableItemsChanged = useCallback(({ viewableItems }) => {
     if (viewableItems.length > 0) {
@@ -972,6 +1138,7 @@ export default function FeedScreen({ navigation }) {
       item={item}
       navigation={navigation}
       userProfile={userProfile}
+      userProfiles={userProfiles}
       isActive={index === activeIndex}
       // Preload window: current clip + next 2 (forward) + previous 1 (back).
       // Forward bias because users scroll down — the next clips are ready instantly.
@@ -980,63 +1147,89 @@ export default function FeedScreen({ navigation }) {
       shouldLoad={index >= activeIndex - 1 && index <= activeIndex + 2}
       onNavigateProfile={() => navigation.navigate('UserProfile', { userId: item.userId })}
     />
-  ), [userProfile, activeIndex]);
+  ), [userProfile, userProfiles, activeIndex]);
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
       <UploadIndicator />
 
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Image
-            source={require('../../../assets/logo.png')}
-            style={{ width: 32, height: 32, borderRadius: 8, marginRight: 8 }}
-            resizeMode="contain"
-          />
-          <Text style={styles.logoGA}>GAMING</Text>
-          <Text style={styles.logoActions}>ACTIONS</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.headerBtn}>
-            <Ionicons name="search-outline" size={22} color={COLORS.white} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setFilterModal(true)} style={styles.headerBtn}>
-  <Ionicons 
-    name="options-outline" 
-    size={22} 
-    color={filterConsole || filterGenre || filterGame ? COLORS.gold : COLORS.white} 
-  />
-  {(filterConsole || filterGenre || filterGame) && (
-    <View style={{
-      position: 'absolute', top: -4, right: -4,
-      width: 8, height: 8, borderRadius: 4,
-      backgroundColor: COLORS.gold,
-    }} />
-  )}
-</TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('Notifications')} style={styles.headerBtn}>
-            <View>
-              <Ionicons name="notifications-outline" size={22} color={COLORS.white} />
-              {unreadCount > 0 && (
-                <View style={{
-                  position: 'absolute', top: -4, right: -4,
-                  width: 16, height: 16, borderRadius: 8,
-                  backgroundColor: COLORS.red, alignItems: 'center', justifyContent: 'center',
-                  borderWidth: 1.5, borderColor: COLORS.black,
-                }}>
-                  <Text style={{ color: COLORS.white, fontSize: 9, fontWeight: '900' }}>
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </Text>
+      {(() => {
+        const streakLevel = userProfile?.streakLevel || 'noob';
+        const streakLabel = SL_LABELS[streakLevel] || 'NOOB';
+        const streakColor = SL_COLORS[streakLevel] || SL_COLORS.noob;
+        const isLeg  = userProfile?.plan === 'legendary';
+        const isIcon = userProfile?.accountType === 'gameconic';
+        const isCr   = userProfile?.accountType === 'creator';
+        const excl   = ['creator', 'gameconic'];
+        const showChampion = !!userProfile?.isChampion && !excl.includes(userProfile?.accountType);
+        const showLeader   = !!userProfile?.isCurrentLeader && !excl.includes(userProfile?.accountType);
+        const equippedBadge = userProfile?.equippedBadge
+          ? PROFILE_BADGES.find(b => b.id === userProfile.equippedBadge && b.emoji)
+          : null;
+        return (
+          <View style={styles.header}>
+            {/* LEFT — Avatar + Username + badges row */}
+            <TouchableOpacity
+              style={styles.headerLeft}
+              activeOpacity={0.75}
+              onPress={() => { if (!user?.uid) return; navigation.navigate('UserProfile', { userId: user?.uid }); }}
+            >
+              <FramedAvatar user={userProfile} size={36} />
+              <View style={{ marginLeft: 8, flex: 1 }}>
+                {/* Username with UE effect */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <FeedAnimatedUsername
+                    username={userProfile?.username || 'Player'}
+                    ueId={userProfile?.equippedUsernameEffect}
+                    baseStyle={styles.headerUsername}
+                  />
+                  {isLeg  && <View style={styles.hBadge}><Text style={styles.hBadgeTxt}>LEG</Text></View>}
+                  {isIcon && <View style={[styles.hBadge, { backgroundColor: COLORS.red }]}><Text style={styles.hBadgeTxt}>ICON</Text></View>}
+                  {isCr   && <View style={[styles.hBadge, { backgroundColor: COLORS.blue }]}><Text style={[styles.hBadgeTxt, { color: COLORS.black }]}>CR</Text></View>}
+                  {showChampion && <ChampionBadge small />}
+                  {showLeader   && <LeaderBadge small />}
                 </View>
-              )}
+                {/* Title badge + streak level pill */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                  {equippedBadge && (
+                    <Text style={styles.headerBadge} numberOfLines={1}>
+                      {equippedBadge.emoji} {equippedBadge.name}
+                    </Text>
+                  )}
+                  <View style={{ backgroundColor: streakColor, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4 }}>
+                    <Text style={{ fontSize: 8, fontWeight: '900', color: '#1A1A2E', letterSpacing: 0.5 }}>{streakLabel}</Text>
+                  </View>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            {/* RIGHT — Search + Filter + Notifications */}
+            <View style={styles.headerRight}>
+              <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.headerBtn}>
+                <Ionicons name="search-outline" size={22} color={COLORS.white} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setFilterModal(true)} style={styles.headerBtn}>
+                <Ionicons name="options-outline" size={22}
+                  color={filterConsole || filterGenre || filterGame ? COLORS.gold : COLORS.white} />
+                {(filterConsole || filterGenre || filterGame) && (
+                  <View style={{ position: 'absolute', top: -4, right: -4, width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.gold }} />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => guestGuard(() => navigation.navigate('Notifications'))} style={styles.headerBtn}>
+                <View>
+                  <Ionicons name="notifications-outline" size={22} color={COLORS.white} />
+                  {!isGuest && unreadCount > 0 && (
+                    <View style={{ position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: COLORS.red, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: COLORS.black }}>
+                      <Text style={{ color: COLORS.white, fontSize: 9, fontWeight: '900' }}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.navigate('UserProfile', { userId: user?.uid })} style={styles.headerBtn}>
-            <FramedAvatar user={userProfile} size={30} />
-          </TouchableOpacity>
-        </View>
-      </View>
+          </View>
+        );
+      })()}
 
       <View style={styles.tabs}>
   {['For You', 'Following'].map((tab, i) => {
@@ -1045,15 +1238,20 @@ export default function FeedScreen({ navigation }) {
       <TouchableOpacity
         key={tab}
         onPress={() => {
+          if (activeTab === key) return;
           setActiveTab(key);
+          setDisplayVideos([]);
+          useFeedStore.setState({
+            videos: [],
+            hasMore: true,
+            _playlist: null,
+            _docCache: null,
+            _followingCache: null,
+          });
           if (key === 'following') {
-            useFeedStore.setState({ videos: [], lastDoc: null, hasMore: true });
-            fetchVideos(user?.uid, false);
-            setDisplayVideos([]);
+            fetchFollowingVideos(user?.uid);
           } else {
-            useFeedStore.setState({ videos: [], lastDoc: null, hasMore: true });
             fetchVideos(user?.uid, false);
-            setDisplayVideos([]);
           }
         }}
         style={styles.tabItem}
@@ -1074,8 +1272,15 @@ export default function FeedScreen({ navigation }) {
               <TouchableOpacity
                 key={String(g.id)}
                 onPress={() => {
-                  setFilter(filterConsole, g.id, filterGame);
-                  setDisplayVideos(shuffle(getFilteredVideos()));
+                  const newGenre = g.id;
+                  setFilter(filterConsole, newGenre, filterGame);
+                  setDisplayVideos([]);
+                  useFeedStore.setState({ videos: [], hasMore: true, _playlist: null, _docCache: null });
+                  if (filterConsole || newGenre || filterGame) {
+                    fetchFilteredVideos(user?.uid);
+                  } else {
+                    fetchVideos(user?.uid, false);
+                  }
                 }}
                 style={[styles.quickChip, active && styles.quickChipActive]}
               >
@@ -1087,7 +1292,13 @@ export default function FeedScreen({ navigation }) {
             <TouchableOpacity
               onPress={() => {
                 setFilter(null, filterGenre, null);
-                setDisplayVideos(shuffle(getFilteredVideos()));
+                setDisplayVideos([]);
+                useFeedStore.setState({ videos: [], hasMore: true, _playlist: null, _docCache: null });
+                if (filterGenre) {
+                  fetchFilteredVideos(user?.uid);
+                } else {
+                  fetchVideos(user?.uid, false);
+                }
               }}
               style={[styles.quickChip, styles.quickChipClear]}
             >
@@ -1138,9 +1349,18 @@ export default function FeedScreen({ navigation }) {
           }
           ListEmptyComponent={
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: CARD_HEIGHT }}>
-              <Ionicons name="game-controller-outline" size={60} color={COLORS.gray2} />
-              <Text style={{ color: COLORS.gray, fontSize: 16, fontWeight: '700', marginTop: 16 }}>No clips yet</Text>
-              <Text style={{ color: COLORS.gray2, fontSize: 13, marginTop: 8 }}>Be the first to upload! 🎮</Text>
+              <Ionicons name={activeTab === 'following' ? 'people-outline' : 'game-controller-outline'} size={60} color={COLORS.gray2} />
+              {activeTab === 'following' ? (
+                <>
+                  <Text style={{ color: COLORS.gray, fontSize: 16, fontWeight: '700', marginTop: 16 }}>No clips from people you follow</Text>
+                  <Text style={{ color: COLORS.gray2, fontSize: 13, marginTop: 8, textAlign: 'center', paddingHorizontal: 32 }}>Follow creators in the feed to see their clips here 🎮</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={{ color: COLORS.gray, fontSize: 16, fontWeight: '700', marginTop: 16 }}>No clips yet</Text>
+                  <Text style={{ color: COLORS.gray2, fontSize: 13, marginTop: 8 }}>Be the first to upload! 🎮</Text>
+                </>
+              )}
             </View>
           }
         />
@@ -1151,7 +1371,13 @@ export default function FeedScreen({ navigation }) {
         onClose={() => setFilterModal(false)}
         onApply={(console_, genre, game) => {
           setFilter(console_, genre, game);
-          setDisplayVideos(shuffle(getFilteredVideos()));
+          setDisplayVideos([]);
+          useFeedStore.setState({ videos: [], hasMore: true, _playlist: null, _docCache: null });
+          if (console_ || genre || game) {
+            fetchFilteredVideos(user?.uid);
+          } else {
+            fetchVideos(user?.uid, false);
+          }
           setFilterModal(false);
         }}
       />
@@ -1161,10 +1387,13 @@ export default function FeedScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.black },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 52 : 30, paddingBottom: 10, backgroundColor: COLORS.black, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
-  headerLeft: { flexDirection: 'row', alignItems: 'center' },
-  logoGA: { fontSize: 19, fontWeight: '900', color: COLORS.white, letterSpacing: 2 },
-  logoActions: { fontSize: 19, fontWeight: '900', color: COLORS.gold, letterSpacing: 2, marginLeft: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: Platform.OS === 'ios' ? 50 : 28, paddingBottom: 8, backgroundColor: COLORS.black, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  headerUsername: { fontSize: 14, fontWeight: '700', color: COLORS.white, letterSpacing: 0.3 },
+  headerBadge: { fontSize: 10, fontWeight: '600', color: COLORS.gold, opacity: 0.85 },
+  headerStreak: { fontSize: 9, fontWeight: '800', color: COLORS.gray, letterSpacing: 0.8, textTransform: 'uppercase' },
+  hBadge: { backgroundColor: COLORS.gold, paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 3, marginLeft: 5 },
+  hBadgeTxt: { fontSize: 8, fontWeight: '900', color: COLORS.black },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerBtn: { marginLeft: 14 },
   tabs: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 9, backgroundColor: COLORS.black, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },

@@ -149,7 +149,7 @@ export default function FanbaseScreen({ navigation, route }) {
                   </>
                 )}
               </TouchableOpacity>
-              <Text style={styles.subscribeNote}>Paiement bientôt · Coming soon</Text>
+              <Text style={styles.subscribeNote}>Accès gratuit pendant la phase de lancement 🚀</Text>
             </>
           )}
         </View>

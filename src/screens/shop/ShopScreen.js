@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity,
   Dimensions, Alert, ActivityIndicator, Animated, Easing, Image,
+  Platform, InteractionManager,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { doc, runTransaction, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, runTransaction, addDoc, collection, serverTimestamp, arrayUnion } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { FRAMES, VIDEO_FRAMES, COMMENT_FRAMES } from '../../constants/frames';
@@ -139,23 +140,23 @@ function PriceTag({ cosmetic, userPlan, owned, equipped = false }) {
 // ─── Background Preview ───────────────────────────────────────────────────────
 function BgPreview({ cosmetic }) {
   const colors = cosmetic.colors || ['#0A0A0F'];
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  const pulse = React.useRef(new Animated.Value(0.6)).current;
   React.useEffect(() => {
     if (!cosmetic.animated) return;
+    let task;
     const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 1200, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 1200, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 1,   duration: 1200, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.6, duration: 1200, useNativeDriver: true }),
     ]));
-    a.start();
-    return () => a.stop();
+    task = InteractionManager.runAfterInteractions(() => a.start());
+    return () => { a.stop(); task?.cancel?.(); };
   }, [cosmetic.id]);
-  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] });
   const mainColor = colors[0];
   const accentColor = colors[colors.length - 1];
   return (
     <View style={{ width: '100%', height: 80, borderRadius: 10, overflow: 'hidden', backgroundColor: mainColor }}>
       {cosmetic.animated ? (
-        <Animated.View style={{ flex: 1, opacity }}>
+        <Animated.View style={{ flex: 1, opacity: pulse }}>
           <View style={{ position: 'absolute', bottom: -10, right: -10, width: 70, height: 70, borderRadius: 35, backgroundColor: accentColor, opacity: 0.5 }} />
           <View style={{ position: 'absolute', top: -15, left: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: accentColor, opacity: 0.3 }} />
         </Animated.View>
@@ -180,22 +181,22 @@ function BgPreview({ cosmetic }) {
 // ─── Banner Preview ───────────────────────────────────────────────────────────
 function BannerPreview({ cosmetic }) {
   const colors = cosmetic.colors || ['#0D0820'];
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  const pulse = React.useRef(new Animated.Value(0.5)).current;
   React.useEffect(() => {
     if (!cosmetic.animated) return;
+    let task;
     const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 1000, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 1000, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 1,   duration: 1000, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.5, duration: 1000, useNativeDriver: true }),
     ]));
-    a.start();
-    return () => a.stop();
+    task = InteractionManager.runAfterInteractions(() => a.start());
+    return () => { a.stop(); task?.cancel?.(); };
   }, [cosmetic.id]);
-  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
   const accentColor = colors[colors.length - 1];
   return (
     <View style={{ width: '100%', height: 80, borderRadius: 10, overflow: 'hidden', backgroundColor: colors[0] }}>
       {cosmetic.animated ? (
-        <Animated.View style={{ flex: 1, opacity }}>
+        <Animated.View style={{ flex: 1, opacity: pulse }}>
           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: accentColor }} />
           <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1, backgroundColor: accentColor, opacity: 0.4 }} />
           <View style={{ position: 'absolute', right: -20, top: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: accentColor, opacity: 0.2 }} />
@@ -220,26 +221,48 @@ function BannerPreview({ cosmetic }) {
 
 // ─── Username Effect Preview ──────────────────────────────────────────────────
 function UsernamePreview({ cosmetic }) {
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  const pulse = React.useRef(new Animated.Value(0.35)).current;
+  const sweep = React.useRef(new Animated.Value(0)).current;
+  const isShimmer = !!cosmetic.shimmer;
+  const PREVIEW_W = 140; // approximate card content width
+
   React.useEffect(() => {
     if (!cosmetic.animated) return;
-    const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: false }),
+    let task;
+    const pa = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1,    duration: 600, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.35, duration: 600, useNativeDriver: true }),
     ]));
-    a.start();
-    return () => a.stop();
-  }, [cosmetic.id]);
-  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
-  // Support color (simple) et colors[] (gradient animé — on prend la 1ère couleur pour la preview)
+    let sa;
+    if (isShimmer) {
+      sa = Animated.loop(
+        Animated.timing(sweep, { toValue: 1, duration: 900, useNativeDriver: true, easing: Easing.linear })
+      );
+    }
+    task = InteractionManager.runAfterInteractions(() => { pa.start(); sa?.start(); });
+    return () => { pa.stop(); sa?.stop(); task?.cancel?.(); };
+  }, [cosmetic.id, isShimmer]);
+
+  const sweepTx = sweep.interpolate({ inputRange: [0, 1], outputRange: [-40, PREVIEW_W + 40] });
   const mainColor = cosmetic.color || (Array.isArray(cosmetic.colors) && cosmetic.colors[0]) || COLORS.white;
+
   return (
-    <View style={{ width: '100%', height: 80, borderRadius: 10, backgroundColor: '#0A0A1A', alignItems: 'center', justifyContent: 'center' }}>
+    <View style={{ width: '100%', height: 80, borderRadius: 10, backgroundColor: '#0A0A1A', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
       {cosmetic.animated ? (
-        <Animated.Text style={{ fontSize: 18, fontWeight: '900', color: mainColor, opacity: glowOpacity,
-          textShadowColor: mainColor, textShadowRadius: 8 }}>
-          PLAYER
-        </Animated.Text>
+        <>
+          <Animated.Text style={{ fontSize: 18, fontWeight: '900', color: mainColor, opacity: pulse,
+            textShadowColor: mainColor, textShadowRadius: 9, textShadowOffset: { width:0, height:0 } }}>
+            PLAYER
+          </Animated.Text>
+          {isShimmer && (
+            <Animated.View style={{
+              position: 'absolute', top: 0, bottom: 0, width: 28,
+              backgroundColor: mainColor,
+              opacity: 0.55,
+              transform: [{ translateX: sweepTx }, { skewX: '-10deg' }],
+            }} pointerEvents="none" />
+          )}
+        </>
       ) : (
         <Text style={{ fontSize: 18, fontWeight: '900', color: mainColor,
           textShadowColor: cosmetic.glow ? mainColor : 'transparent',
@@ -248,8 +271,8 @@ function UsernamePreview({ cosmetic }) {
         </Text>
       )}
       {cosmetic.animated && (
-        <View style={{ position: 'absolute', top: 6, right: 6, backgroundColor: '#FF2D55', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 }}>
-          <Text style={{ fontSize: 7, color: '#fff', fontWeight: '900' }}>ANIMATED</Text>
+        <View style={{ position: 'absolute', top: 6, right: 6, backgroundColor: isShimmer ? '#C9A84C' : '#FF2D55', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 }}>
+          <Text style={{ fontSize: 7, color: '#fff', fontWeight: '900' }}>{isShimmer ? 'SHIMMER' : 'ANIMATED'}</Text>
         </View>
       )}
     </View>
@@ -270,27 +293,29 @@ function BadgePreview({ cosmetic }) {
 
 // ─── Card Border Preview ──────────────────────────────────────────────────────
 function CardBorderPreview({ cosmetic }) {
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  // useNativeDriver: true — opacity only (borderWidth/shadowRadius stay static)
+  const pulse = React.useRef(new Animated.Value(0.55)).current;
   React.useEffect(() => {
     if (!cosmetic.animated) return;
+    let task;
     const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 800, useNativeDriver: false }),
+      Animated.timing(pulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.55, duration: 800, useNativeDriver: true }),
     ]));
-    a.start();
-    return () => a.stop();
+    task = InteractionManager.runAfterInteractions(() => a.start());
+    return () => { a.stop(); task?.cancel?.(); };
   }, [cosmetic.id]);
-  const borderW = pulse.interpolate({ inputRange: [0, 1], outputRange: [1.5, 3] });
-  const shadowO = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
   const mainColor = cosmetic.color || (cosmetic.colors && cosmetic.colors[0]) || COLORS.gray3;
   return (
     <View style={{ width: '100%', height: 80, borderRadius: 10, backgroundColor: '#0A0A1A', alignItems: 'center', justifyContent: 'center' }}>
       {cosmetic.animated ? (
+        // Static border + shadow, animate opacity of entire card → shadow scales with opacity
         <Animated.View style={{ width: 60, height: 60, borderRadius: 10, backgroundColor: '#111120',
-          borderWidth: borderW, borderColor: mainColor,
-          shadowColor: mainColor, shadowOpacity: shadowO, shadowRadius: 8, shadowOffset: { width: 0, height: 0 },
+          borderWidth: 2.5, borderColor: mainColor,
+          shadowColor: mainColor, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width: 0, height: 0 },
+          opacity: pulse,
           alignItems: 'center', justifyContent: 'center' }}>
-          <Ionicons name="person" size={22} color={mainColor} style={{ opacity: 0.6 }} />
+          <Ionicons name="person" size={22} color={mainColor} style={{ opacity: 0.7 }} />
         </Animated.View>
       ) : (
         <View style={{ width: 60, height: 60, borderRadius: 10, backgroundColor: '#111120',
@@ -313,90 +338,144 @@ function CardBorderPreview({ cosmetic }) {
 // ─── Theme Preview ────────────────────────────────────────────────────────────
 // Theme color palettes — chaque theme a sa propre identité visuelle
 const THEME_PALETTES = {
-  theme_champion:  { bg: '#1A1200', banner: '#C9A84C', accent: '#FFD700', avatar: '#C9A84C' },
-  theme_phantom:   { bg: '#080010', banner: '#2A0040', accent: '#BF5AF2', avatar: '#7C4DFF' },
-  theme_inferno:   { bg: '#1A0500', banner: '#FF3D00', accent: '#FFD700', avatar: '#FF6D00' },
-  theme_storm:     { bg: '#050510', banner: '#001030', accent: '#FFD700', avatar: '#00D4FF' },
-  theme_cosmic:    { bg: '#02000A', banner: '#0A0030', accent: '#E040FB', avatar: '#7C4DFF' },
-  theme_matrix:    { bg: '#001A05', banner: '#003010', accent: '#00FF41', avatar: '#00C853' },
+  theme_champion:   { bg: '#1A1200', banner: '#C9A84C',  accent: '#FFD700', avatar: '#C9A84C',  accent2: '#FF8C00' },
+  theme_phantom:    { bg: '#080010', banner: '#2A0040',  accent: '#BF5AF2', avatar: '#7C4DFF',  accent2: '#E040FB' },
+  theme_inferno:    { bg: '#1A0500', banner: '#FF3D00',  accent: '#FFD700', avatar: '#FF6D00',  accent2: '#FF0000' },
+  theme_storm:      { bg: '#050510', banner: '#001030',  accent: '#FFD700', avatar: '#00D4FF',  accent2: '#7C4DFF' },
+  theme_cosmic:     { bg: '#02000A', banner: '#0A0030',  accent: '#E040FB', avatar: '#7C4DFF',  accent2: '#00D4FF' },
+  theme_matrix:     { bg: '#001A05', banner: '#003010',  accent: '#00FF41', avatar: '#00C853',  accent2: '#00D4FF' },
+  // Nouveaux thèmes (2025)
+  theme_sakura:     { bg: '#0A0005', banner: '#FF69B4',  accent: '#FFB7C5', avatar: '#FF69B4',  accent2: '#FF2D9D' },
+  theme_cyber:      { bg: '#050515', banner: '#FF0080',  accent: '#00D4FF', avatar: '#FF0080',  accent2: '#7C4DFF' },
+  theme_arctic:     { bg: '#000810', banner: '#A0E8FF',  accent: '#00D4FF', avatar: '#A0E8FF',  accent2: '#FFFFFF' },
+  theme_void_walker:{ bg: '#030005', banner: '#7C4DFF',  accent: '#BC13FE', avatar: '#7C4DFF',  accent2: '#E040FB' },
+  theme_neon_city:  { bg: '#050510', banner: '#FF00FF',  accent: '#00FFFF', avatar: '#FF00FF',  accent2: '#FFD700' },
 };
 
 function ThemePreview({ cosmetic }) {
-  const pal = THEME_PALETTES[cosmetic.id] || { bg: '#0A0A0F', banner: '#1A1A1A', accent: '#C9A84C', avatar: '#888' };
+  const pal = THEME_PALETTES[cosmetic.id] || { bg: '#0A0A0F', banner: '#1A1A1A', accent: '#C9A84C', avatar: '#888', accent2: '#C9A84C' };
   const pulse = React.useRef(new Animated.Value(0)).current;
+  const shimmer = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
-    if (!cosmetic.animated) return;
-    const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 1200, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 1200, useNativeDriver: false }),
+    let task;
+    const p = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1,   duration: 900, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.2, duration: 900, useNativeDriver: true }),
     ]));
-    a.start();
-    return () => a.stop();
+    const s = cosmetic.animated
+      ? Animated.loop(Animated.timing(shimmer, { toValue: 1, duration: 2000, useNativeDriver: true }))
+      : null;
+    task = InteractionManager.runAfterInteractions(() => { p.start(); s?.start(); });
+    return () => { p.stop(); s?.stop(); task?.cancel?.(); };
   }, [cosmetic.id]);
-  const glowO = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.8] });
+  const glowO = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.2, 0.7] });
+  const shimX  = shimmer.interpolate({ inputRange: [0, 1], outputRange: ['-100%', '100%'] });
   return (
-    <View style={{ width: '100%', height: 100, borderRadius: 10, overflow: 'hidden', backgroundColor: pal.bg }}>
-      {/* Bannière top */}
-      <View style={{ height: 42, backgroundColor: pal.banner }}>
+    <View style={{ width: '100%', height: 110, borderRadius: 12, overflow: 'hidden', backgroundColor: pal.bg,
+      shadowColor: pal.accent, shadowOpacity: 0.6, shadowRadius: 10, shadowOffset: { width:0, height:0 } }}>
+      {/* Bannière top avec dégradé simulé */}
+      <View style={{ height: 50, backgroundColor: pal.banner }}>
+        {/* Overlay accent animé */}
         {cosmetic.animated && (
           <Animated.View style={{ position: 'absolute', inset: 0, backgroundColor: pal.accent, opacity: glowO }} />
         )}
-        {/* Lignes déco */}
-        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 2, backgroundColor: pal.accent, opacity: 0.8 }} />
+        {/* Shimmer band */}
+        {cosmetic.animated && (
+          <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, width: 60,
+            backgroundColor: pal.accent2, opacity: 0.35, transform: [{ translateX: shimX }] }} />
+        )}
+        {/* Stripe déco */}
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 2.5, backgroundColor: pal.accent }} />
+        <View style={{ position: 'absolute', bottom: 2.5, left: 0, right: 0, height: 1, backgroundColor: pal.accent2, opacity: 0.5 }} />
+        {/* Tag theme */}
+        {cosmetic.isNew && (
+          <View style={{ position: 'absolute', top: 6, right: 6, backgroundColor: '#FF2D55', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 }}>
+            <Text style={{ fontSize: 6, color: '#fff', fontWeight: '900', letterSpacing: 0.5 }}>NEW</Text>
+          </View>
+        )}
       </View>
-      {/* Avatar row */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, marginTop: -14 }}>
-        <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: pal.avatar, borderWidth: 2.5, borderColor: pal.bg, alignItems: 'center', justifyContent: 'center',
-          shadowColor: pal.accent, shadowOpacity: 0.9, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } }}>
-          <Text style={{ fontSize: 12 }}>🎮</Text>
+      {/* Avatar + info row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, marginTop: -16 }}>
+        <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: pal.bg, borderWidth: 3, borderColor: pal.accent,
+          alignItems: 'center', justifyContent: 'center',
+          shadowColor: pal.accent, shadowOpacity: 1, shadowRadius: 8, shadowOffset: { width: 0, height: 0 } }}>
+          <Text style={{ fontSize: 14 }}>🎮</Text>
         </View>
-        <View style={{ marginLeft: 8 }}>
-          <Text style={{ fontSize: 10, fontWeight: '900', color: pal.accent }}>PLAYER</Text>
-          <View style={{ backgroundColor: pal.accent + '22', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginTop: 2 }}>
-            <Text style={{ fontSize: 7, color: pal.accent, fontWeight: '800' }}>{cosmetic.name.split(' ')[0].toUpperCase()}</Text>
+        <View style={{ marginLeft: 8, flex: 1 }}>
+          <Text style={{ fontSize: 10, fontWeight: '900', color: pal.accent }}>{cosmetic.name.split(' ')[0].toUpperCase()}</Text>
+          <View style={{ flexDirection: 'row', gap: 4, marginTop: 3 }}>
+            <View style={{ backgroundColor: pal.accent + '30', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2, borderWidth: 1, borderColor: pal.accent + '60' }}>
+              <Text style={{ fontSize: 7, color: pal.accent, fontWeight: '800' }}>PACK</Text>
+            </View>
+            {cosmetic.animated && (
+              <Animated.View style={{ backgroundColor: pal.accent2 + '30', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2,
+                borderWidth: 1, borderColor: pal.accent2, opacity: pulse.interpolate({ inputRange:[0,1], outputRange:[0.6,1] }) }}>
+                <Text style={{ fontSize: 7, color: pal.accent2, fontWeight: '900' }}>✨ LIVE</Text>
+              </Animated.View>
+            )}
           </View>
         </View>
       </View>
-      {/* Accent glow bottom */}
-      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1.5, backgroundColor: pal.accent, opacity: 0.5 }} />
-      {cosmetic.animated && (
-        <View style={{ position: 'absolute', top: 6, right: 6, backgroundColor: '#FF2D55', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 }}>
-          <Text style={{ fontSize: 7, color: '#fff', fontWeight: '900' }}>ANIMATED</Text>
-        </View>
-      )}
+      {/* Bottom glow line */}
+      <Animated.View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 2,
+        backgroundColor: pal.accent, opacity: pulse.interpolate({ inputRange:[0,1], outputRange:[0.4,1] }) }} />
     </View>
   );
 }
 
-// ─── Avatar Frame Preview (inchangé) ─────────────────────────────────────────
+// ─── Avatar Frame Preview ────────────────────────────────────────────────────
 function AnimatedRingPreview({ frame, size }) {
-  const pulse = React.useRef(new Animated.Value(0)).current;
-  const spin  = React.useRef(new Animated.Value(0)).current;
+  const pulse  = React.useRef(new Animated.Value(0)).current;
+  const spin   = React.useRef(new Animated.Value(0)).current;
+  const spin2  = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: false }),
-    ])).start();
-    Animated.loop(Animated.timing(spin, { toValue: 1, duration: 2500, useNativeDriver: true, easing: Easing.linear })).start();
-    return () => { pulse.stopAnimation(); spin.stopAnimation(); };
+    let task;
+    const pulseAnim = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1,   duration: 700, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+    ]));
+    const spinAnim  = Animated.loop(Animated.timing(spin,  { toValue: 1, duration: 1800, useNativeDriver: true, easing: Easing.linear }));
+    const spin2Anim = Animated.loop(Animated.timing(spin2, { toValue: 1, duration: 2600, useNativeDriver: true, easing: Easing.linear }));
+    task = InteractionManager.runAfterInteractions(() => {
+      pulseAnim.start(); spinAnim.start(); spin2Anim.start();
+    });
+    return () => { pulseAnim.stop(); spinAnim.stop(); spin2Anim.stop(); task?.cancel?.(); };
   }, []);
-  const opacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.35, 0.95] });
-  const rotate  = spin.interpolate({ inputRange: [0,1], outputRange: ['0deg','360deg'] });
-  const spinIds = ['neon_pulse_blue','neon_pulse_pink','galaxy_animated','rainbow_animated','lightning_animated','void_animated','nebula_animated','neon_city_animated','cosmic_animated','blizzard_animated'];
-  const ringSize = size + 10;
-  if (spinIds.includes(frame.id)) {
+  // pulse goes 0.4→1, use directly as opacity
+  const rotate    = spin.interpolate({ inputRange: [0,1], outputRange: ['0deg','360deg'] });
+  const rotateRev = spin2.interpolate({ inputRange: [0,1], outputRange: ['0deg','-360deg'] });
+  const outerSize = size + 14;
+  const innerSize = size + 6;
+  // ALL animated frames get spinning ring treatment
+  if (frame.animated) {
     return (
       <>
-        <Animated.View style={{ position: 'absolute', width: ringSize, height: ringSize, borderRadius: ringSize/2, borderWidth: 3,
-          borderColor: frame.color, borderTopColor: 'transparent', borderRightColor: 'transparent',
-          transform: [{ rotate }], shadowColor: frame.color, shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width:0, height:0 } }} />
-        <Animated.View style={{ position: 'absolute', width: ringSize, height: ringSize, borderRadius: ringSize/2, borderWidth: 1.5, borderColor: frame.color, opacity }} />
+        {/* Outer glow halo */}
+        <Animated.View style={{ position: 'absolute', width: outerSize + 6, height: outerSize + 6,
+          borderRadius: (outerSize+6)/2, backgroundColor: frame.color, opacity: pulse.interpolate({ inputRange:[0.4,1], outputRange:[0.08, 0.22] }) }} />
+        {/* Outer spinning arc */}
+        <Animated.View style={{ position: 'absolute', width: outerSize, height: outerSize,
+          borderRadius: outerSize/2, borderWidth: 3,
+          borderColor: frame.color, borderTopColor: 'transparent', borderLeftColor: 'transparent',
+          transform: [{ rotate }],
+          shadowColor: frame.color, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width:0, height:0 } }} />
+        {/* Inner counter-spinning arc */}
+        <Animated.View style={{ position: 'absolute', width: innerSize, height: innerSize,
+          borderRadius: innerSize/2, borderWidth: 2,
+          borderColor: frame.color, borderBottomColor: 'transparent', borderRightColor: 'transparent',
+          opacity: 0.7, transform: [{ rotate: rotateRev }] }} />
+        {/* Solid ring underneath (pulsing glow) */}
+        <Animated.View style={{ position: 'absolute', width: innerSize, height: innerSize,
+          borderRadius: innerSize/2, borderWidth: 1.5, borderColor: frame.color, opacity: pulse,
+          shadowColor: frame.color, shadowOpacity: 0.8, shadowRadius: 8, shadowOffset: { width:0, height:0 } }} />
       </>
     );
   }
   return (
-    <Animated.View style={{ position: 'absolute', width: ringSize, height: ringSize, borderRadius: ringSize/2, borderWidth: 3,
-      borderColor: frame.color, opacity, shadowColor: frame.color, shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width:0, height:0 } }} />
+    <Animated.View style={{ position: 'absolute', width: outerSize, height: outerSize,
+      borderRadius: outerSize/2, borderWidth: 3,
+      borderColor: frame.color, opacity: pulse,
+      shadowColor: frame.color, shadowOpacity: frame.glow ? 0.9 : 0.4, shadowRadius: frame.glow ? 8 : 4, shadowOffset: { width:0, height:0 } }} />
   );
 }
 
@@ -423,65 +502,190 @@ function AvatarFramePreview({ frame, avatar, username, size = 54 }) {
 
 function VideoFramePreview({ frame, size = 70 }) {
   const hasFrame = frame.id !== 'none';
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  // All useNativeDriver: true — opacity, scale, translateY only
+  const pulse  = React.useRef(new Animated.Value(0.6)).current;
+  const scan   = React.useRef(new Animated.Value(0)).current;
+  const flare  = React.useRef(new Animated.Value(0)).current;
+
   React.useEffect(() => {
     if (!frame.animated) return;
-    const anim = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 800, useNativeDriver: false }),
+    let task;
+    const pulseAnim = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1,   duration: 800, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.6, duration: 800, useNativeDriver: true }),
     ]));
-    anim.start();
-    return () => anim.stop();
+    const scanAnim = Animated.loop(Animated.sequence([
+      Animated.timing(scan, { toValue: 1, duration: 1400, useNativeDriver: true }),
+      Animated.timing(scan, { toValue: 0, duration: 0,    useNativeDriver: true }),
+      Animated.delay(500),
+    ]));
+    const flareAnim = Animated.loop(Animated.sequence([
+      Animated.timing(flare, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(flare, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ]));
+    task = InteractionManager.runAfterInteractions(() =>
+      Animated.parallel([pulseAnim, scanAnim, flareAnim]).start()
+    );
+    return () => { pulseAnim.stop(); scanAnim.stop(); flareAnim.stop(); task?.cancel?.(); };
   }, [frame.id]);
-  const animOpacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.5, 1] });
-  const animBorder  = pulse.interpolate({ inputRange: [0,1], outputRange: [2, 4] });
+
+  const h = size * 0.6;
+  // Only opacity/transform — native driver compatible
+  const animOpacity = pulse;   // border + fill pulse (opacity)
+  const fillOpacity = pulse.interpolate({ inputRange: [0.6, 1], outputRange: [0.04, 0.12] });
+  const scanTransY  = scan.interpolate({ inputRange: [0, 1], outputRange: [0, h] });
+  const scanOpacity = scan.interpolate({ inputRange: [0, 0.1, 0.75, 1], outputRange: [0, 0.9, 0.4, 0] });
+  const dotScale    = flare.interpolate({ inputRange: [0,1], outputRange: [1, 1.9] });
+  const dotOpacity  = flare.interpolate({ inputRange: [0,1], outputRange: [0.5, 1] });
+
   return (
-    <View style={{ width: size, height: size * 0.6, position: 'relative', borderRadius: 8, overflow: 'hidden', backgroundColor: '#0a0a1a' }}>
+    <View style={{ width: size, height: h, borderRadius: 8, overflow: 'hidden', backgroundColor: '#07071a' }}>
+      {/* Content */}
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <Ionicons name="game-controller" size={22} color={hasFrame ? frame.color : COLORS.gray3} style={{ opacity: 0.4 }} />
+        <Ionicons name="game-controller" size={22} color={hasFrame ? frame.color : COLORS.gray3} style={{ opacity: 0.35 }} />
       </View>
+
       {hasFrame && (
-        <>
-          {frame.animated
-            ? <Animated.View style={{ position: 'absolute', inset: 0, borderWidth: animBorder, borderColor: frame.color, borderRadius: 8, opacity: animOpacity,
-                shadowColor: frame.color, shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width:0, height:0 } }} />
-            : <View style={{ position: 'absolute', inset: 0, borderWidth: 2.5, borderColor: frame.color, borderRadius: 8, opacity: frame.glow ? 0.9 : 0.7 }} />
-          }
-          <View style={{ position: 'absolute', top: 3, left: 3, width: 8, height: 8, borderTopWidth: 2, borderLeftWidth: 2, borderColor: frame.color }} />
-          <View style={{ position: 'absolute', top: 3, right: 3, width: 8, height: 8, borderTopWidth: 2, borderRightWidth: 2, borderColor: frame.color }} />
-          <View style={{ position: 'absolute', bottom: 3, left: 3, width: 8, height: 8, borderBottomWidth: 2, borderLeftWidth: 2, borderColor: frame.color }} />
-          <View style={{ position: 'absolute', bottom: 3, right: 3, width: 8, height: 8, borderBottomWidth: 2, borderRightWidth: 2, borderColor: frame.color }} />
-        </>
+        frame.animated ? (
+          <>
+            {/* Static border + glow, opacity pulsing — shadow scales with opacity */}
+            <Animated.View style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              borderRadius: 8, borderWidth: 3, borderColor: frame.color,
+              opacity: animOpacity,
+              shadowColor: frame.color, shadowOpacity: 1,
+              shadowRadius: 16, shadowOffset: { width: 0, height: 0 },
+            }} />
+
+            {/* Inner color fill pulse */}
+            <Animated.View style={{
+              position: 'absolute', top: 4, left: 4, right: 4, bottom: 4,
+              borderRadius: 5, backgroundColor: frame.color, opacity: fillOpacity,
+            }} />
+
+            {/* Scan line — translateY (native) instead of top */}
+            <Animated.View style={{
+              position: 'absolute', left: 4, right: 4,
+              top: 0, height: 2,
+              backgroundColor: frame.color, opacity: scanOpacity,
+              shadowColor: frame.color, shadowOpacity: 1, shadowRadius: 5, shadowOffset: { width: 0, height: 0 },
+              transform: [{ translateY: scanTransY }],
+            }} />
+
+            {/* Corner brackets — static */}
+            <View style={{ position: 'absolute', top: 3, left: 3, width: 12, height: 12, borderTopWidth: 2.5, borderLeftWidth: 2.5, borderColor: frame.color }} />
+            <View style={{ position: 'absolute', top: 3, right: 3, width: 12, height: 12, borderTopWidth: 2.5, borderRightWidth: 2.5, borderColor: frame.color }} />
+            <View style={{ position: 'absolute', bottom: 3, left: 3, width: 12, height: 12, borderBottomWidth: 2.5, borderLeftWidth: 2.5, borderColor: frame.color }} />
+            <View style={{ position: 'absolute', bottom: 3, right: 3, width: 12, height: 12, borderBottomWidth: 2.5, borderRightWidth: 2.5, borderColor: frame.color }} />
+
+            {/* Pulsing dot at each corner — scale + opacity (native) */}
+            <Animated.View style={{ position: 'absolute', top: 1, left: 1, width: 5, height: 5, borderRadius: 2.5, backgroundColor: frame.color, opacity: dotOpacity, transform: [{ scale: dotScale }] }} />
+            <Animated.View style={{ position: 'absolute', top: 1, right: 1, width: 5, height: 5, borderRadius: 2.5, backgroundColor: frame.color, opacity: dotOpacity, transform: [{ scale: dotScale }] }} />
+            <Animated.View style={{ position: 'absolute', bottom: 1, left: 1, width: 5, height: 5, borderRadius: 2.5, backgroundColor: frame.color, opacity: dotOpacity, transform: [{ scale: dotScale }] }} />
+            <Animated.View style={{ position: 'absolute', bottom: 1, right: 1, width: 5, height: 5, borderRadius: 2.5, backgroundColor: frame.color, opacity: dotOpacity, transform: [{ scale: dotScale }] }} />
+          </>
+        ) : (
+          <>
+            <View style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              borderWidth: 2.5, borderColor: frame.color, borderRadius: 8,
+              opacity: frame.glow ? 0.9 : 0.7,
+              shadowColor: frame.glow ? frame.color : 'transparent',
+              shadowOpacity: 0.7, shadowRadius: 6, shadowOffset: { width: 0, height: 0 },
+            }} />
+            <View style={{ position: 'absolute', top: 3, left: 3, width: 8, height: 8, borderTopWidth: 2, borderLeftWidth: 2, borderColor: frame.color }} />
+            <View style={{ position: 'absolute', top: 3, right: 3, width: 8, height: 8, borderTopWidth: 2, borderRightWidth: 2, borderColor: frame.color }} />
+            <View style={{ position: 'absolute', bottom: 3, left: 3, width: 8, height: 8, borderBottomWidth: 2, borderLeftWidth: 2, borderColor: frame.color }} />
+            <View style={{ position: 'absolute', bottom: 3, right: 3, width: 8, height: 8, borderBottomWidth: 2, borderRightWidth: 2, borderColor: frame.color }} />
+          </>
+        )
       )}
     </View>
   );
 }
 
 function CommentBubblePreview({ frame }) {
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  // All useNativeDriver: true — opacity, scale, translateX only
+  const pulse   = React.useRef(new Animated.Value(0.5)).current;
+  const shimmer = React.useRef(new Animated.Value(0)).current;
+  const spark   = React.useRef(new Animated.Value(0)).current;
+
   React.useEffect(() => {
     if (!frame.animated) return;
-    const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 750, useNativeDriver: false }),
-      Animated.timing(pulse, { toValue: 0, duration: 750, useNativeDriver: false }),
+    let task;
+    const pulseAnim = Animated.loop(Animated.sequence([
+      Animated.timing(pulse,   { toValue: 1,   duration: 700, useNativeDriver: true }),
+      Animated.timing(pulse,   { toValue: 0.5, duration: 700, useNativeDriver: true }),
     ]));
-    a.start();
-    return () => a.stop();
+    const shimmerAnim = Animated.loop(Animated.sequence([
+      Animated.timing(shimmer, { toValue: 1, duration: 1100, useNativeDriver: true }),
+      Animated.timing(shimmer, { toValue: 0, duration: 0,    useNativeDriver: true }),
+      Animated.delay(350),
+    ]));
+    const sparkAnim = Animated.loop(Animated.sequence([
+      Animated.timing(spark,   { toValue: 1, duration: 480, useNativeDriver: true }),
+      Animated.timing(spark,   { toValue: 0, duration: 480, useNativeDriver: true }),
+    ]));
+    task = InteractionManager.runAfterInteractions(() =>
+      Animated.parallel([pulseAnim, shimmerAnim, sparkAnim]).start()
+    );
+    return () => { pulseAnim.stop(); shimmerAnim.stop(); sparkAnim.stop(); task?.cancel?.(); };
   }, [frame.id]);
-  const borderWidth = pulse.interpolate({ inputRange: [0,1], outputRange: [2, 3.5] });
-  const shadowOpacity = pulse.interpolate({ inputRange: [0,1], outputRange: [0.4, 1] });
+
+  // translateX instead of left — native driver compatible
+  const shimmerTransX = shimmer.interpolate({ inputRange: [0, 1], outputRange: [-50, 270] });
+  const shimmerOpac   = shimmer.interpolate({ inputRange: [0, 0.12, 0.7, 1], outputRange: [0, 0.7, 0.25, 0] });
+  const dotScale      = spark.interpolate({ inputRange: [0,1], outputRange: [0.7, 1.6] });
+  const dotOpacity    = spark.interpolate({ inputRange: [0,1], outputRange: [0.3, 1  ] });
+  const dotScale2     = spark.interpolate({ inputRange: [0,1], outputRange: [1.5, 0.7] });
+
   const baseStyle = { width: '100%', borderRadius: 10, padding: 10, marginBottom: 8, backgroundColor: COLORS.black };
+
   if (frame.animated) {
     return (
-      <Animated.View style={[baseStyle, { borderWidth, borderColor: frame.color, shadowColor: frame.color, shadowOffset: { width:0, height:0 }, shadowOpacity, shadowRadius: 8 }]}>
-        <Text style={{ fontSize: 10, color: COLORS.gold, fontWeight: '800' }}>YOU ⚡</Text>
-        <Text style={{ fontSize: 11, color: COLORS.white, marginTop: 2 }}>Sample comment 🔥</Text>
-      </Animated.View>
+      // Static border + shadow — opacity of the glow overlay pulses instead
+      <View style={[baseStyle, {
+        borderWidth: 2.5, borderColor: frame.color,
+        shadowColor: frame.color, shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.85, shadowRadius: 16,
+        overflow: 'hidden',
+      }]}>
+        {/* Pulsing glow overlay (opacity only — native) */}
+        <Animated.View style={{
+          position: 'absolute', top: 0, bottom: 0, left: 0, right: 0,
+          borderRadius: 10, borderWidth: 2, borderColor: frame.color,
+          opacity: pulse,
+        }} pointerEvents="none" />
+
+        {/* Shimmer sweep — translateX (native) instead of left */}
+        <Animated.View style={{
+          position: 'absolute', top: 0, bottom: 0,
+          left: -50, width: 38,
+          backgroundColor: frame.color, opacity: shimmerOpac,
+          transform: [{ translateX: shimmerTransX }, { skewX: '-18deg' }],
+        }} />
+
+        {/* Content row 1 */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={{ fontSize: 10, color: COLORS.gold, fontWeight: '800' }}>YOU ⚡</Text>
+          <Animated.View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: frame.color, opacity: dotOpacity, transform: [{ scale: dotScale }] }} />
+        </View>
+        {/* Content row 2 */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
+          <Text style={{ fontSize: 11, color: COLORS.white }}>Sample comment 🔥</Text>
+          <Animated.View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: frame.color, opacity: dotOpacity, transform: [{ scale: dotScale2 }] }} />
+        </View>
+      </View>
     );
   }
+
   return (
-    <View style={[baseStyle, { borderWidth: frame.id === 'none' ? 1 : 2, borderColor: frame.id === 'none' ? COLORS.gray3 : frame.color,
-      shadowColor: frame.glow ? frame.color : 'transparent', shadowOffset: { width:0, height:0 }, shadowOpacity: frame.glow ? 0.7 : 0, shadowRadius: 6 }]}>
+    <View style={[baseStyle, {
+      borderWidth: frame.id === 'none' ? 1 : 2,
+      borderColor: frame.id === 'none' ? COLORS.gray3 : frame.color,
+      shadowColor: frame.glow ? frame.color : 'transparent',
+      shadowOffset: { width: 0, height: 0 }, shadowOpacity: frame.glow ? 0.7 : 0, shadowRadius: 6,
+    }]}>
       <Text style={{ fontSize: 10, color: COLORS.gold, fontWeight: '800' }}>YOU</Text>
       <Text style={{ fontSize: 11, color: COLORS.white, marginTop: 2 }}>Sample comment 🔥</Text>
     </View>
@@ -525,50 +729,59 @@ function ChampionBanner({ type }) {
 // ─── Generic Cosmetic Grid ────────────────────────────────────────────────────
 function CosmeticGrid({ items, priceFilter, userPlan, ownedCosmetics, equippedId, onPress, renderPreview, infoText, isAdmin = false }) {
   const allOwned = isAdmin ? items.map(i => i.id) : ownedCosmetics;
+  const tier = (item) => item.animated ? 2 : item.glow && item.dollarsPrice ? 1 : item.glow ? 0.5 : 0;
   const filtered = items.filter(item => {
+    if (!isAdmin && item.dollarsPrice) return false; // hidden from non-admins
     if (priceFilter === 'owned') return canAccessCosmetic(item, userPlan, allOwned) && !item.exclusive;
     if (priceFilter === 'free') return item.free;
     if (priceFilter === 'points') return item.pointsPrice > 0 && !item.dollarsPrice;
     if (priceFilter === 'legendary') return item.legendaryFree;
     if (priceFilter === 'dollars') return !!item.dollarsPrice;
     return true;
-  });
+  }).sort((a, b) => tier(a) - tier(b));
 
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-      {infoText && (
+    <FlatList
+      data={filtered}
+      numColumns={2}
+      keyExtractor={(item) => item.id}
+      contentContainerStyle={{ paddingBottom: 120 }}
+      columnWrapperStyle={{ paddingHorizontal: 14, justifyContent: 'space-between' }}
+      showsVerticalScrollIndicator={false}
+      removeClippedSubviews={true}
+      initialNumToRender={6}
+      maxToRenderPerBatch={4}
+      windowSize={5}
+      ListHeaderComponent={infoText ? (
         <View style={s.infoBanner}>
           <Ionicons name="information-circle-outline" size={14} color={COLORS.gold} />
           <Text style={s.infoText}>{infoText}</Text>
         </View>
+      ) : null}
+      ListEmptyComponent={(
+        <View style={{ width: '100%', paddingVertical: 40, alignItems: 'center' }}>
+          <Text style={{ color: COLORS.gray, fontSize: 13 }}>No items in this filter</Text>
+        </View>
       )}
-      <View style={s.grid}>
-        {filtered.length === 0 && (
-          <View style={{ width: '100%', paddingVertical: 40, alignItems: 'center' }}>
-            <Text style={{ color: COLORS.gray, fontSize: 13 }}>No items in this filter</Text>
-          </View>
-        )}
-        {filtered.map(item => {
-          const owned = isAdmin || canAccessCosmetic(item, userPlan, allOwned);
-          return (
-            <TouchableOpacity
-              key={item.id}
-              activeOpacity={0.85}
-              style={[s.frameCard, owned && { borderColor: (item.color || COLORS.gold) + '80', borderWidth: 1.5 }]}
-              onPress={() => onPress(item, owned)}
-            >
-              <View style={s.framePreviewWrap}>
-                {renderPreview(item)}
-              </View>
-              <RarityBadge rarity={item.rarity || 'common'} />
-              <Text style={s.frameName} numberOfLines={1}>{item.name}</Text>
-              <Text style={s.frameDesc} numberOfLines={2}>{item.desc || item.preview || ''}</Text>
-              <PriceTag cosmetic={item} userPlan={userPlan} owned={owned} equipped={equippedId === item.id} />
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </ScrollView>
+      renderItem={({ item }) => {
+        const owned = isAdmin || canAccessCosmetic(item, userPlan, allOwned);
+        return (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[s.frameCard, owned && { borderColor: (item.color || COLORS.gold) + '80', borderWidth: 1.5 }]}
+            onPress={() => onPress(item, owned)}
+          >
+            <View style={s.framePreviewWrap}>
+              {renderPreview(item)}
+            </View>
+            <RarityBadge rarity={item.rarity || 'common'} />
+            <Text style={s.frameName} numberOfLines={1}>{item.name}</Text>
+            <Text style={s.frameDesc} numberOfLines={2}>{item.desc || item.preview || ''}</Text>
+            <PriceTag cosmetic={item} userPlan={userPlan} owned={owned} equipped={equippedId === item.id} />
+          </TouchableOpacity>
+        );
+      }}
+    />
   );
 }
 
@@ -582,16 +795,53 @@ const GIFT_CARD_EARN = [
 ];
 
 // ─── Main ShopScreen ──────────────────────────────────────────────────────────
+// ─── Guest Wall ───────────────────────────────────────────────────────────────
+function GuestShopWall() {
+  const navigation = useNavigation();
+  const exitGuest = useAuthStore((s) => s.exitGuestMode);
+  return (
+    <View style={{ flex: 1, backgroundColor: COLORS.background || '#0a0a0a', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+      <StatusBar style="light" />
+      <Text style={{ fontSize: 52, marginBottom: 16 }}>🛒</Text>
+      <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 10 }}>
+        Boutique Gaming Actions
+      </Text>
+      <Text style={{ color: '#aaa', fontSize: 15, textAlign: 'center', lineHeight: 22, marginBottom: 36 }}>
+        Crée un compte gratuit pour accéder aux cadres, cosmétiques, abonnements et bien plus.
+      </Text>
+      <TouchableOpacity
+        onPress={() => exitGuest()}
+        style={{ backgroundColor: '#7B2FFF', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 40, marginBottom: 14, width: '100%', alignItems: 'center' }}
+        activeOpacity={0.85}
+      >
+        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>Créer un compte gratuit 🎮</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => navigation.goBack()} activeOpacity={0.7}>
+        <Text style={{ color: '#666', fontSize: 14, marginTop: 4 }}>Retour</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function ShopScreen() {
   const navigation = useNavigation();
-  const { user, userProfile, saveProfile } = useAuthStore();
+  const { user, userProfile, saveProfile, isGuest } = useAuthStore();
   const [category, setCategory] = useState('avatar_frames');
   const [loading, setLoading] = useState(false);
   const [priceFilter, setPriceFilter] = useState('all');
+  // Lazy render — content mounts only after InteractionManager settles on each tab switch
+  const [renderReady, setRenderReady] = React.useState(false);
+  React.useEffect(() => {
+    setRenderReady(false);
+    const task = InteractionManager.runAfterInteractions(() => setRenderReady(true));
+    return () => task.cancel();
+  }, [category]);
 
-  const ADMIN_EMAILS = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
+  // Full guest wall — no shop access whatsoever (hooks all declared above)
+  if (isGuest) return <GuestShopWall />;
+
   const isAdmin = userProfile?.accountType === 'gameconic' || userProfile?.accountType === 'admin'
-    || userProfile?.isAdmin || ADMIN_EMAILS.includes(user?.email?.toLowerCase());
+    || !!userProfile?.isAdmin;
   const gaPoints         = userProfile?.gaPoints || 0;
   const userPlan         = userProfile?.plan || 'free';
   const equippedFrame    = userProfile?.equippedFrame || 'none';
@@ -655,10 +905,30 @@ export default function ShopScreen() {
     if (!isAdmin && gaPoints < frame.pointsPrice) return showAlert({ title: 'Not enough GA Points', message: `You need ${frame.pointsPrice} pts.`, type: 'warning' });
     showAlert({ title: `Buy "${frame.name}"?`, message: `Cost: ${frame.pointsPrice} pts`, type: 'info',
       buttons: [{ text: 'Cancel', style: 'cancel' }, { text: `Buy — ${frame.pointsPrice} pts`, onPress: async () => {
-        const newOwned = [...new Set([...(userProfile?.ownedCommentFrames || []), frame.id])];
-        await saveProfile({ ownedCommentFrames: newOwned, equippedCommentFrame: frame.id, gaPoints: gaPoints - frame.pointsPrice });
-        await logPurchase(user.uid, frame, 'comment', gaPoints - frame.pointsPrice);
-        showAlert({ title: '✅ Purchased!', message: `"${frame.name}" equipped on your comments!`, type: 'success' });
+        setLoading(true);
+        try {
+          const userRef = doc(db, 'users', user.uid);
+          let balanceAfter;
+          await runTransaction(db, async (transaction) => {
+            const snap = await transaction.get(userRef);
+            const current = snap.data()?.gaPoints ?? 0;
+            if (current < frame.pointsPrice) throw new Error('NOT_ENOUGH_POINTS');
+            balanceAfter = current - frame.pointsPrice;
+            transaction.update(userRef, {
+              gaPoints: balanceAfter,
+              equippedCommentFrame: frame.id,
+              ownedCommentFrames: arrayUnion(frame.id),
+            });
+          });
+          await saveProfile({ equippedCommentFrame: frame.id, ownedCommentFrames: [...new Set([...(userProfile?.ownedCommentFrames || []), frame.id])] });
+          await logPurchase(user.uid, frame, 'comment', balanceAfter);
+          showAlert({ title: '✅ Purchased!', message: `"${frame.name}" equipped on your comments!`, type: 'success' });
+        } catch (e) {
+          if (e.message === 'NOT_ENOUGH_POINTS') showAlert({ title: 'Not enough GA Points', message: `You need ${frame.pointsPrice} pts.`, type: 'warning' });
+          else showAlert({ title: 'Error', message: 'Purchase failed. Please try again.', type: 'danger' });
+        } finally {
+          setLoading(false);
+        }
       }}] });
   };
 
@@ -706,8 +976,8 @@ export default function ShopScreen() {
       return;
     }
     if (item.legendaryFree && userPlan !== 'legendary') {
-      showAlert({ title: '👑 Legendary Required', message: `This item is free for Legendary subscribers.\n\nUpgrade for CA$1.99/month to unlock it!`, type: 'info',
-        buttons: [{ text: 'Maybe later', style: 'cancel' }, { text: 'Go Legendary 👑', onPress: () => navigation.navigate('Subscription') }] });
+      showAlert({ title: '👑 Legendary Required', message: `Cet item est offert gratuitement aux abonnés Legendary.\n\nDécouvre les avantages Legendary dans la boutique.`, type: 'info',
+        buttons: [{ text: 'Plus tard', style: 'cancel' }, { text: 'Voir Legendary 👑', onPress: () => navigation.navigate('Subscription') }] });
       return;
     }
     if (!item.pointsPrice || item.pointsPrice === 0) { showAlert({ title: item.name, message: item.desc, type: 'info' }); return; }
@@ -745,19 +1015,32 @@ export default function ShopScreen() {
       Alert.alert('🔜 Coming Soon', `This premium theme pack will be available for purchase very soon!\n\nStay tuned! 🎮`, [{ text: 'Got it 👌' }]);
       return;
     }
-    if (owned || isAdmin) {
-      showAlert({ title: `Apply "${theme.name}"?`, message: `This will activate all ${(theme.includes || []).length} items of this theme on your profile.`, type: 'info',
-        buttons: [{ text: 'Cancel', style: 'cancel' }, { text: 'Apply Theme 🎨', onPress: async () => {
+    showAlert({ title: `Apply "${theme.name}"?`, message: `This will activate all ${(theme.includes || []).length} items of this theme on your profile.${isAdmin && !owned ? '\n\n[Admin bypass — unlocking]' : ''}`, type: 'info',
+      buttons: [{ text: 'Cancel', style: 'cancel' }, { text: 'Apply Theme 🎨', onPress: async () => {
+        // Admin: also add theme + all includes to owned arrays so they render correctly
+        if (isAdmin && !owned) {
+          const newOwned = [...new Set([...ownedCosmetics, theme.id, ...(theme.includes || [])])];
           await saveProfile({
-            equippedProfileBg: theme.includes?.[0],
+            ownedCosmetics: newOwned,
+            equippedTheme:         theme.id,
+            equippedProfileBg:     theme.includes?.[0],
             equippedProfileBanner: theme.includes?.[1],
-            equippedProfileBadge: theme.includes?.[2],
-            equippedCardBorder: theme.includes?.[3],
-            equippedUsernameEffect: theme.includes?.[4],
+            equippedProfileBadge:  theme.includes?.[2],
+            equippedCardBorder:    theme.includes?.[3],
+            equippedUsernameEffect:theme.includes?.[4],
           });
-          showAlert({ title: '✅ Theme Applied!', message: `"${theme.name}" is live on your profile!`, type: 'success' });
-        }}] });
-    }
+        } else {
+          await saveProfile({
+            equippedTheme:         theme.id,
+            equippedProfileBg:     theme.includes?.[0],
+            equippedProfileBanner: theme.includes?.[1],
+            equippedProfileBadge:  theme.includes?.[2],
+            equippedCardBorder:    theme.includes?.[3],
+            equippedUsernameEffect:theme.includes?.[4],
+          });
+        }
+        showAlert({ title: '✅ Theme Applied!', message: `"${theme.name}" is live on your profile!`, type: 'success' });
+      }}] });
   };
 
   // ─── Comment frame owned check ─────────────────────────────────────────────
@@ -775,7 +1058,7 @@ export default function ShopScreen() {
       {/* Header */}
       <View style={s.header}>
         <View>
-          <Text style={s.headerTitle}>Shop 🛍️</Text>
+          <Text style={s.headerTitle}>Shop 🛒</Text>
           <Text style={s.headerSub}>Customize your profile</Text>
           {isAdmin && (
             <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, backgroundColor: 'rgba(255,45,85,0.12)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
@@ -824,7 +1107,7 @@ export default function ShopScreen() {
       {/* Price filter — sauf gift_cards */}
       {category !== 'gift_cards' && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10, paddingTop: 4, gap: 8 }}>
-          {PRICE_FILTERS.map(f => (
+          {PRICE_FILTERS.filter(f => isAdmin || f.id !== 'dollars').map(f => (
             <TouchableOpacity key={f.id} onPress={() => setPriceFilter(f.id)}
               style={[s.priceChip, priceFilter === f.id && s.priceChipActive]}>
               <Text style={[s.priceChipText, priceFilter === f.id && s.priceChipTextActive]}>{f.label}</Text>
@@ -833,24 +1116,47 @@ export default function ShopScreen() {
         </ScrollView>
       )}
 
+      {/* ─── Lazy content placeholder while InteractionManager settles ─── */}
+      {!renderReady && (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="small" color={COLORS.gold} />
+        </View>
+      )}
+
       {/* ─── AVATAR FRAMES ─── */}
-      {category === 'avatar_frames' && (
-        <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-          <ChampionBanner type="avatar" />
-          <View style={s.grid}>
-            {[...FRAMES].filter(f => !f.exclusive).filter(frame => {
-              const owned = frame.free || ownedFrames.includes(frame.id);
-              if (priceFilter === 'owned') return owned;
-              if (priceFilter === 'free') return frame.free;
-              if (priceFilter === 'points') return frame.pointsPrice > 0 && !frame.dollarsPrice;
-              if (priceFilter === 'dollars') return !!frame.dollarsPrice;
-              if (priceFilter === 'legendary') return false;
-              return true;
-            }).sort((a, b) => (a.pointsPrice || 0) - (b.pointsPrice || 0)).map((frame) => {
+      {renderReady && category === 'avatar_frames' && (() => {
+        const avatarData = [...FRAMES].filter(f => !f.exclusive).filter(frame => {
+          if (!isAdmin && frame.dollarsPrice) return false;
+          const owned = frame.free || ownedFrames.includes(frame.id);
+          if (priceFilter === 'owned') return owned;
+          if (priceFilter === 'free') return frame.free;
+          if (priceFilter === 'points') return frame.pointsPrice > 0 && !frame.dollarsPrice;
+          if (priceFilter === 'dollars') return !!frame.dollarsPrice;
+          if (priceFilter === 'legendary') return false;
+          return true;
+        }).sort((a, b) => {
+          const frameTier = f => f.animated ? 2 : f.glow ? 1 : 0;
+          const td = frameTier(a) - frameTier(b);
+          return td !== 0 ? td : (a.pointsPrice || a.dollarsPrice || 0) - (b.pointsPrice || b.dollarsPrice || 0);
+        });
+        return (
+          <FlatList
+            data={avatarData}
+            numColumns={2}
+            keyExtractor={(f) => f.id}
+            contentContainerStyle={{ paddingBottom: 120 }}
+            columnWrapperStyle={{ paddingHorizontal: 14, justifyContent: 'space-between' }}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews={true}
+            initialNumToRender={6}
+            maxToRenderPerBatch={4}
+            windowSize={5}
+            ListHeaderComponent={<ChampionBanner type="avatar" />}
+            renderItem={({ item: frame }) => {
               const isEquipped = equippedFrame === frame.id;
               const isOwned = frame.free || ownedFrames.includes(frame.id);
               return (
-                <TouchableOpacity key={frame.id} onPress={() => handleAvatarFrame(frame)} activeOpacity={0.85}
+                <TouchableOpacity onPress={() => handleAvatarFrame(frame)} activeOpacity={0.85}
                   style={[s.frameCard, isEquipped && { borderColor: frame.color === COLORS.gray3 ? COLORS.gold : frame.color, borderWidth: 1.5 }]}>
                   <View style={s.framePreviewWrap}>
                     <AvatarFramePreview frame={frame} avatar={userProfile?.avatar} username={userProfile?.username} size={54} />
@@ -869,13 +1175,13 @@ export default function ShopScreen() {
                   )}
                 </TouchableOpacity>
               );
-            })}
-          </View>
-        </ScrollView>
-      )}
+            }}
+          />
+        );
+      })()}
 
       {/* ─── PROFILE BACKGROUNDS ─── */}
-      {category === 'profile_bg' && (
+      {renderReady && category === 'profile_bg' && (
         <CosmeticGrid items={PROFILE_BACKGROUNDS} priceFilter={priceFilter} userPlan={userPlan}
           ownedCosmetics={[...ownedCosmetics, ...(PROFILE_BACKGROUNDS.filter(b => b.free).map(b => b.id))]}
           equippedId={userProfile?.equippedProfileBg}
@@ -886,7 +1192,7 @@ export default function ShopScreen() {
       )}
 
       {/* ─── BANNERS ─── */}
-      {category === 'banners' && (
+      {renderReady && category === 'banners' && (
         <CosmeticGrid items={PROFILE_BANNERS} priceFilter={priceFilter} userPlan={userPlan}
           ownedCosmetics={[...ownedCosmetics, ...(PROFILE_BANNERS.filter(b => b.free).map(b => b.id))]}
           equippedId={userProfile?.equippedProfileBanner}
@@ -897,7 +1203,7 @@ export default function ShopScreen() {
       )}
 
       {/* ─── PROFILE BADGES / TITLES ─── */}
-      {category === 'badges' && (
+      {renderReady && category === 'badges' && (
         <CosmeticGrid items={PROFILE_BADGES} priceFilter={priceFilter} userPlan={userPlan}
           ownedCosmetics={[...ownedCosmetics, ...(PROFILE_BADGES.filter(b => b.free).map(b => b.id))]}
           equippedId={userProfile?.equippedProfileBadge}
@@ -908,17 +1214,18 @@ export default function ShopScreen() {
       )}
 
       {/* ─── USERNAME EFFECTS ─── */}
-      {category === 'username_fx' && (
+      {renderReady && category === 'username_fx' && (
         <CosmeticGrid items={USERNAME_EFFECTS} priceFilter={priceFilter} userPlan={userPlan}
           ownedCosmetics={[...ownedCosmetics, ...(USERNAME_EFFECTS.filter(u => u.free).map(u => u.id))]}
           equippedId={userProfile?.equippedUsernameEffect}
           onPress={handleCosmetic}
+          isAdmin={isAdmin}
           renderPreview={(item) => <UsernamePreview cosmetic={item} />}
           infoText="✨ Username effects change the color and glow of your name on your profile page. Animated versions pulse with light. Visible on your profile header." />
       )}
 
       {/* ─── CARD BORDERS ─── */}
-      {category === 'card_borders' && (
+      {renderReady && category === 'card_borders' && (
         <CosmeticGrid items={CARD_BORDERS} priceFilter={priceFilter} userPlan={userPlan}
           ownedCosmetics={[...ownedCosmetics, ...(CARD_BORDERS.filter(c => c.free).map(c => c.id))]}
           equippedId={userProfile?.equippedCardBorder}
@@ -929,7 +1236,7 @@ export default function ShopScreen() {
       )}
 
       {/* ─── THEMES ─── */}
-      {category === 'themes' && (
+      {renderReady && category === 'themes' && (
         <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
           <View style={s.infoBanner}>
             <Ionicons name="sparkles-outline" size={14} color={COLORS.gold} />
@@ -937,15 +1244,17 @@ export default function ShopScreen() {
           </View>
           <View style={s.grid}>
             {PROFILE_THEMES.filter(theme => {
+              if (!isAdmin && theme.dollarsPrice) return false; // hidden from non-admins
               if (priceFilter === 'dollars') return !!theme.dollarsPrice;
-              if (priceFilter === 'owned') return ownedCosmetics.includes(theme.id);
+              if (priceFilter === 'owned') return isAdmin || ownedCosmetics.includes(theme.id);
               return true;
-            }).map(theme => {
-              const owned = ownedCosmetics.includes(theme.id);
+            }).sort((a, b) => (a.dollarsPrice || 0) - (b.dollarsPrice || 0)).map(theme => {
+              const owned = isAdmin || ownedCosmetics.includes(theme.id);
+              const pal = THEME_PALETTES[theme.id] || { accent: COLORS.gold };
               return (
                 <TouchableOpacity key={theme.id} onPress={() => handleTheme(theme, owned)} activeOpacity={0.85}
-                  style={[s.frameCard, { width: '100%' }, owned && { borderColor: COLORS.gold + '60', borderWidth: 1 }]}>
-                  <View style={[s.framePreviewWrap, { height: 100 }]}>
+                  style={[s.frameCard, { width: '100%' }, owned && { borderColor: pal.accent + '80', borderWidth: 1.5 }]}>
+                  <View style={[s.framePreviewWrap, { height: 110 }]}>
                     <ThemePreview cosmetic={theme} />
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 4 }}>
@@ -955,7 +1264,7 @@ export default function ShopScreen() {
                   <Text style={[s.frameDesc, { textAlign: 'left' }]}>{theme.desc}</Text>
                   <Text style={{ fontSize: 10, color: COLORS.gray2, marginBottom: 6 }}>Includes {(theme.includes || []).length} items</Text>
                   {owned ? (
-                    <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.15)', borderColor: COLORS.gold }]}><Text style={[s.actionBtnText, { color: COLORS.gold }]}>🎨 APPLY THEME</Text></View>
+                    <View style={[s.actionBtn, { backgroundColor: pal.accent + '22', borderColor: pal.accent }]}><Text style={[s.actionBtnText, { color: pal.accent }]}>🎨 APPLY THEME</Text></View>
                   ) : (
                     <View style={[s.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}><Ionicons name="flash" size={10} color="#FF2D55" /><Text style={[s.actionBtnText, { color: '#FF2D55', marginLeft: 3 }]}>CA${theme.dollarsPrice?.toFixed(2)}</Text></View>
                   )}
@@ -967,25 +1276,44 @@ export default function ShopScreen() {
       )}
 
       {/* ─── VIDEO FRAMES ─── */}
-      {category === 'video_frames' && (
-        <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-          <View style={s.infoBanner}>
-            <Ionicons name="videocam-outline" size={14} color={COLORS.gold} />
-            <Text style={s.infoText}>Video frames appear as a border around your clips in the feed.</Text>
-          </View>
-          <ChampionBanner type="video" />
-          <View style={s.grid}>
-            {[...VIDEO_FRAMES].filter(f => !f.exclusive).filter(frame => {
-              const owned = frame.free || ownedVideoFrames.includes(frame.id);
-              if (priceFilter === 'owned') return owned;
-              if (priceFilter === 'free') return frame.free;
-              if (priceFilter === 'points') return frame.pointsPrice > 0 && !frame.dollarsPrice;
-              if (priceFilter === 'dollars') return !!frame.dollarsPrice;
-              return true;
-            }).sort((a, b) => (a.pointsPrice || 0) - (b.pointsPrice || 0)).map((frame) => {
+      {renderReady && category === 'video_frames' && (() => {
+        const videoData = [...VIDEO_FRAMES].filter(f => !f.exclusive).filter(frame => {
+          if (!isAdmin && frame.dollarsPrice) return false;
+          const owned = frame.free || ownedVideoFrames.includes(frame.id);
+          if (priceFilter === 'owned') return owned;
+          if (priceFilter === 'free') return frame.free;
+          if (priceFilter === 'points') return frame.pointsPrice > 0 && !frame.dollarsPrice;
+          if (priceFilter === 'dollars') return !!frame.dollarsPrice;
+          return true;
+        }).sort((a, b) => {
+          const t = f => f.animated ? 2 : f.glow ? 1 : 0;
+          return t(a) !== t(b) ? t(a) - t(b) : (a.pointsPrice || a.dollarsPrice || 0) - (b.pointsPrice || b.dollarsPrice || 0);
+        });
+        return (
+          <FlatList
+            data={videoData}
+            numColumns={2}
+            keyExtractor={(f) => f.id}
+            contentContainerStyle={{ paddingBottom: 120 }}
+            columnWrapperStyle={{ paddingHorizontal: 14, justifyContent: 'space-between' }}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews={true}
+            initialNumToRender={6}
+            maxToRenderPerBatch={4}
+            windowSize={5}
+            ListHeaderComponent={(
+              <>
+                <View style={s.infoBanner}>
+                  <Ionicons name="videocam-outline" size={14} color={COLORS.gold} />
+                  <Text style={s.infoText}>Video frames appear as a border around your clips in the feed.</Text>
+                </View>
+                <ChampionBanner type="video" />
+              </>
+            )}
+            renderItem={({ item: frame }) => {
               const isOwned = frame.free || ownedVideoFrames.includes(frame.id);
               return (
-                <TouchableOpacity key={frame.id} onPress={() => handleVideoFrame(frame)} activeOpacity={0.85}
+                <TouchableOpacity onPress={() => handleVideoFrame(frame)} activeOpacity={0.85}
                   style={[s.frameCard, isOwned && { borderColor: frame.color + '60', borderWidth: 1 }]}>
                   <View style={s.framePreviewWrap}><VideoFramePreview frame={frame} /></View>
                   <Text style={s.frameName} numberOfLines={1}>{frame.name}</Text>
@@ -998,32 +1326,51 @@ export default function ShopScreen() {
                   )}
                 </TouchableOpacity>
               );
-            })}
-          </View>
-        </ScrollView>
-      )}
+            }}
+          />
+        );
+      })()}
 
       {/* ─── COMMENT FRAMES ─── */}
-      {category === 'comment_frames' && (
-        <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-          <View style={[s.infoBanner, { marginBottom: 12 }]}>
-            <Text style={s.infoText}>💬 Comment Frames add a glowing border around your comments — visible to everyone!</Text>
-          </View>
-          <ChampionBanner type="comment" />
-          <View style={s.grid}>
-            {[...COMMENT_FRAMES].filter(f => !f.exclusive).filter(frame => {
-              const owned = commentFrameOwned(frame);
-              if (priceFilter === 'owned') return owned;
-              if (priceFilter === 'free') return frame.free || frame.pointsPrice === 0;
-              if (priceFilter === 'points') return frame.pointsPrice > 0 && !frame.dollarsPrice;
-              if (priceFilter === 'dollars') return !!frame.dollarsPrice;
-              if (priceFilter === 'legendary') return frame.legendaryFree;
-              return true;
-            }).sort((a, b) => (a.pointsPrice || 0) - (b.pointsPrice || 0)).map((frame) => {
+      {renderReady && category === 'comment_frames' && (() => {
+        const commentData = [...COMMENT_FRAMES].filter(f => !f.exclusive).filter(frame => {
+          if (!isAdmin && frame.dollarsPrice) return false;
+          const owned = commentFrameOwned(frame);
+          if (priceFilter === 'owned') return owned;
+          if (priceFilter === 'free') return frame.free || frame.pointsPrice === 0;
+          if (priceFilter === 'points') return frame.pointsPrice > 0 && !frame.dollarsPrice;
+          if (priceFilter === 'dollars') return !!frame.dollarsPrice;
+          if (priceFilter === 'legendary') return frame.legendaryFree;
+          return true;
+        }).sort((a, b) => {
+          const t = f => f.animated ? 2 : f.glow ? 1 : 0;
+          return t(a) !== t(b) ? t(a) - t(b) : (a.pointsPrice || a.dollarsPrice || 0) - (b.pointsPrice || b.dollarsPrice || 0);
+        });
+        return (
+          <FlatList
+            data={commentData}
+            numColumns={2}
+            keyExtractor={(f) => f.id}
+            contentContainerStyle={{ paddingBottom: 120 }}
+            columnWrapperStyle={{ paddingHorizontal: 14, justifyContent: 'space-between' }}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews={true}
+            initialNumToRender={6}
+            maxToRenderPerBatch={4}
+            windowSize={5}
+            ListHeaderComponent={(
+              <>
+                <View style={[s.infoBanner, { marginBottom: 12 }]}>
+                  <Text style={s.infoText}>💬 Comment Frames add a glowing border around your comments — visible to everyone!</Text>
+                </View>
+                <ChampionBanner type="comment" />
+              </>
+            )}
+            renderItem={({ item: frame }) => {
               const owned = commentFrameOwned(frame);
               const equipped = userProfile?.equippedCommentFrame === frame.id;
               return (
-                <TouchableOpacity key={frame.id} activeOpacity={0.85}
+                <TouchableOpacity activeOpacity={0.85}
                   style={[s.frameCard, equipped && { borderColor: frame.color || COLORS.gold, borderWidth: 1.5 }]}
                   onPress={() => handleCommentFrame(frame, owned)}>
                   <View style={s.framePreviewWrap}><CommentBubblePreview frame={frame} /></View>
@@ -1035,13 +1382,13 @@ export default function ShopScreen() {
                   }
                 </TouchableOpacity>
               );
-            })}
-          </View>
-        </ScrollView>
-      )}
+            }}
+          />
+        );
+      })()}
 
       {/* ─── GIFT CARDS ─── */}
-      {category === 'gift_cards' && (
+      {renderReady && category === 'gift_cards' && (
         <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
           <View style={s.infoBanner}>
             <Ionicons name="gift-outline" size={14} color={COLORS.gold} />
@@ -1079,7 +1426,7 @@ export default function ShopScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.black },
   loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', zIndex: 99 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 54, paddingBottom: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 10 },
   headerTitle: { fontSize: 24, fontWeight: '900', color: COLORS.white },
   headerSub: { fontSize: 12, color: COLORS.gray, marginTop: 2 },
   pointsBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 0.5, borderColor: COLORS.gold },

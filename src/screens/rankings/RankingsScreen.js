@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, query, orderBy, limit, getDocs, getDoc, doc, updateDoc, onSnapshot, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, getDoc, doc, updateDoc, setDoc, onSnapshot, where, serverTimestamp } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { db } from '../../config/firebase';
@@ -100,6 +100,7 @@ function GenreLeaderboard({ genreId, navigation }) {
         snap.docs.forEach(d => {
           const v = d.data();
           if (!v.userId || !(v.ggCount > 0)) return;
+          if (v.banned || v.restricted) return;
           if (!userGGs[v.userId]) userGGs[v.userId] = { uid: v.userId, username: v.username, avatar: v.avatar || '', ggCount: 0 };
           userGGs[v.userId].ggCount += v.ggCount || 0;
         });
@@ -159,6 +160,7 @@ function HeroPodium({ data, navigation }) {
   // Pop animation when the #1 spot changes hands
   const firstPop = useRef(new Animated.Value(1)).current;
   const prevFirstRef = useRef(first?.uid);
+  const loopRefs = useRef([]);
 
   useEffect(() => {
     if (first?.uid && prevFirstRef.current && prevFirstRef.current !== first.uid) {
@@ -170,14 +172,21 @@ function HeroPodium({ data, navigation }) {
   }, [first?.uid]);
 
   useEffect(() => {
-    Animated.loop(Animated.sequence([
+    const glowLoop = Animated.loop(Animated.sequence([
       Animated.timing(glow, { toValue: 1, duration: 1600, useNativeDriver: true }),
       Animated.timing(glow, { toValue: 0, duration: 1600, useNativeDriver: true }),
-    ])).start();
-    Animated.loop(Animated.sequence([
+    ]));
+    glowLoop.start();
+    loopRefs.current.push(glowLoop);
+
+    const bobLoop = Animated.loop(Animated.sequence([
       Animated.timing(bob, { toValue: 1, duration: 1400, useNativeDriver: true }),
       Animated.timing(bob, { toValue: 0, duration: 1400, useNativeDriver: true }),
-    ])).start();
+    ]));
+    bobLoop.start();
+    loopRefs.current.push(bobLoop);
+
+    return () => { loopRefs.current.forEach(l => l.stop()); };
   }, []);
 
   const glowScale = glow.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.2] });
@@ -253,7 +262,7 @@ function YourRankCard({ myRank, userProfile, topUsers }) {
       <View style={s.youCard}>
         <Avatar user={userProfile} size={40} />
         <View style={{ flex: 1, marginLeft: 12 }}>
-          <Text style={s.youTitle}>have classified yet</Text>
+          <Text style={s.youTitle}>You're not ranked yet</Text>
           <Text style={s.youSub}>Post clips and get GG-ed to get into the rankings 🎮</Text>
         </View>
       </View>
@@ -307,13 +316,14 @@ function PlayerRow({ user, maxGG, navigation }) {
     if (prevRankRef.current !== user.rank) {
       const movedUp = user.rank < prevRankRef.current;
       prevRankRef.current = user.rank;
-      // Slide in from the direction they moved + a gold glow pulse
       slideAnim.setValue(movedUp ? -20 : 20);
       glowAnim.setValue(1);
-      Animated.parallel([
+      const anim = Animated.parallel([
         Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, speed: 12, bounciness: 8 }),
         Animated.timing(glowAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
-      ]).start();
+      ]);
+      anim.start();
+      return () => anim.stop();
     }
   }, [user.rank]);
 
@@ -391,7 +401,9 @@ export default function RankingsScreen({ navigation }) {
   const [videosOfDay, setVideosOfDay] = useState([]);
   const [myRank, setMyRank] = useState(null);
   const [loading, setLoading] = useState(true);
-  const lastLeaderRef = useRef(null); // tracks last synced leader to avoid redundant writes
+
+  // Profile cache — avoid N getDoc calls on every GG event. TTL: 90 seconds.
+  const profileCache = React.useRef({}); // { uid: { data, fetchedAt } }
 
   useEffect(() => {
     const timer = setInterval(() => setNow2(new Date()), 1000);
@@ -405,9 +417,13 @@ export default function RankingsScreen({ navigation }) {
   useEffect(() => {
     const unsub = onSnapshot(
       query(collection(db, 'videos'), orderBy('ggCount', 'desc'), limit(500)),
-      (snap) => {
-        const allVideos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        processRankings(allVideos);
+      async (snap) => {
+        try {
+          const allVideos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          await processRankings(allVideos);
+        } catch (e) {
+          setLoading(false); // ensure spinner clears on error
+        }
       },
       (err) => { console.log('rankings listener error:', err.message); setLoading(false); }
     );
@@ -430,34 +446,49 @@ export default function RankingsScreen({ navigation }) {
         .map((v, i) => ({ rank: i + 1, ...v }));
       setTopVideos(topVids.filter(v => (v.ggCount || 0) > 0).slice(0, 5));
 
-      // Agrège les GG par joueur depuis TOUTES les vidéos
+      // Agrège les GG par joueur depuis TOUTES les vidéos (hors bannis/restricted)
       const userGGs = {};
       allVideos.forEach((v) => {
         if (!v.userId || !(v.ggCount > 0)) return;
+        if (v.banned || v.restricted) return;
         if (!userGGs[v.userId]) {
           userGGs[v.userId] = { uid: v.userId, username: v.username, avatar: v.avatar || '', plan: v.plan || 'free', streakLevel: v.streakLevel, ggCount: 0 };
         }
         userGGs[v.userId].ggCount += v.ggCount || 0;
       });
 
-      const usersList = Object.values(userGGs)
+      // Sort ALL users before slicing so myRank can be found regardless of position
+      const allUsersSorted = Object.values(userGGs)
         .sort((a, b) => b.ggCount - a.ggCount)
-        .slice(0, 20)
         .map((u, i) => ({ ...u, rank: i + 1 }));
 
-      // Enrichit avec les vrais profils (avatar, plan, tier)
-      const enrichedUsers = await Promise.all(
-        usersList.map(async (u) => {
+      // Find current user in full sorted list BEFORE slicing to top 20
+      const myRankEntry = allUsersSorted.find(u => u.uid === user?.uid);
+      const myRankIndex = myRankEntry ? allUsersSorted.indexOf(myRankEntry) : -1;
+
+      const usersList = allUsersSorted.slice(0, 20);
+
+      // Enrichit avec les vrais profils — TTL cache: only re-fetch after 90s
+      const CACHE_TTL_MS = 90_000;
+      const now = Date.now();
+      const toFetch = usersList.filter(u => {
+        const cached = profileCache.current[u.uid];
+        return !cached || (now - cached.fetchedAt) > CACHE_TTL_MS;
+      });
+      if (toFetch.length > 0) {
+        await Promise.all(toFetch.map(async (u) => {
           try {
             const snap = await getDoc(doc(db, 'users', u.uid));
-            if (snap.exists()) {
-              const p = snap.data();
-              return { ...u, avatar: p.avatar || '', plan: p.plan || u.plan, username: p.username || u.username, streakLevel: p.streakLevel || u.streakLevel, accountType: p.accountType || 'gamer', isChampion: p.isChampion || false, equippedFrame: p.equippedFrame || 'none' };
-            }
+            if (snap.exists()) profileCache.current[u.uid] = { data: snap.data(), fetchedAt: Date.now() };
           } catch (e) {}
-          return u;
-        })
-      );
+        }));
+      }
+      const enrichedUsers = usersList.map((u) => {
+        const cached = profileCache.current[u.uid];
+        if (!cached) return u;
+        const p = cached.data;
+        return { ...u, avatar: p.avatar || '', plan: p.plan || u.plan, username: p.username || u.username, streakLevel: p.streakLevel || u.streakLevel, accountType: p.accountType || 'gamer', isChampion: p.isChampion || false, isCurrentLeader: p.isCurrentLeader || false, equippedFrame: p.equippedFrame || 'none' };
+      });
       // Animate position changes — items smoothly slide to their new rank
       // when GG counts change the order (live leaderboard effect).
       if (Platform.OS === 'ios' || Platform.OS === 'android') {
@@ -483,43 +514,57 @@ export default function RankingsScreen({ navigation }) {
         try { await updateDoc(doc(db, 'users', u.uid), { isCurrentLeader: false }); } catch {}
       }
 
-      // Mon rang
+      // Mon rang — calculé sur les utilisateurs filtrés (hors créateurs/gameconic)
       if (user?.uid) {
-        const sorted = Object.values(userGGs).sort((a, b) => b.ggCount - a.ggCount);
-        const myEntry = sorted.find((u) => u.uid === user.uid);
-        if (myEntry) {
-          const myPos = sorted.findIndex((u) => u.uid === user.uid) + 1;
-          setMyRank({ rank: myPos, ggCount: myEntry.ggCount });
+        // myRankEntry was computed from the full sorted list (before slicing to top 20)
+        // so users ranked 21st or lower are correctly found
+        if (myRankEntry) {
+          // Re-rank after filtering excluded account types (accountType may not be set
+          // for users outside the enriched top-20, so fall back to 'gamer')
+          const allUsersFiltered = allUsersSorted
+            .filter(u => RANKING_EXEMPT_UIDS.includes(u.uid) || !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType || 'gamer'))
+            .sort((a, b) => b.ggCount - a.ggCount);
+          const myPos = allUsersFiltered.findIndex(u => u.uid === user.uid) + 1;
+          if (myPos > 0) setMyRank({ rank: myPos, ggCount: myRankEntry.ggCount });
         }
 
         // ── Real-time leader sync ────────────────────────────────────────────
         // The true #1 (most GG) should be the ONLY one with isCurrentLeader.
-        // Guarded by a ref so we only write when the leader actually changes,
-        // not on every snapshot (avoids unnecessary Firestore writes).
-        // Only consider non-excluded users for leader badge
-        const rankedSorted = sorted.filter(u =>
-          RANKING_EXEMPT_UIDS.includes(u.uid) ||
-          !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType)
-        );
+        // Uses enrichedUsers (has accountType) — raw userGGs doesn't have accountType.
+        // Guard: only the gameconic admin account writes (avoids multi-client write storms).
+        // Firestore-backed debounce: reads system/leaderStatus before writing so writes
+        // are skipped if the correct leader is already recorded — survives app restarts.
+        const rankedSorted = enrichedUsers
+          .filter(u => RANKING_EXEMPT_UIDS.includes(u.uid) || !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType))
+          .sort((a, b) => b.ggCount - a.ggCount);
         const trueLeaderId = rankedSorted[0]?.uid;
         const trueLeaderGG = rankedSorted[0]?.ggCount || 0;
-        if (trueLeaderId && trueLeaderGG > 0 && lastLeaderRef.current !== trueLeaderId) {
-          lastLeaderRef.current = trueLeaderId;
+        // Tout utilisateur connecté peut déclencher la mise à jour — le debounce Firestore
+        // (system/leaderStatus) empêche les écritures inutiles si le leader n'a pas changé.
+        if (trueLeaderId && trueLeaderGG > 0) {
           try {
-            // Find ALL users currently flagged as leader
-            const flaggedSnap = await getDocs(
-              query(collection(db, 'users'), where('isCurrentLeader', '==', true))
-            );
-            // Remove the badge from anyone who is NOT the true #1
-            for (const d of flaggedSnap.docs) {
-              if (d.id !== trueLeaderId) {
-                await updateDoc(doc(db, 'users', d.id), { isCurrentLeader: false });
+            // Firestore-backed check: only proceed if the stored leader differs
+            const statusRef = doc(db, 'system', 'leaderStatus');
+            const statusSnap = await getDoc(statusRef);
+            const currentLeaderId = statusSnap.data()?.currentLeaderId;
+            if (currentLeaderId !== trueLeaderId) {
+              // Find ALL users currently flagged as leader
+              const flaggedSnap = await getDocs(
+                query(collection(db, 'users'), where('isCurrentLeader', '==', true))
+              );
+              // Remove isCurrentLeader from anyone who is NOT the true #1
+              for (const d of flaggedSnap.docs) {
+                if (d.id !== trueLeaderId) {
+                  await updateDoc(doc(db, 'users', d.id), { isCurrentLeader: false });
+                }
               }
-            }
-            // Make sure the true leader HAS the badge
-            const leaderHasBadge = flaggedSnap.docs.some(d => d.id === trueLeaderId);
-            if (!leaderHasBadge) {
-              await updateDoc(doc(db, 'users', trueLeaderId), { isCurrentLeader: true });
+              // Give the true leader the badge
+              const leaderHasBadge = flaggedSnap.docs.some(d => d.id === trueLeaderId);
+              if (!leaderHasBadge) {
+                await updateDoc(doc(db, 'users', trueLeaderId), { isCurrentLeader: true });
+              }
+              // Persist the new leader so subsequent snapshots skip these writes
+              await setDoc(statusRef, { currentLeaderId: trueLeaderId, updatedAt: serverTimestamp() }, { merge: true });
             }
           } catch (e) {}
         }
@@ -691,14 +736,6 @@ export default function RankingsScreen({ navigation }) {
               </Text>
             </View>
             {GENRE_LIST.map(genre => {
-              // Get top 3 for this genre from topUsers (approximate — uses all videos)
-              const genreUsers = Object.values(
-                topUsers.reduce((acc, u) => {
-                  // We don't have per-genre breakdown in topUsers — show general top with genre label
-                  return acc;
-                }, {})
-              );
-              // Get videos for this genre
               return (
                 <View key={genre.id} style={{ marginHorizontal: 14, marginBottom: 16, backgroundColor: COLORS.card, borderRadius: 14, overflow: 'hidden', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.08)' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.06)' }}>

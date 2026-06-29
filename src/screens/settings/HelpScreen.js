@@ -6,6 +6,9 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../../config/firebase';
+import useAuthStore from '../../store/useAuthStore';
 
 const FAQ = [
   { q: 'How do GA Points work?', a: 'You earn GA Points through activity: posting clips (+25), receiving GGs (+2), gaining followers (+1), daily login bonus, and more. Use them in the Shop or to unlock Legendary.' },
@@ -36,6 +39,7 @@ const STRIKES_INFO = [
 ];
 
 export default function HelpScreen({ navigation }) {
+  const { user } = useAuthStore();
   const [activeSection, setActiveSection] = useState('faq');
   const [bugTitle, setBugTitle] = useState('');
   const [bugDesc, setBugDesc] = useState('');
@@ -49,14 +53,26 @@ export default function HelpScreen({ navigation }) {
     { id: 'legal', label: 'Legal', icon: 'document-text-outline' },
   ];
 
-  const handleBugSubmit = () => {
+  const handleBugSubmit = async () => {
     if (!bugTitle.trim() || !bugDesc.trim()) {
       Alert.alert('Missing', 'Please fill in both fields.');
       return;
     }
-    Alert.alert('✅ Report Sent', 'Thank you! Our team will review your report within 48 hours.', [
-      { text: 'OK', onPress: () => { setBugTitle(''); setBugDesc(''); } },
-    ]);
+    try {
+      await addDoc(collection(db, 'bug_reports'), {
+        userId: user?.uid || null,
+        email: user?.email || null,
+        subject: bugTitle.trim(),
+        message: bugDesc.trim(),
+        createdAt: serverTimestamp(),
+        status: 'open',
+      });
+      Alert.alert('✅ Report Sent', 'Thank you! Our team will review your report within 48 hours.', [
+        { text: 'OK', onPress: () => { setBugTitle(''); setBugDesc(''); } },
+      ]);
+    } catch (e) {
+      Alert.alert('Error', 'Could not send report. Please try again or email us directly.');
+    }
   };
 
   return (

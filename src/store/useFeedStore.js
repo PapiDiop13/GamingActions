@@ -46,7 +46,7 @@ const useFeedStore = create((set, get) => ({
     const unique = [...new Set(userIds)].filter(Boolean);
     if (unique.length === 0) return;
     const now = Date.now();
-    const TTL = 60 * 1000; // 60s : profils "quasi-live" sans requêtes redondantes au scroll
+    const TTL = 15 * 1000; // 15s : badges/cosmétiques quasi-temps réel sans trop de requêtes
     const fetchedAt = _profileFetchedAt || {};
     // Ne refetch que les profils absents ou expirés (> 60s)
     const toFetch = unique.filter(uid => !userProfiles[uid] || (now - (fetchedAt[uid] || 0)) > TTL);
@@ -88,7 +88,7 @@ const useFeedStore = create((set, get) => ({
       let docCache  = get()._docCache;
 
       if (!loadMore || !playlist || !docCache) {
-        const allDocsSnap = await getDocs(query(collection(db, 'videos')));
+        const allDocsSnap = await getDocs(query(collection(db, 'videos'), limit(800)));
         const NON_CLIP_TYPES = ['flashtuto', 'flashinfo', 'gameindev'];
 
         // Build a map of id → full video data (cached for instant page serving)
@@ -416,7 +416,10 @@ const useFeedStore = create((set, get) => ({
           }
         } catch (e) {}
       }
-    } catch(e){}
+    } catch(e) {
+      console.warn('[addComment] failed:', e.message);
+      throw e; // let calling component show an error toast
+    }
   },
 
   fetchComments: (videoId) => {
@@ -428,7 +431,7 @@ const useFeedStore = create((set, get) => ({
     const unsub = onSnapshot(q, (snapshot) => {
       const comments = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       set({ comments });
-    });
+    }, () => {}); // silent error — unauthenticated guests can't read comments
     return unsub;
   },
 
@@ -443,10 +446,13 @@ const useFeedStore = create((set, get) => ({
   getFilteredVideos: () => {
     const { filterConsole, filterGenre, filterGame, activeTab } = get();
     let filtered = get().getEnrichedVideos();
-    filtered = filtered.filter((v) => !v.restricted);
-    // Filter out videos from blocked users
-    const { useAuthStore } = require('./useAuthStore');
-    const blockedUsers = useAuthStore?.getState?.()?.userProfile?.blockedUsers || [];
+    filtered = filtered.filter((v) => !v.restricted && !v.banned);
+    // Filter out videos from blocked users (import dynamique évité — accès direct au state global)
+    let blockedUsers = [];
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      blockedUsers = require('./useAuthStore').default?.getState?.()?.userProfile?.blockedUsers || [];
+    } catch (e) {}
     if (blockedUsers.length > 0) {
       filtered = filtered.filter((v) => !blockedUsers.includes(v.userId));
     }
@@ -457,6 +463,146 @@ const useFeedStore = create((set, get) => ({
     if (filterGenre) filtered = filtered.filter((v) => v.genre === filterGenre);
     if (filterGame) filtered = filtered.filter((v) => v.game === filterGame);
     return filtered;
+  },
+
+  // ─── FILTERED FEED — requête Firestore ciblée quand un filtre est actif ───────
+  // Requête directement Firestore sur le champ le plus sélectif (game > genre > console),
+  // puis filtre secondaire client-side pour les autres critères.
+  fetchFilteredVideos: async (currentUserId) => {
+    const { filterConsole, filterGenre, filterGame } = get();
+    if (!filterConsole && !filterGenre && !filterGame) return; // pas de filtre actif
+    set({ isLoading: true, videos: [], hasMore: false });
+    try {
+      let q;
+      // Requête Firestore sur le champ le plus sélectif
+      if (filterGame) {
+        q = query(collection(db, 'videos'), where('game', '==', filterGame), limit(200));
+      } else if (filterGenre) {
+        q = query(collection(db, 'videos'), where('genre', '==', filterGenre), limit(200));
+      } else {
+        q = query(collection(db, 'videos'), where('console', '==', filterConsole), limit(200));
+      }
+
+      const snap = await getDocs(q);
+      let allVideos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Filtres secondaires client-side
+      if (filterGame && filterConsole) allVideos = allVideos.filter(v => v.console?.toLowerCase() === filterConsole.toLowerCase());
+      if (filterGame && filterGenre)   allVideos = allVideos.filter(v => v.genre === filterGenre);
+      if (filterGenre && filterConsole) allVideos = allVideos.filter(v => v.console?.toLowerCase() === filterConsole.toLowerCase());
+      allVideos = allVideos.filter(v => !v.restricted && !v.banned);
+
+      // Statut GG pour les 10 premières
+      if (currentUserId && allVideos.length > 0) {
+        try {
+          const pageIds = allVideos.slice(0, 10).map(v => v.id);
+          const ggSnap = await getDocs(query(collection(db, 'ggs'), where('userId', '==', currentUserId), where('videoId', 'in', pageIds)));
+          const ggIds = new Set(ggSnap.docs.map(d => d.data().videoId));
+          allVideos.forEach(v => { v.hasGG = ggIds.has(v.id); });
+        } catch (e) {}
+
+        // Follow status
+        try {
+          let followingIds = get()._followingCache;
+          if (!followingIds) {
+            const followSnap = await getDocs(query(collection(db, 'follows'), where('followerId', '==', currentUserId)));
+            followingIds = new Set(followSnap.docs.map(d => d.data().followingId));
+            set({ _followingCache: followingIds });
+          }
+          allVideos.forEach(v => { v.isFollowing = followingIds.has(v.userId); });
+        } catch (e) {}
+      }
+
+      // Normaliser + mélanger
+      const normalized = allVideos.map(v => ({
+        ...v,
+        hasGG: v.hasGG || false,
+        ggCount: v.ggCount || 0,
+        commentCount: v.commentsCount || v.commentCount || 0,
+        videoUrl: getVideoUrl(v),
+        thumbnailUrl: getThumbnailUrl(v) || v.thumbnail || null,
+      }));
+
+      // Shuffle pour varier l'ordre
+      const shuffled = [...normalized].sort(() => Math.random() - 0.5);
+
+      set({ videos: shuffled, isLoading: false, hasMore: false });
+      get().fetchUserProfiles(shuffled.map(v => v.userId).filter(Boolean));
+    } catch (e) {
+      console.log('fetchFilteredVideos error:', e.message);
+      set({ isLoading: false });
+    }
+  },
+
+  // ─── FOLLOWING FEED — requête dédiée Firestore ──────────────────────────────
+  // Ne dépend PAS du playlist global aléatoire : on requête directement les
+  // vidéos des utilisateurs suivis, triées par date décroissante.
+  fetchFollowingVideos: async (currentUserId) => {
+    if (!currentUserId) { set({ isLoading: false }); return; }
+    set({ isLoading: true, videos: [], hasMore: false });
+    try {
+      // 1. Récupérer la liste des follows
+      const followSnap = await getDocs(
+        query(collection(db, 'follows'), where('followerId', '==', currentUserId))
+      );
+      const followedIds = followSnap.docs.map(d => d.data().followingId).filter(Boolean);
+      if (followedIds.length === 0) {
+        set({ videos: [], isLoading: false });
+        return;
+      }
+
+      // 2. Requêter les vidéos des utilisateurs suivis (Firebase 'in' max 30 par batch)
+      let allVideos = [];
+      for (let i = 0; i < followedIds.length; i += 30) {
+        const batch = followedIds.slice(i, i + 30);
+        const snap = await getDocs(
+          query(
+            collection(db, 'videos'),
+            where('userId', 'in', batch),
+            orderBy('createdAt', 'desc'),
+            limit(50)
+          )
+        );
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (!data.restricted && !data.banned) {
+            allVideos.push({ id: d.id, ...data, isFollowing: true });
+          }
+        });
+      }
+
+      // 3. Trier par date décroissante (fusion des batches)
+      allVideos.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+
+      // 4. Statut GG pour les 10 premières vidéos
+      if (allVideos.length > 0) {
+        try {
+          const pageIds = allVideos.slice(0, 10).map(v => v.id);
+          const ggSnap = await getDocs(
+            query(collection(db, 'ggs'), where('userId', '==', currentUserId), where('videoId', 'in', pageIds))
+          );
+          const ggIds = new Set(ggSnap.docs.map(d => d.data().videoId));
+          allVideos.forEach(v => { v.hasGG = ggIds.has(v.id); });
+        } catch (e) {}
+      }
+
+      // 5. Normaliser URLs + champs
+      const normalized = allVideos.map(v => ({
+        ...v,
+        hasGG: v.hasGG || false,
+        ggCount: v.ggCount || 0,
+        isFollowing: true,
+        commentCount: v.commentsCount || v.commentCount || 0,
+        videoUrl: getVideoUrl(v),
+        thumbnailUrl: getThumbnailUrl(v) || v.thumbnail || null,
+      }));
+
+      set({ videos: normalized, isLoading: false, hasMore: false });
+      get().fetchUserProfiles(normalized.map(v => v.userId).filter(Boolean));
+    } catch (e) {
+      console.log('fetchFollowingVideos error:', e.message);
+      set({ isLoading: false });
+    }
   },
 }));
 

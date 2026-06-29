@@ -83,18 +83,22 @@ export async function awardPoints(userId, deltaPts, deltaGG = 0, reason = '', ex
 
       // gaPoints can never go below 0 (no negative balance in the shop)
       newGaPoints                = Math.max(0, (data.gaPoints     || 0) + deltaPts);
-      // streakPoints only ever increase (level-up is permanent)
-      const newStreakPoints       = Math.max(0, (data.streakPoints || 0) + deltaPts);
       const newGgReceived         = Math.max(0, (data.ggReceived   || 0) + deltaGG);
-      // Recalculate streak level every time points change
-      const newStreakLevel         = calcStreakLevel(newStreakPoints);
 
-      tx.update(userRef, {
-        gaPoints:     newGaPoints,
-        streakPoints: newStreakPoints,
-        ggReceived:   newGgReceived,
-        streakLevel:  newStreakLevel,
-      });
+      const updateFields = {
+        gaPoints:   newGaPoints,
+        ggReceived: newGgReceived,
+      };
+
+      // streakPoints only ever increase (level-up is permanent)
+      if (deltaPts > 0) {
+        const newStreakPoints = (data.streakPoints || 0) + deltaPts;
+        updateFields.streakPoints = newStreakPoints;
+        // Recalculate streak level only when earning points
+        updateFields.streakLevel = calcStreakLevel(newStreakPoints);
+      }
+
+      tx.update(userRef, updateFields);
     });
 
     // Write audit record (outside the transaction — not critical if it fails)

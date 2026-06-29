@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  Platform, Alert, Image, Switch, RefreshControl, KeyboardAvoidingView,
-  Modal, ActivityIndicator, Dimensions,
+  Platform, Alert, Image, Switch, RefreshControl,
+  Modal, ActivityIndicator, Dimensions, KeyboardAvoidingView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,15 +13,10 @@ import {
 } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import AdminFinanceTab from '../../components/AdminFinanceTab';
-import { db } from '../../config/firebase';
+import { db, auth } from '../../config/firebase';
 import { GAMES } from '../../constants/games';
 import { fetchPeriodStats, fetchTopErrors, fetchRecentErrors } from '../../utils/errorLogger';
 
-const HARDCODED_ADMINS = [
-  'admin@gamingactions.com',
-  'pdiop08@outlook.fr',
-  'free08man@gmail.com',
-];
 
 const TABS = [
   { id: 'overview',  label: 'Stats',    icon: 'bar-chart' },
@@ -63,8 +58,88 @@ function AdminVideoPlayer({ videoUrl, height = 180 }) {
 }
 
 export default function AdminScreen({ navigation, route }) {
+  const scrollRef = useRef(null);
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [recalcLoading, setRecalcLoading] = useState(false);
+  const [recalcResult, setRecalcResult] = useState(null);
+
+  // ─── Recalcul complet des GG + leader ──────────────────────────────────────
+  const EXCLUDED_TYPES = ['creator', 'gameconic'];
+  const recalculateGGAndLeader = async () => {
+    setRecalcLoading(true);
+    setRecalcResult(null);
+    try {
+      // 1. Charger toutes les vidéos pour agréger ggCount par userId
+      const videoSnap = await getDocs(collection(db, 'videos'));
+      const ggByUser = {};
+      videoSnap.docs.forEach(d => {
+        const { userId, ggCount } = d.data();
+        if (userId && ggCount > 0) {
+          ggByUser[userId] = (ggByUser[userId] || 0) + ggCount;
+        }
+      });
+
+      // 2. Charger tous les users
+      const userSnap = await getDocs(collection(db, 'users'));
+      const users = userSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // 3. Corriger ggReceived pour tous les users dont c'est désynchronisé
+      const fixBatch = [];
+      for (const u of users) {
+        const real = ggByUser[u.id] || 0;
+        if ((u.ggReceived || 0) !== real) {
+          fixBatch.push(updateDoc(doc(db, 'users', u.id), { ggReceived: real }));
+        }
+      }
+      if (fixBatch.length) await Promise.all(fixBatch);
+
+      // 4. Calculer le vrai classement (exclure creator/gameconic)
+      const ranked = users
+        .filter(u => !EXCLUDED_TYPES.includes(u.accountType))
+        .map(u => ({ ...u, ggCount: ggByUser[u.id] || 0 }))
+        .sort((a, b) => b.ggCount - a.ggCount);
+
+      const trueLeader = ranked[0];
+
+      if (!trueLeader || trueLeader.ggCount === 0) {
+        setRecalcResult({ ok: false, msg: 'Aucun GG trouvé — classement vide.' });
+        setRecalcLoading(false);
+        return;
+      }
+
+      // 5. Retirer isCurrentLeader de tous ceux qui ne sont plus #1
+      const leaderSnap = await getDocs(query(collection(db, 'users'), where('isCurrentLeader', '==', true)));
+      const removeBatch = leaderSnap.docs
+        .filter(d => d.id !== trueLeader.id)
+        .map(d => updateDoc(doc(db, 'users', d.id), { isCurrentLeader: false }));
+      if (removeBatch.length) await Promise.all(removeBatch);
+
+      // 6. Mettre isCurrentLeader sur le vrai leader
+      await updateDoc(doc(db, 'users', trueLeader.id), { isCurrentLeader: true });
+
+      // 7. Mettre à jour system/leaderStatus
+      await setDoc(doc(db, 'system', 'leaderStatus'), {
+        currentLeaderId: trueLeader.id,
+        currentLeaderUsername: trueLeader.username,
+        currentLeaderGG: trueLeader.ggCount,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+
+      setRecalcResult({
+        ok: true,
+        leader: trueLeader.username,
+        gg: trueLeader.ggCount,
+        fixed: fixBatch.length,
+        total: ranked.length,
+      });
+
+    } catch (e) {
+      setRecalcResult({ ok: false, msg: e.message });
+    }
+    setRecalcLoading(false);
+  };
 
   // OVERVIEW
   const [stats, setStats]            = useState({});
@@ -78,21 +153,22 @@ export default function AdminScreen({ navigation, route }) {
     { key: 'month', label: 'Month' },
     { key: 'total', label: 'Total' },
   ];
+  const [statsError, setStatsError] = useState(null);
   const loadOverview = async () => {
     setLoading(true);
+    setStatsError(null);
     try {
-      const [uS,vS,gS,fS,nS,rS] = await Promise.all([
-        getDocs(query(collection(db,'users'),limit(1000))),
-        getDocs(query(collection(db,'videos'),limit(1000))),
+      const [uS,vS,gS,fS,rS] = await Promise.all([
+        getDocs(query(collection(db,'users'),limit(2000))),
+        getDocs(query(collection(db,'videos'),limit(2000))),
         getDocs(query(collection(db,'ggs'),limit(5000))),
         getDocs(query(collection(db,'follows'),limit(5000))),
-        getDocs(query(collection(db,'notifications'),limit(1000))),
         getDocs(query(collection(db,'reports'),where('status','==','pending'))),
       ]);
       const totalGG = vS.docs.reduce((s,d) => s + (d.data().ggCount||0), 0);
       setStats({
         users:uS.size, videos:vS.size, ggs:gS.size, totalGG,
-        follows:fS.size, notifs:nS.size, pendingReports: rS.size,
+        follows:fS.size, pendingReports: rS.size,
         creators: uS.docs.filter(d=>['creator','gameconic'].includes(d.data().accountType)).length,
         legendary: uS.docs.filter(d=>d.data().plan==='legendary').length,
         banned: uS.docs.filter(d=>d.data().banned).length,
@@ -100,8 +176,11 @@ export default function AdminScreen({ navigation, route }) {
       });
       const [ps, te] = await Promise.all([fetchPeriodStats(statPeriod), fetchTopErrors(5)]);
       if (ps) { setPeriodStats(ps); if (ps.uploadFail >= 3) setUploadAlert(true); }
-      setTopErrors(te);
-    } catch(e){}
+      if (te) setTopErrors(te);
+    } catch(e) {
+      setStatsError(e?.message || 'Failed to load stats');
+      console.log('[AdminStats] loadOverview error:', e);
+    }
     setLoading(false);
   };
   useEffect(() => {
@@ -282,6 +361,8 @@ export default function AdminScreen({ navigation, route }) {
   // USERS
   const [users, setUsers] = useState([]);
   const [userSearch, setUserSearch] = useState('');
+  const [usersLastDoc, setUsersLastDoc] = useState(null);
+  const [usersHasMore, setUsersHasMore] = useState(false);
 
   // TOP 10 + FRAUD
   const [allUsers, setAllUsers] = useState([]);
@@ -330,39 +411,130 @@ export default function AdminScreen({ navigation, route }) {
     } catch(e){}
     setLoading(false);
   };
+  const USER_PAGE = 100;
   const loadUsers = async (search = '') => {
     setLoading(true);
     try {
-      let snap;
-      if (search.trim().length >= 2) {
-        // Search by username prefix (case sensitive in Firestore)
-        const term = search.trim();
-        const termEnd = term.slice(0,-1) + String.fromCharCode(term.charCodeAt(term.length-1)+1);
-        snap = await getDocs(query(
+      const term = search.trim();
+      if (term.length < 2) { setUsers([]); setLoading(false); return; }
+
+      const makeRange = (t) => {
+        const end = t.slice(0,-1) + String.fromCharCode(t.charCodeAt(t.length-1)+1);
+        return [t, end];
+      };
+
+      // Build multiple variant queries to handle case differences
+      const variants = new Set([
+        term,
+        term.toLowerCase(),
+        term.toUpperCase(),
+        term.charAt(0).toUpperCase() + term.slice(1).toLowerCase(),
+        term.charAt(0).toLowerCase() + term.slice(1),
+      ]);
+
+      const seenIds = new Set();
+      const results = [];
+
+      // 1. Search by email if @ present
+      if (term.includes('@')) {
+        const emailSnap = await getDocs(query(
+          collection(db,'users'),
+          where('email','==',term.toLowerCase()),
+          limit(10)
+        ));
+        emailSnap.docs.forEach(d => {
+          if (!seenIds.has(d.id)) { seenIds.add(d.id); results.push({id:d.id,...d.data()}); }
+        });
+      }
+
+      // 2. Try exact UID match
+      try {
+        const uidDoc = await getDocs(query(collection(db,'users'), where('__name__','==',term), limit(1)));
+        uidDoc.docs.forEach(d => {
+          if (!seenIds.has(d.id)) { seenIds.add(d.id); results.push({id:d.id,...d.data()}); }
+        });
+      } catch(_) {}
+
+      // 3. Prefix queries for each case variant
+      const snapPromises = [...variants].map(v => {
+        const [start, end] = makeRange(v);
+        return getDocs(query(
           collection(db,'users'),
           orderBy('username'),
-          where('username','>=',term),
-          where('username','<',termEnd),
+          where('username','>=',start),
+          where('username','<',end),
           limit(30)
-        ));
-        if (snap.empty) {
-          // Try lowercase
-          const low = term.toLowerCase();
-          const lowEnd = low.slice(0,-1) + String.fromCharCode(low.charCodeAt(low.length-1)+1);
-          snap = await getDocs(query(
-            collection(db,'users'),
-            orderBy('username'),
-            where('username','>=',low),
-            where('username','<',lowEnd),
-            limit(30)
-          ));
-        }
-      } else {
-        snap = await getDocs(query(collection(db,'users'),orderBy('username'),limit(50)));
-      }
-      setUsers(snap.docs.map(d=>({id:d.id,...d.data()})));
+        )).catch(()=>null);
+      });
+      const snaps = await Promise.all(snapPromises);
+      snaps.forEach(snap => {
+        if (!snap) return;
+        snap.docs.forEach(d => {
+          if (!seenIds.has(d.id)) { seenIds.add(d.id); results.push({id:d.id,...d.data()}); }
+        });
+      });
+
+      // Sort: exact matches first, then alphabetical
+      results.sort((a,b) => {
+        const aName = (a.username||'').toLowerCase();
+        const bName = (b.username||'').toLowerCase();
+        const t2 = term.toLowerCase();
+        const aExact = aName === t2 ? 0 : aName.startsWith(t2) ? 1 : 2;
+        const bExact = bName === t2 ? 0 : bName.startsWith(t2) ? 1 : 2;
+        if (aExact !== bExact) return aExact - bExact;
+        return aName.localeCompare(bName);
+      });
+
+      setUsersLastDoc(null);
+      setUsersHasMore(false);
+      setUsers(results);
     } catch(e){ console.log('loadUsers:', e.message); }
     setLoading(false);
+  };
+
+  const setAsLeader = async (u) => {
+    Alert.alert(
+      `👑 Définir ${u.username} comme Leader ?`,
+      'Retirera le badge de l\'ancien leader et l\'attribuera à ' + u.username,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: '🔥 Confirmer', onPress: async () => {
+          try {
+            // Retirer l'ancien leader
+            const oldSnap = await getDocs(query(collection(db,'users'), where('isCurrentLeader','==',true)));
+            for (const d of oldSnap.docs) {
+              if (d.id !== u.id) await updateDoc(doc(db,'users',d.id), { isCurrentLeader: false });
+            }
+            // Mettre le nouveau leader
+            await updateDoc(doc(db,'users',u.id), { isCurrentLeader: true });
+            // Mettre à jour le doc système pour que le debounce rankings fonctionne
+            await setDoc(doc(db,'system','leaderStatus'), {
+              currentLeaderId: u.id, updatedAt: serverTimestamp(),
+            }, { merge: true });
+            setUsers(prev => prev.map(x => ({
+              ...x,
+              isCurrentLeader: x.id === u.id,
+            })));
+            Alert.alert('✅ Fait', u.username + ' est maintenant le #1 Leader.');
+          } catch(e) { Alert.alert('Erreur', e.message); }
+        }},
+      ]
+    );
+  };
+
+  const toggleAdmin = (u) => {
+    const making = !u.isAdmin;
+    Alert.alert(
+      making ? `Donner admin à ${u.username} ?` : `Révoquer admin de ${u.username} ?`,
+      making ? 'Cet utilisateur pourra accéder au panneau admin.' : 'Cet utilisateur perdra l\'accès admin.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: making ? '✅ Confirmer' : '🚫 Révoquer', style: making ? 'default' : 'destructive', onPress: async () => {
+          await updateDoc(doc(db,'users',u.id), { isAdmin: making });
+          setUsers(prev => prev.map(x => x.id === u.id ? { ...x, isAdmin: making } : x));
+        }},
+      ]
+    );
   };
   const toggleBan = (u) => {
     const nb = !u.banned;
@@ -597,11 +769,15 @@ This cannot be undone.`,
       await Promise.all(ops);
 
       // 2. Envoyer les vrais push via Cloud Function
+      const idToken = await auth.currentUser?.getIdToken();
       const pushRes = await fetch(
-        'https://us-central1-gamingactions-app.cloudfunctions.net/broadcastPush?key=ga_cleanup_2026',
+        'https://us-central1-gamingactions-app.cloudfunctions.net/broadcastPush',
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
           body: JSON.stringify({ title: notifTitle, body: notifBody, screen: 'Feed' }),
         }
       );
@@ -634,19 +810,22 @@ This cannot be undone.`,
   };
 
   useEffect(() => {
+    // Scroll to top immediately on tab change, before loading starts
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
     if(tab==='overview') loadOverview();
     if(tab==='reports') loadReports();
     if(tab==='creators') loadCreatorReqs();
     if(tab==='moderation') loadModeration();
     if(tab==='top10') loadTop10();
     if(tab==='fraud') loadFraud();
-    if(tab==='users') loadUsers();
+    if(tab==='users') { setUsers([]); setUserSearch(''); } // search-only, pas de chargement auto
     if(tab==='announce') loadAnnouncement();
     if(tab==='games') loadCustomGames();
     if(tab==='videos') loadAdminVideos();
     if(tab==='access') loadAdmins();
     if(tab==='errors') loadErrors();
   }, [tab]);
+
 
   const fmtDate = (ts) => {
     if(!ts) return '';
@@ -678,15 +857,96 @@ This cannot be undone.`,
         ))}
       </ScrollView>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{padding:14,paddingBottom:100}}
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{padding:14,paddingBottom:100}}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={()=>{
-          if(tab==='overview')loadOverview();if(tab==='reports')loadReports();if(tab==='users')loadUsers();
-          if(tab==='top10')loadTop10();if(tab==='fraud')loadFraud();
+          if(tab==='overview')loadOverview();
+          if(tab==='reports')loadReports();
+          if(tab==='top10')loadTop10();
+          if(tab==='fraud')loadFraud();
         }} tintColor={COLORS.gold}/>}>
+
+        {/* USERS */}
+        {tab==='users'&&(
+          <>
+            <TextInput
+              value={userSearch}
+              onChangeText={(t) => { setUserSearch(t); if (t.length >= 2) loadUsers(t); else if (t.length === 0) setUsers([]); }}
+              placeholder="Rechercher par username ou email…"
+              placeholderTextColor={COLORS.gray}
+              style={[st.searchInput,{marginBottom:12}]}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              onSubmitEditing={() => loadUsers(userSearch)}
+              clearButtonMode="while-editing"
+            />
+            {loading&&<ActivityIndicator color={COLORS.gold} style={{marginTop:20}}/>}
+            {!loading&&userSearch.length<2&&users.length===0&&(
+              <View style={{alignItems:'center',marginTop:48,opacity:0.45}}>
+                <Ionicons name="search-outline" size={44} color={COLORS.gray}/>
+                <Text style={{color:COLORS.gray,marginTop:10,fontSize:13,textAlign:'center'}}>Tape au moins 2 caractères{'\n'}pour chercher un utilisateur</Text>
+              </View>
+            )}
+            {!loading&&userSearch.length>=2&&users.length===0&&(
+              <View style={{alignItems:'center',marginTop:48,opacity:0.45}}>
+                <Ionicons name="person-remove-outline" size={44} color={COLORS.gray}/>
+                <Text style={{color:COLORS.gray,marginTop:10,fontSize:13}}>Aucun résultat pour "{userSearch}"</Text>
+              </View>
+            )}
+            {users.length>0&&<Text style={[st.hint,{marginBottom:8}]}>{users.length} résultat(s)</Text>}
+            {users.map(u=>(
+              <View key={u.id} style={[st.userRow,
+                u.banned&&{borderColor:COLORS.red+'50',backgroundColor:COLORS.redDim},
+                u.isChampion&&{borderColor:COLORS.gold+'60',backgroundColor:'rgba(201,168,76,0.05)'},
+                u.isCurrentLeader&&{borderColor:'#FF2D2D60',backgroundColor:'rgba(255,45,45,0.04)'},
+                u.isAdmin&&{borderColor:'#00BFFF50'},
+              ]}>
+                <View style={{flex:1,marginRight:8}}>
+                  <View style={{flexDirection:'row',alignItems:'center',flexWrap:'wrap',marginBottom:2}}>
+                    <Text style={st.userName}>{u.isChampion?'👑 ':u.isCurrentLeader?'🔥 ':''}{u.username||'--'}</Text>
+                    {u.isCurrentLeader&&<Text style={[st.badgeTag,{backgroundColor:'#FF2D2D',color:COLORS.white}]}>#1</Text>}
+                    {u.isChampion&&<Text style={[st.badgeTag,{backgroundColor:COLORS.gold,color:COLORS.black}]}>CHAMP</Text>}
+                    {u.isAdmin&&<Text style={[st.badgeTag,{backgroundColor:'#00BFFF',color:COLORS.black}]}>ADMIN</Text>}
+                    {u.accountType==='creator'&&<Text style={[st.badgeTag,{backgroundColor:COLORS.blue}]}>CR</Text>}
+                    {u.accountType==='gameconic'&&<Text style={[st.badgeTag,{backgroundColor:COLORS.red}]}>ICON</Text>}
+                    {u.plan==='legendary'&&<Text style={[st.badgeTag,{backgroundColor:COLORS.gold,color:COLORS.black}]}>LEG</Text>}
+                    {u.banned&&<Text style={[st.badgeTag,{backgroundColor:COLORS.red}]}>BANNED</Text>}
+                  </View>
+                  <Text style={st.userEmail} numberOfLines={1}>{u.email||u.id}</Text>
+                  <Text style={st.userMeta}>⭐ {u.ggReceived||0} GG · 🎯 {u.gaPoints||0} pts · 👥 {u.followers||0}</Text>
+                </View>
+                <View style={{flexDirection:'column',gap:5}}>
+                  <TouchableOpacity onPress={()=>setAsLeader(u)} style={[st.banBtn,{borderColor:u.isCurrentLeader?COLORS.red:'#FF7A00'}]}>
+                    <Text style={[st.banBtnText,{color:u.isCurrentLeader?COLORS.red:'#FF7A00',fontSize:10}]}>{u.isCurrentLeader?'🔥 #1':'Leader'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={()=>toggleChampion(u)} style={[st.banBtn,{borderColor:u.isChampion?COLORS.red:COLORS.gold}]}>
+                    <Text style={[st.banBtnText,{color:u.isChampion?COLORS.red:COLORS.gold,fontSize:10}]}>{u.isChampion?'Uncrwn':'Crown'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={()=>toggleAdmin(u)} style={[st.banBtn,{borderColor:u.isAdmin?COLORS.red:'#00BFFF'}]}>
+                    <Text style={[st.banBtnText,{color:u.isAdmin?COLORS.red:'#00BFFF',fontSize:10}]}>{u.isAdmin?'Unadmin':'Admin'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={()=>toggleBan(u)} style={[st.banBtn,u.banned&&{borderColor:COLORS.green}]}>
+                    <Text style={[st.banBtnText,u.banned&&{color:COLORS.green},{fontSize:10}]}>{u.banned?'Unban':'Ban'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </>
+        )}
 
         {/* OVERVIEW */}
         {tab==='overview'&&(
           <>
+            {/* Stats error */}
+            {statsError&&(
+              <TouchableOpacity onPress={loadOverview} style={{flexDirection:'row',alignItems:'center',backgroundColor:'rgba(255,45,85,0.12)',borderWidth:1,borderColor:COLORS.red,borderRadius:12,padding:12,marginBottom:14}}>
+                <Ionicons name="refresh" size={16} color={COLORS.red}/>
+                <Text style={{flex:1,color:COLORS.red,fontWeight:'700',fontSize:12,marginLeft:8}}>Erreur: {statsError} — Tap to retry</Text>
+              </TouchableOpacity>
+            )}
             {/* Upload alert */}
             {uploadAlert&&(
               <View style={{flexDirection:'row',alignItems:'center',backgroundColor:'rgba(255,45,85,0.12)',borderWidth:1,borderColor:COLORS.red,borderRadius:12,padding:12,marginBottom:14}}>
@@ -737,10 +997,48 @@ This cannot be undone.`,
                 </View>
               ))}
             </View>
+            {/* ── Recalculate GG & Leader ── */}
+            <TouchableOpacity
+              onPress={recalculateGGAndLeader}
+              disabled={recalcLoading}
+              style={{
+                flexDirection:'row', alignItems:'center', justifyContent:'center',
+                marginTop:20, marginBottom:8, padding:14, borderRadius:12,
+                backgroundColor: recalcLoading ? COLORS.card : 'rgba(255,122,0,0.12)',
+                borderWidth:1.5, borderColor: recalcLoading ? COLORS.gray3 : '#FF7A00',
+              }}>
+              {recalcLoading
+                ? <ActivityIndicator color="#FF7A00" size="small" />
+                : <Ionicons name="refresh-circle" size={20} color="#FF7A00" />}
+              <Text style={{marginLeft:8,fontWeight:'900',fontSize:13,color:recalcLoading?COLORS.gray:'#FF7A00'}}>
+                {recalcLoading ? 'Recalcul en cours…' : '🔥 Recalculer GG + Leader'}
+              </Text>
+            </TouchableOpacity>
+            {recalcResult && (
+              <View style={{
+                padding:12, borderRadius:10, marginBottom:16,
+                backgroundColor: recalcResult.ok ? 'rgba(48,209,88,0.1)' : 'rgba(255,45,85,0.1)',
+                borderWidth:1, borderColor: recalcResult.ok ? COLORS.green : COLORS.red,
+              }}>
+                {recalcResult.ok ? (
+                  <>
+                    <Text style={{color:COLORS.green,fontWeight:'900',fontSize:13}}>✅ Classement mis à jour</Text>
+                    <Text style={{color:COLORS.gray,fontSize:11,marginTop:4}}>
+                      🔥 Leader : {recalcResult.leader} ({recalcResult.gg} GG){'\n'}
+                      👥 {recalcResult.total} joueurs classés{'\n'}
+                      🔧 {recalcResult.fixed} ggReceived corrigés
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={{color:COLORS.red,fontWeight:'700',fontSize:12}}>❌ {recalcResult.msg}</Text>
+                )}
+              </View>
+            )}
+
             {/* Top errors */}
             {topErrors.length>0&&(
               <>
-                <Text style={[st.secTitle,{fontSize:13,marginTop:20,marginBottom:10}]}>🔥 TOP ERRORS</Text>
+                <Text style={[st.secTitle,{fontSize:13,marginTop:8,marginBottom:10}]}>🔥 TOP ERRORS</Text>
                 {topErrors.map((e,i)=>(
                   <View key={e.id} style={{flexDirection:'row',alignItems:'center',backgroundColor:COLORS.card,borderRadius:10,padding:10,marginBottom:6,borderWidth:0.5,borderColor:e.count>=5?COLORS.red:COLORS.gray3}}>
                     <Text style={{fontSize:11,fontWeight:'900',color:e.count>=5?COLORS.red:COLORS.gold,width:28}}>#{i+1}</Text>
@@ -1001,17 +1299,17 @@ This cannot be undone.`,
             </View>
             <Text style={st.hint}>Users avec beaucoup de GG recus mais tres peu de videos. Ratio {'>'}100 GG par video = suspect.</Text>
             {allUsers.filter(u=>{
-              const vids = u.videosCount||0;
+              const vids = u.videoCount||0;
               const gg = u.ggReceived||0;
               return vids>0 && gg/vids>100;
-            }).sort((a,b)=>((b.ggReceived||0)/(b.videosCount||1))-((a.ggReceived||0)/(a.videosCount||1))).slice(0,10).map((u,i)=>(
+            }).sort((a,b)=>((b.ggReceived||0)/(b.videoCount||1))-((a.ggReceived||0)/(a.videoCount||1))).slice(0,10).map((u,i)=>(
               <View key={u.id} style={[st.rankRow,{borderColor:COLORS.gold+'50'}]}>
                 <Text style={[st.rankNum,{color:COLORS.gold}]}>{i+1}</Text>
                 <View style={{flex:1}}>
                   <Text style={st.rankName}>{u.username||'--'}</Text>
-                  <Text style={st.rankEmail}>{u.ggReceived||0} GG / {u.videosCount||0} videos</Text>
+                  <Text style={st.rankEmail}>{u.ggReceived||0} GG / {u.videoCount||0} videos</Text>
                 </View>
-                <Text style={[st.rankVal,{color:COLORS.red}]}>x{Math.round((u.ggReceived||0)/(u.videosCount||1))}</Text>
+                <Text style={[st.rankVal,{color:COLORS.red}]}>x{Math.round((u.ggReceived||0)/(u.videoCount||1))}</Text>
               </View>
             ))}
 
@@ -1028,47 +1326,6 @@ This cannot be undone.`,
                   <Text style={st.rankEmail}>Level: {u.streakLevel||'noob'} · GG:{u.ggReceived||0} · Fol:{u.followers||0}</Text>
                 </View>
                 <Text style={[st.rankVal,{color:COLORS.blue}]}>{fmtK(u.gaPoints||0)} pts</Text>
-              </View>
-            ))}
-          </>
-        )}
-
-        {/* USERS */}
-        {tab==='users'&&(
-          <>
-            <TextInput
-              value={userSearch}
-              onChangeText={(t) => { setUserSearch(t); if (t.length === 0 || t.length >= 2) loadUsers(t); }}
-              placeholder="Search username..."
-              placeholderTextColor={COLORS.gray}
-              style={st.searchInput}
-              autoCapitalize="none"
-              returnKeyType="search"
-              onSubmitEditing={() => loadUsers(userSearch)}
-            />
-            <Text style={st.hint}>{filteredUsers.length} utilisateur(s)</Text>
-            {filteredUsers.map(u=>(
-              <View key={u.id} style={[st.userRow,u.banned&&{borderColor:COLORS.red+'50',backgroundColor:COLORS.redDim},u.isChampion&&{borderColor:COLORS.gold+'60',backgroundColor:'rgba(201,168,76,0.05)'}]}>
-                <View style={{flex:1}}>
-                  <View style={{flexDirection:'row',alignItems:'center',flexWrap:'wrap'}}>
-                    <Text style={st.userName}>{u.isChampion ? '👑 ' : ''}{u.username||'--'}</Text>
-                    {u.accountType==='creator'&&<Text style={[st.badgeTag,{backgroundColor:COLORS.blue}]}>CR</Text>}
-                    {u.accountType==='gameconic'&&<Text style={[st.badgeTag,{backgroundColor:COLORS.red}]}>ICON</Text>}
-                    {u.plan==='legendary'&&<Text style={[st.badgeTag,{backgroundColor:COLORS.gold,color:COLORS.black}]}>LEG</Text>}
-                    {u.banned&&<Text style={[st.badgeTag,{backgroundColor:COLORS.red}]}>BANNED</Text>}
-                    {u.isChampion&&<Text style={[st.badgeTag,{backgroundColor:COLORS.gold,color:COLORS.black}]}>CHAMP</Text>}
-                  </View>
-                  <Text style={st.userEmail}>{u.email||u.id}</Text>
-                  <Text style={st.userMeta}>GG:{u.ggReceived||0} Pts:{u.gaPoints||0} Fol:{u.followers||0}</Text>
-                </View>
-                <View style={{flexDirection:'column',gap:6}}>
-                  <TouchableOpacity onPress={()=>toggleChampion(u)} style={[st.banBtn,{borderColor:u.isChampion?COLORS.red:COLORS.gold}]}>
-                    <Text style={[st.banBtnText,{color:u.isChampion?COLORS.red:COLORS.gold}]}>{u.isChampion?'Revoke':'Crown'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={()=>toggleBan(u)} style={[st.banBtn,u.banned&&{borderColor:COLORS.green}]}>
-                    <Text style={[st.banBtnText,u.banned&&{color:COLORS.green}]}>{u.banned?'Unban':'Ban'}</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
             ))}
           </>

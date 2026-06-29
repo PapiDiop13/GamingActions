@@ -34,6 +34,7 @@ export default function ChangeEmailScreen({ navigation }) {
         [{ text: 'OK', onPress: () => signOut() }]
       );
     } catch (e) {
+      logError(LOG_CONTEXT.SETTINGS_FAIL || 'settings', e, user?.uid);
       if (e.code === 'auth/wrong-password') {
         Alert.alert('Error', 'Incorrect password.');
       } else if (e.code === 'auth/email-already-in-use') {

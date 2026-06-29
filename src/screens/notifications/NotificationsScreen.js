@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, RefreshControl, Text, StyleSheet, FlatList, ScrollView, TouchableOpacity, Platform, Image, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, RefreshControl, Text, StyleSheet, FlatList, ScrollView, TouchableOpacity, Platform, Image, ActivityIndicator, Alert } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +38,11 @@ export default function NotificationsScreen({ navigation }) {
   const [activeFilter, setActiveFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -62,6 +68,7 @@ export default function NotificationsScreen({ navigation }) {
           avatarCache[uid] = s.exists() ? (s.data().avatar || '') : '';
         } catch (e) { avatarCache[uid] = ''; }
       }));
+      if (!mountedRef.current) return;
       // Injecte l'avatar trouvé
       const enriched = list.map(n => ({
         ...n,
@@ -69,6 +76,9 @@ export default function NotificationsScreen({ navigation }) {
       }));
       setNotifs(enriched);
       setLoading(false);
+      // Clear app icon badge when notifications are viewed
+      const unread = enriched.filter(n => !n.read).length;
+      Notifications.setBadgeCountAsync(unread).catch(() => {});
     }, (error) => {
       console.log('Notif error:', error);
       setLoading(false);
@@ -91,13 +101,22 @@ export default function NotificationsScreen({ navigation }) {
   const markAllRead = async () => {
     const unread = notifs.filter(n => !n.read);
     if (unread.length === 0) return;
-    const batch = writeBatch(db);
-    unread.forEach(n => batch.update(doc(db, 'notifications', n.id), { read: true }));
-    await batch.commit();
+    try {
+      const batch = writeBatch(db);
+      unread.forEach(n => batch.update(doc(db, 'notifications', n.id), { read: true }));
+      await batch.commit();
+      Notifications.setBadgeCountAsync(0).catch(() => {});
+    } catch (e) {
+      // silent fail — notifications will re-render correctly on next snapshot
+    }
   };
 
   const markRead = async (notifId) => {
-    await updateDoc(doc(db, 'notifications', notifId), { read: true });
+    try {
+      await updateDoc(doc(db, 'notifications', notifId), { read: true });
+    } catch (e) {
+      // silent fail — the UI will correct itself on the next snapshot
+    }
   };
 
   const timeAgo = (timestamp) => {
@@ -124,8 +143,12 @@ export default function NotificationsScreen({ navigation }) {
                 const videoSnap = await getDoc(doc(db, 'videos', item.videoId));
                 if (videoSnap.exists()) {
                   navigation.navigate('VideoPlayer', { video: { id: videoSnap.id, ...videoSnap.data() } });
+                } else {
+                  Alert.alert('Video unavailable', 'This video may have been removed.');
                 }
-              } catch (e) {}
+              } catch (e) {
+                Alert.alert('Video unavailable', 'This video may have been removed.');
+              }
             } else if ((item.type === 'follow' || item.type === 'fanbase_join' || item.type === 'fanbase') && item.fromUserId) {
               navigation.navigate('UserProfile', { userId: item.fromUserId });
             } else if (item.type === 'ranking' || item.type === 'champion' || item.type === 'leader_bonus') {

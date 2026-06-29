@@ -21,7 +21,7 @@ export default function FanbaseManageScreen({ navigation }) {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [user?.uid]);
 
   const loadData = async () => {
     if (!user?.uid) return;
@@ -91,6 +91,7 @@ export default function FanbaseManageScreen({ navigation }) {
     { id: 'overview', label: 'Overview', icon: 'grid-outline' },
     { id: 'fans', label: 'Fans', icon: 'people-outline' },
     { id: 'videos', label: 'Videos', icon: 'videocam-outline' },
+    { id: 'fanbox', label: 'FanBox', icon: 'chatbubbles-outline' },
     { id: 'settings', label: 'Settings', icon: 'settings-outline' },
   ];
 
@@ -228,7 +229,7 @@ export default function FanbaseManageScreen({ navigation }) {
                 videos.map(v => (
                   <TouchableOpacity
                     key={v.id}
-                    onPress={() => navigation.navigate('TipDetail', { tip: v })}
+                    onPress={() => navigation.navigate('VideoPlayer', { video: v })}
                     onLongPress={() => {
                       Alert.alert('Video options', '', [
                         { text: 'Edit', onPress: () => navigation.navigate('EditVideo', { video: v }) },
@@ -257,6 +258,53 @@ export default function FanbaseManageScreen({ navigation }) {
             </>
           )}
 
+          {/* FANBOX */}
+          {activeTab === 'fanbox' && (
+            <>
+              <Text style={s.sectionLabel}>CHAT GROUPE — FANBOX</Text>
+              <View style={{ marginHorizontal: 14 }}>
+                <TouchableOpacity
+                  style={s.fanboxOpenBtn}
+                  onPress={() => navigation.navigate('FanBox', { creatorId: user?.uid, creatorName: userProfile?.username })}
+                >
+                  <Ionicons name="chatbubbles" size={22} color={COLORS.black} />
+                  <Text style={s.fanboxOpenBtnText}>Ouvrir le FanBox</Text>
+                  <Ionicons name="arrow-forward" size={18} color={COLORS.black} />
+                </TouchableOpacity>
+
+                <View style={[s.settingCard, { marginTop: 16 }]}>
+                  <View style={s.settingRow}>
+                    <Text style={s.settingLabel}>Membres actifs</Text>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: GREEN }}>{fans.length}</Text>
+                  </View>
+                  <View style={[s.settingRow, { borderBottomWidth: 0 }]}>
+                    <Text style={s.settingLabel}>Modération</Text>
+                    <Text style={{ fontSize: 11, color: COLORS.gray }}>Long-press sur un message</Text>
+                  </View>
+                </View>
+
+                <Text style={[s.sectionLabel, { paddingHorizontal: 0, paddingTop: 20 }]}>MEMBRES ({fans.length})</Text>
+                {fans.length === 0 ? (
+                  <Text style={s.emptyText}>Aucun membre dans le FanBox pour le moment.</Text>
+                ) : (
+                  <View style={s.settingCard}>
+                    {fans.slice(0, 10).map((fan, i) => (
+                      <View key={fan.id} style={[s.settingRow, i === Math.min(fans.length, 10) - 1 && { borderBottomWidth: 0 }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <Avatar user={fan} size={28} />
+                          <Text style={[s.settingLabel, { fontSize: 13 }]}>{fan.username}</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => handleKick(fan)}>
+                          <Text style={{ fontSize: 11, color: COLORS.red, fontWeight: '700' }}>Retirer</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </>
+          )}
+
           {/* SETTINGS */}
           {activeTab === 'settings' && (
             <>
@@ -264,17 +312,13 @@ export default function FanbaseManageScreen({ navigation }) {
               <View style={s.settingCard}>
                 <View style={s.settingRow}>
                   <Text style={s.settingLabel}>Notifications nouveaux fans</Text>
-                  <Switch value={true} disabled trackColor={{ true: GREEN }} />
+                  <Switch value={true} disabled trackColor={{ false: COLORS.gray3, true: GREEN }} />
                 </View>
                 <View style={s.settingRow}>
                   <Text style={s.settingLabel}>Prix mensuel</Text>
                   <View style={s.comingSoon}><Text style={s.comingSoonText}>Coming soon</Text></View>
                 </View>
-                <View style={s.settingRow}>
-                  <Text style={s.settingLabel}>FanBox (chat groupe)</Text>
-                  <View style={s.comingSoon}><Text style={s.comingSoonText}>Coming soon</Text></View>
-                </View>
-                <View style={s.settingRow}>
+                <View style={[s.settingRow, { borderBottomWidth: 0 }]}>
                   <Text style={s.settingLabel}>Retrait des revenus</Text>
                   <View style={s.comingSoon}><Text style={s.comingSoonText}>Coming soon</Text></View>
                 </View>
@@ -325,4 +369,6 @@ const s = StyleSheet.create({
   settingLabel: { fontSize: 13, color: COLORS.white },
   comingSoon: { backgroundColor: COLORS.goldDim, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 0.5, borderColor: COLORS.goldBorder },
   comingSoonText: { fontSize: 10, color: COLORS.gold, fontWeight: '700' },
+  fanboxOpenBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: GREEN, borderRadius: 16, paddingVertical: 16, shadowColor: GREEN, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  fanboxOpenBtnText: { fontSize: 16, fontWeight: '900', color: COLORS.black, flex: 1, textAlign: 'center' },
 });

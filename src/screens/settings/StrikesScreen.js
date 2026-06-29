@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -122,7 +122,7 @@ export default function StrikesScreen({ navigation }) {
             <Text style={styles.appealTitle}>Dispute a Strike</Text>
             <Text style={styles.appealDesc}>If you believe a strike was issued in error, contact our moderation team.</Text>
           </View>
-          <TouchableOpacity style={styles.appealBtn}>
+          <TouchableOpacity style={styles.appealBtn} onPress={() => Alert.alert('Contact Support', 'Email us at support@gamingactions.com')}>
             <Text style={styles.appealBtnText}>Contact</Text>
           </TouchableOpacity>
         </View>

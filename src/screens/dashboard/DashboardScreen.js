@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, Image, ActivityIndicator, RefreshControl,
+  Platform, Image, ActivityIndicator, RefreshControl, Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -107,7 +107,7 @@ export default function DashboardScreen({ navigation }) {
           <Ionicons name="arrow-back" size={22} color={COLORS.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Dashboard</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Withdraw')} style={styles.withdrawBtn}>
+        <TouchableOpacity onPress={() => Alert.alert('🚀 Bientôt disponible', 'Le retrait sera activé prochainement.')} style={styles.withdrawBtn}>
           <Text style={styles.withdrawBtnText}>Withdraw</Text>
         </TouchableOpacity>
       </View>
@@ -176,8 +176,8 @@ export default function DashboardScreen({ navigation }) {
             </View>
             <Text style={styles.revenueValue}>$0.00</Text>
             <Text style={styles.revenueNote}>Revenue features will be activated soon. Your Fanbase earnings will appear here.</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Withdraw')} style={styles.revenueBtn}>
-              <Text style={styles.revenueBtnText}>Configure withdrawal →</Text>
+            <TouchableOpacity onPress={() => Alert.alert('🚀 Bientôt disponible', 'Le retrait sera activé prochainement.')} style={styles.revenueBtn}>
+              <Text style={styles.revenueBtnText}>Bientôt disponible 🚀</Text>
             </TouchableOpacity>
           </View>
 

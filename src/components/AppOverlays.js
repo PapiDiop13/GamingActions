@@ -68,7 +68,7 @@ export default function AppOverlays() {
     };
 
     buildSlides();
-  }, [user?.uid]);
+  }, [user?.uid, userProfile]);
 
   const animateNext = (cb) => {
     Animated.sequence([

@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, query, getDocs, orderBy, limit, where } from 'firebase/firestore';
+import { collection, query, getDocs, limit, where } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
 import Avatar from '../../components/FramedAvatar';
@@ -34,16 +34,19 @@ export default function SearchScreen({ navigation }) {
         const q = searchQuery.toLowerCase().trim();
         const snap = await getDocs(query(
           collection(db, 'users'),
-          orderBy('usernameLower'),
           where('usernameLower', '>=', q),
           where('usernameLower', '<=', q + '\uf8ff'),
           limit(30)
         ));
         const matched = snap.docs
           .map(d => ({ id: d.id, uid: d.data().uid || d.id, ...d.data() }))
-          .filter(u => u.username);
+          .filter(u => u.username)
+          .sort((a, b) => (a.usernameLower || '').localeCompare(b.usernameLower || ''));
         setResults(matched);
-      } catch(e){ setResults([]); }
+      } catch(e){
+        setResults([]);
+        console.warn('Search error:', e?.message);
+      }
       finally { setLoading(false); }
     }, 300);
     return () => clearTimeout(searchTimeout.current);
@@ -113,7 +116,7 @@ export default function SearchScreen({ navigation }) {
       </View>
 
       <Text style={styles.resultsLabel}>
-        {!searchQuery.trim() ? 'Recherche un gamer...' : loading ? 'Searching...' : `${filtered.length} RESULT${filtered.length !== 1 ? 'S' : ''}`}
+        {!searchQuery.trim() ? 'Search for a gamer...' : loading ? 'Searching...' : `${filtered.length} RESULT${filtered.length !== 1 ? 'S' : ''}`}
       </Text>
 
       {loading ? (
@@ -132,7 +135,11 @@ export default function SearchScreen({ navigation }) {
           ListEmptyComponent={() => (
             <View style={styles.empty}>
               <Ionicons name="search-outline" size={48} color={COLORS.gray2} />
-              <Text style={styles.emptyText}>No gamers found for "{searchQuery}"</Text>
+              {searchQuery.trim().length > 0 ? (
+                <Text style={styles.emptyText}>No gamers found for "{searchQuery}"</Text>
+              ) : (
+                <Text style={styles.emptyText}>Search for gamers by username</Text>
+              )}
             </View>
           )}
         />

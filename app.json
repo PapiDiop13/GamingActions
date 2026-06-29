@@ -15,13 +15,12 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.gamingactions.app",
-      "buildNumber": "43",
+      "buildNumber": "47",
       "infoPlist": {
         "NSCameraUsageDescription": "Gaming Actions needs access to your camera to record gameplay clips and take profile pictures.",
         "NSPhotoLibraryUsageDescription": "Gaming Actions needs access to your photo library to upload gameplay clips and set your profile picture.",
         "NSPhotoLibraryAddUsageDescription": "Gaming Actions needs permission to save clips to your photo library.",
         "NSMicrophoneUsageDescription": "Gaming Actions needs access to your microphone to record audio with your gameplay clips.",
-        "NSUserTrackingUsageDescription": "Gaming Actions uses this data to provide you with a personalized experience and improve the app.",
         "UIBackgroundModes": [
           "remote-notification"
         ],
@@ -39,7 +38,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.gamingactions.app",
-      "versionCode": 33,
+      "versionCode": 47,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -118,12 +117,6 @@
         }
       ],
       "expo-font",
-      [
-        "expo-tracking-transparency",
-        {
-          "userTrackingPermission": "Gaming Actions uses this data to provide personalized content and improve your experience."
-        }
-      ],
       [
         "@react-native-google-signin/google-signin",
         {

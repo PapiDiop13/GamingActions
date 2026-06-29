@@ -15,8 +15,9 @@
  */
 
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { awardPoints, getDailyBonus } from './points';
 import { logEvent, logError, LOG_CONTEXT } from './errorLogger';
@@ -26,7 +27,7 @@ Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
-    shouldSetBadge:  true,
+    shouldSetBadge:  false, // Badge managed manually via setBadgeCountAsync (synced to real unread count)
   }),
 });
 
@@ -44,6 +45,13 @@ Notifications.setNotificationHandler({
  */
 export async function registerPushToken(userId) {
   if (!userId) return;
+
+  // Push tokens require a physical device — simulators have no APNs/FCM support
+  // expo-constants isDevice is available without expo-device package
+  if (!Constants.isDevice) {
+    console.log('[Push] Skipping push token registration on simulator');
+    return;
+  }
 
   try {
     // Check current permission status before requesting
@@ -68,7 +76,7 @@ export async function registerPushToken(userId) {
     // Persist token to Firestore — Cloud Functions read `fcmToken` to send pushes
     await updateDoc(doc(db, 'users', userId), {
       fcmToken: token,
-      lastSeen: new Date(),
+      lastSeen: serverTimestamp(),
     });
 
     // Android notification channel — required for Android 8+ (API 26+)
@@ -126,7 +134,7 @@ export async function updateLastSeen(userId) {
     );
 
     // Always update lastSeen (used for "active X days ago" display)
-    await updateDoc(userRef, { lastSeen: now });
+    await updateDoc(userRef, { lastSeen: serverTimestamp() });
 
     if (isNewDay) {
       const bonus = getDailyBonus(data.streakLevel || 'noob');

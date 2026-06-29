@@ -189,13 +189,18 @@ export function sortFeedByPrefs(videos, prefs) {
   const gameCounts  = prefs.games  || {};
 
   // Total confirmed views (5-second watches)
+  // Note: videos with genre: null are not counted — if all views are null-genre,
+  // totalViews stays 0 and we exit cold-start to avoid staying stuck forever.
   const totalViews = Object.values(genreCounts).reduce((s, n) => s + n, 0);
 
   // ── Cold start (< 5 views): pure shuffle, no scoring ───────────────────────
   // Without history, scoring would just sort by ggCount (popularity) which
   // makes the same top clips always appear first. Pure shuffle gives every
   // clip — including small creators — a fair chance.
-  if (totalViews < MIN_VIEWS_TO_SCORE) {
+  // Exit cold-start if totalViews === 0 but the user has recentViews — this
+  // means all viewed videos had genre: null, which would cause an infinite cold-start loop.
+  const recentViewCount = (prefs.recentViews || []).length;
+  if (totalViews < MIN_VIEWS_TO_SCORE && !(totalViews === 0 && recentViewCount >= MIN_VIEWS_TO_SCORE)) {
     const shuffled = [...videos];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));

@@ -193,10 +193,9 @@ export function censorText(text) {
   const norm = normalize(text);
   allBannedWords().forEach(w => {
     if (new RegExp(`\\b${w}\\b`, 'i').test(norm)) {
-      result = result.replace(new RegExp(`\\b\\w${'\\w'.repeat(Math.max(0, w.length - 1))}\\b`, 'gi'), (match) => {
-        const mn = normalize(match);
-        if (mn === w) return match[0] + '*'.repeat(match.length - 1);
-        return match;
+      const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), (match) => {
+        return match[0] + '*'.repeat(match.length - 1);
       });
     }
   });

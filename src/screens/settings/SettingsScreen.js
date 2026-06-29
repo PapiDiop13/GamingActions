@@ -49,9 +49,8 @@ export default function SettingsScreen({ navigation }) {
   const [showAdmin, setShowAdmin] = useState(false);
 
   useEffect(() => {
-    const ADMIN_EMAILS = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
-    setShowAdmin(!!userProfile?.isAdmin || ADMIN_EMAILS.includes(user?.email?.toLowerCase()));
-  }, [user?.email]);
+    setShowAdmin(!!userProfile?.isAdmin);
+  }, [userProfile?.isAdmin]);
 
   const handleLogout = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -76,71 +75,42 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const handleDelete = () => {
-    // Step 1 — first warning
     Alert.alert(
-      '🗑️ Delete Account',
-      'This will permanently delete your account, all your clips, comments, GGs, and points.\n\nThis action is IRREVERSIBLE.',
+      'Delete Account',
+      'Your account and all your content will be deleted. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Continue →',
+          text: 'Delete My Account',
           style: 'destructive',
           onPress: () => {
-            // Step 2 — final confirmation
             Alert.alert(
-              '⚠️ Are you absolutely sure?',
-              'Type DELETE to confirm — your account and all data will be permanently removed.',
+              'Are you sure?',
+              'All your clips, GGs and progress will be permanently removed.',
               [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                  text: '🗑️ Delete Forever',
+                  text: 'Delete Forever',
                   style: 'destructive',
                   onPress: async () => {
                     try {
                       const uid = user?.uid;
                       if (!uid) return;
 
-                      // 1. Delete user's videos
-                      const videosSnap = await getDocs(query(collection(db, 'videos'), where('userId', '==', uid)));
-                      const batch1 = writeBatch(db);
-                      videosSnap.docs.forEach(d => batch1.delete(d.ref));
-                      await batch1.commit();
+                      // Soft delete — données conservées côté admin, suppression effective après 90j.
+                      await updateDoc(doc(db, 'users', uid), {
+                        status: 'pending_deletion',
+                        deletedAt: serverTimestamp(),
+                        banned: true,
+                        username: `deleted_${uid.slice(0, 6)}`,
+                        avatar: null,
+                        bio: '',
+                      });
 
-                      // 2. Delete user's comments
-                      const commentsSnap = await getDocs(query(collection(db, 'comments'), where('userId', '==', uid)));
-                      const batch2 = writeBatch(db);
-                      commentsSnap.docs.forEach(d => batch2.delete(d.ref));
-                      await batch2.commit();
-
-                      // 3. Delete user's GGs
-                      const ggsSnap = await getDocs(query(collection(db, 'ggs'), where('userId', '==', uid)));
-                      const batch3 = writeBatch(db);
-                      ggsSnap.docs.forEach(d => batch3.delete(d.ref));
-                      await batch3.commit();
-
-                      // 4. Delete user's notifications
-                      const notifsSnap = await getDocs(query(collection(db, 'notifications'), where('userId', '==', uid)));
-                      const batch4 = writeBatch(db);
-                      notifsSnap.docs.forEach(d => batch4.delete(d.ref));
-                      await batch4.commit();
-
-                      // 5. Delete Firestore user doc
-                      await deleteDoc(doc(db, 'users', uid));
-
-                      // 6. Delete Firebase Auth user
-                      await deleteUser(auth.currentUser);
+                      await signOut(auth);
 
                     } catch (e) {
-                      // If deleteUser fails due to re-auth needed
-                      if (e.code === 'auth/requires-recent-login') {
-                        Alert.alert(
-                          'Re-authentication Required',
-                          'For security, please sign out and sign back in before deleting your account.',
-                          [{ text: 'OK' }]
-                        );
-                      } else {
-                        Alert.alert('Error', 'Could not delete account. Please try again or contact support@gamingactions.com');
-                      }
+                      Alert.alert('Error', 'Could not delete account. Please try again or contact support@gamingactions.com');
                     }
                   },
                 },

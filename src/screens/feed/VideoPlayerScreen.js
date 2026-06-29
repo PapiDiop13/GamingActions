@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Platform,
   KeyboardAvoidingView, TextInput, ScrollView, Modal,
   TouchableWithoutFeedback, Image, Animated, Share, Vibration, PanResponder,
+  Dimensions, Alert,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEvent } from 'expo';
@@ -14,11 +15,13 @@ import { getVideoUrl, getThumbnailUrl } from '../../config/mux';
 import useFeedStore from '../../store/useFeedStore';
 import useAuthStore from '../../store/useAuthStore';
 import { db } from '../../config/firebase';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { ringColorForUser, commentFrameStyle } from '../../constants/frames';
 import FramedAvatar from '../../components/FramedAvatar';
 import CommentsSheet from '../../components/CommentsSheet';
 import { recordView, loadPrefs } from '../../utils/feedAlgo';
+
+const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── GG Button animé ─────────────────────────────────────────────────────────
 function GGBtn({ hasGG, count, onPress, disabled }) {
@@ -62,7 +65,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
   React.useEffect(() => {
     showControlsTemporarily();
     return () => { if (controlsTimer.current) clearTimeout(controlsTimer.current); };
-  }, []);
+  }, [showControlsTemporarily]);
 
   const [showComments, setShowComments] = useState(false);
 
@@ -79,9 +82,8 @@ export default function VideoPlayerScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!video?.id) return;
-    const { collection: col, query: q2, where: w2, onSnapshot: sub } = require('firebase/firestore');
-    const unsub = sub(
-      q2(col(db, 'comments'), w2('videoId', '==', video.id)),
+    const unsub = onSnapshot(
+      query(collection(db, 'comments'), where('videoId', '==', video.id)),
       (snap) => setLiveCommentCount(snap.size),
       () => {}
     );
@@ -105,7 +107,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
   const commentCount = liveCommentCount;
 
   const viewTimerRef = useRef(null);
-  const progressWidth = React.useRef(300);
+  const progressWidth = React.useRef(SCREEN_W);
   const viewConfirmedRef = useRef(false);
 
   useEffect(() => {
@@ -147,7 +149,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
       try { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP); } catch (e) {}
       try { player.pause(); } catch (e) {}
     };
-  }, []));
+  }, [player]));
 
   const formatTime = (sec) => {
     const s = Math.floor(sec || 0);
@@ -226,6 +228,11 @@ export default function VideoPlayerScreen({ navigation, route }) {
   // soit détecté AVANT que le single tap s'exécute — évite le conflit pause/play
   const tapTimeoutRef = useRef(null);
 
+  // ─── Cleanup tap timeout on unmount (NC16) ───────────────────────────────
+  useEffect(() => {
+    return () => { if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current); };
+  }, []);
+
   const handleVideoTap = (evt) => {
     const now = Date.now();
     const { locationX, locationY } = evt.nativeEvent;
@@ -303,6 +310,13 @@ export default function VideoPlayerScreen({ navigation, route }) {
                   hasGG={hasGG}
                   count={ggCount}
                   onPress={async () => {
+                    if (!user) {
+                      Alert.alert('Connecte-toi', 'Crée un compte pour GG ce clip !', [
+                        { text: 'Annuler', style: 'cancel' },
+                        { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+                      ]);
+                      return;
+                    }
                     Vibration.vibrate(40);
                     if (liveVideo) {
                       toggleGG(video?.id, user?.uid, liveVideo);
@@ -325,7 +339,18 @@ export default function VideoPlayerScreen({ navigation, route }) {
                   }}
                   disabled={isOwnVideo}
                 />
-                <TouchableOpacity onPress={() => setShowComments(true)} style={[styles.sideAction, { marginTop: 20 }]}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!user) {
+                      Alert.alert('Connecte-toi', 'Crée un compte pour commenter !', [
+                        { text: 'Annuler', style: 'cancel' },
+                        { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+                      ]);
+                      return;
+                    }
+                    setShowComments(true);
+                  }}
+                  style={[styles.sideAction, { marginTop: 20 }]}>
                   <Ionicons name="chatbubble-outline" size={22} color={COLORS.white} />
                   <Text style={styles.sideActionText}>{commentCount}</Text>
                 </TouchableOpacity>
@@ -348,7 +373,11 @@ export default function VideoPlayerScreen({ navigation, route }) {
                 onPress={(e) => {
                   const w = progressWidth.current || 1;
                   const fraction = Math.max(0, Math.min(1, e.nativeEvent.locationX / w));
-                  try { player.currentTime = fraction * duration; } catch {}
+                  try {
+                    const targetTime = fraction * duration;
+                    const delta = targetTime - (player.currentTime ?? 0);
+                    player.seekBy(delta);
+                  } catch {}
                   showControlsTemporarily();
                 }}
                 style={[styles.progressTrack, { paddingVertical: 10, marginVertical: -10 }]}
@@ -369,7 +398,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
               {!isLandscape && video?.game && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
                   <Ionicons name="game-controller-outline" size={12} color={COLORS.gold} />
-                  <Text style={{ color: COLORS.gold, fontSize: 11, marginLeft: 4 }}>{video.game} · {video.console}</Text>
+                  <Text style={{ color: COLORS.gold, fontSize: 11, marginLeft: 4 }}>{video.game}{video.console ? ` · ${video.console}` : ''}</Text>
                 </View>
               )}
               {!isLandscape && (video?.caption || video?.description) && (

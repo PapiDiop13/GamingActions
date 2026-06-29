@@ -2,17 +2,19 @@
  * ProfileFeedScreen.js
  * Feed vertical swipeable depuis le profil — utilise expo-video comme le feed principal
  */
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
   View, FlatList, StyleSheet, Dimensions, Platform,
-  TouchableOpacity, Text,
+  TouchableOpacity, Text, Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { doc, getDoc } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import useFeedStore from '../../store/useFeedStore';
+import { db } from '../../config/firebase';
 import { getVideoUrl } from '../../config/mux';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
@@ -22,6 +24,14 @@ function ProfileVideoItem({ video, isActive, navigation }) {
   const { userProfiles, toggleGGDirect } = useFeedStore();
   const [hasGG, setHasGG] = useState(video?.hasGG ?? false);
   const [ggCount, setGGCount] = useState(video?.ggCount ?? 0);
+
+  // Vérifie le vrai statut GG depuis Firestore (les vidéos de profil n'ont pas hasGG)
+  useEffect(() => {
+    if (!user?.uid || !video?.id || video?.userId === user?.uid) return;
+    getDoc(doc(db, 'ggs', `${user.uid}_${video.id}`))
+      .then(snap => { if (snap.exists()) setHasGG(true); })
+      .catch(() => {});
+  }, [user?.uid, video?.id]);
 
   const player = useVideoPlayer(
     isActive && video?.videoUrl ? getVideoUrl(video) : null,
@@ -38,7 +48,14 @@ function ProfileVideoItem({ video, isActive, navigation }) {
   }, [isActive]);
 
   const handleGG = async () => {
-    if (!user?.uid || video?.userId === user?.uid) return;
+    if (!user?.uid) {
+      Alert.alert('Connecte-toi', 'Crée un compte pour GG ce clip !', [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+      ]);
+      return;
+    }
+    if (video?.userId === user?.uid) return;
     // Optimistic UI local
     const prevHasGG = hasGG;
     const prevCount = ggCount;
@@ -84,7 +101,16 @@ function ProfileVideoItem({ video, isActive, navigation }) {
             <Text style={st.actionCount}>{ggCount}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => navigation.navigate('Comments', { video })}
+            onPress={() => {
+              if (!user?.uid) {
+                Alert.alert('Connecte-toi', 'Crée un compte pour commenter !', [
+                  { text: 'Annuler', style: 'cancel' },
+                  { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+                ]);
+                return;
+              }
+              navigation.navigate('Comments', { video });
+            }}
             style={st.actionBtn}
           >
             <Ionicons name="chatbubble-outline" size={28} color={COLORS.white} />
@@ -135,6 +161,7 @@ export default function ProfileFeedScreen({ route, navigation }) {
         decelerationRate="fast"
         showsVerticalScrollIndicator={false}
         initialScrollIndex={startIndex}
+        onScrollToIndexFailed={() => {}}
         getItemLayout={(_, index) => ({ length: SCREEN_H, offset: SCREEN_H * index, index })}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}

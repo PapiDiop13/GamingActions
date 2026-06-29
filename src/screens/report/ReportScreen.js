@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, addDoc, serverTimestamp, getDocs, query, where, updateDoc, doc, increment } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDoc, updateDoc, doc, increment } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
 import useAuthStore from '../../store/useAuthStore';
@@ -79,13 +79,13 @@ export default function ReportScreen({ navigation, route }) {
 
       // Incrémenter le compteur de reports sur la vidéo
       if (targetType === 'video' && videoId) {
-        await updateDoc(doc(db, 'videos', videoId), { reportCount: increment(1) });
-        // Auto-hide si 10+ reports
-        const reportsSnap = await getDocs(
-          query(collection(db, 'reports'), where('targetId', '==', videoId), where('targetType', '==', 'video'))
-        );
-        if (reportsSnap.size >= 10) {
-          await updateDoc(doc(db, 'videos', videoId), {
+        const videoRef = doc(db, 'videos', videoId);
+        await updateDoc(videoRef, { reportCount: increment(1) });
+        // Auto-hide si 10+ reports — read reportCount from the doc (no collection scan)
+        const vidSnap = await getDoc(videoRef);
+        const newReportCount = vidSnap.exists() ? (vidSnap.data().reportCount || 0) : 0;
+        if (newReportCount >= 10) {
+          await updateDoc(videoRef, {
             restricted: true,
             restrictedAt: serverTimestamp(),
             restrictedReason: 'Auto-flagged: 10+ community reports',
@@ -115,7 +115,7 @@ export default function ReportScreen({ navigation, route }) {
         <View style={styles.successContainer}>
           <Ionicons name="shield-checkmark" size={72} color={COLORS.green} />
           <Text style={styles.successTitle}>Report Submitted</Text>
-          <Text style={styles.successDesc}>Thank you for helping keep Gaming Actions safe. Our team will review this report within 24 hours.</Text>
+          <Text style={styles.successDesc}>Thank you for helping keep Gaming Actions safe. Our team will review this report within 48 hours.</Text>
           <View style={styles.successInfo}>
             <Ionicons name="information-circle-outline" size={16} color={COLORS.blue} />
             <Text style={styles.successInfoText}>You will be notified of the outcome. Repeated false reports may result in restrictions on your account.</Text>
@@ -145,7 +145,7 @@ export default function ReportScreen({ navigation, route }) {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         <View style={styles.banner}>
           <Ionicons name="flag-outline" size={28} color={COLORS.red} />
-          <Text style={styles.bannerText}>Reports are anonymous. Our moderation team reviews all reports within 24 hours.</Text>
+          <Text style={styles.bannerText}>Reports are anonymous. Our moderation team reviews all reports within 48 hours.</Text>
         </View>
 
         <Text style={styles.sectionLabel}>REASON FOR REPORTING</Text>

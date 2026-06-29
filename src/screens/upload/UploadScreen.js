@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Platform, Alert,
@@ -6,7 +6,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, updateDoc, doc, increment } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, updateDoc, doc, increment, limit } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import { getMuxThumbnailUrl, getMuxPlaybackUrl } from '../../config/mux';
@@ -20,6 +20,7 @@ import { setUploadState } from '../feed/FeedScreen';
 import { globalNavigate } from '../../utils/navigationRef';
 import * as StoreReview from 'expo-store-review';
 import { logError, logEvent, LOG_CONTEXT } from '../../utils/errorLogger';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const GREEN = '#00C853';
 
@@ -100,6 +101,10 @@ export default function UploadScreen({ navigation, route }) {
   const [uploading, setUploading] = useState(false);
   const [videoUri, setVideoUri] = useState(null);
 
+  // NC21 — guard against setState on unmounted component
+  const mountedRef = useRef(true);
+  useEffect(() => { return () => { mountedRef.current = false; }; }, []);
+
   // Preview expo-video (muet, sans lecture auto). Suit la vidéo locale sélectionnée.
   const previewPlayer = useVideoPlayer(videoUri || null, (p) => { p.muted = true; });
   useEffect(() => {
@@ -123,8 +128,8 @@ export default function UploadScreen({ navigation, route }) {
     });
     if (!result.canceled) {
         const asset = result.assets[0];
-        // duration peut être en ms ou en secondes selon la version d'expo
-        const durationInSeconds = asset.duration > 1000 ? asset.duration / 1000 : asset.duration;
+        // Expo ImagePicker retourne toujours la durée en millisecondes
+        const durationInSeconds = asset.duration / 1000;
         if (durationInSeconds && durationInSeconds < 8) {
           return Alert.alert('Too Short', 'Video must be at least 10 seconds long to prevent spam.');
         }
@@ -150,23 +155,23 @@ export default function UploadScreen({ navigation, route }) {
 
   const handlePublish = async () => {
     const game = showCustomGame ? customGame.trim() : selectedGame;
-    if (!title.trim() && !caption.trim()) return Alert.alert('Missing', 'Please add a title for your clip.');
+    if (!title.trim()) return Alert.alert('Missing', 'Please add a title for your clip.');
     if (!game) return Alert.alert('Missing', 'Please select or enter a game.');
     if (!selectedConsole) return Alert.alert('Missing', 'Please select your console.');
     if (!videoUri) return Alert.alert('Missing', 'Please select a video.');
 
-    // ─── Limite hebdomadaire : 20 pour free, illimité pour Legendary/Creator ───
+    // ─── Limite hebdomadaire ───────────────────────────────────────────────
     if (user?.uid && !hasUnlimitedUploads) {
       try {
-        const snap = await getDocs(query(collection(db, 'videos'), where('userId', '==', user.uid)));
+        const weekSnap = await getDocs(query(collection(db, 'videos'), where('userId', '==', user.uid), limit(20)));
         const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        const recentCount = snap.docs.filter((d) => {
+        const recentCount = weekSnap.docs.filter((d) => {
           const ts = d.data().createdAt;
           const ms = ts?.toMillis ? ts.toMillis() : (ts?.seconds ? ts.seconds * 1000 : 0);
           return ms >= weekAgo;
         }).length;
         if (recentCount >= WEEKLY_UPLOAD_LIMIT) {
-          await logEvent(LOG_CONTEXT.UPLOAD_LIMIT, { recentCount }, user?.uid);
+          logEvent(LOG_CONTEXT.UPLOAD_LIMIT, { recentCount }, user?.uid).catch(() => {});
           return Alert.alert(
             '📊 Weekly limit reached',
             'You can upload up to 20 videos per week on the free plan.\n\nUpgrade to Legendary for unlimited uploads! 🏆',
@@ -176,52 +181,40 @@ export default function UploadScreen({ navigation, route }) {
             ]
           );
         }
-      } catch (e) {
-        // En cas d'échec du check, on laisse passer
-      }
+      } catch (e) {}
     }
 
     setUploading(true);
     setUploadState({ isUploading: true, progress: 0 });
-    await logEvent(LOG_CONTEXT.UPLOAD_START, { contentType, game, console: selectedConsole }, user?.uid);
-  
-    const destTab = contentType === 'clip' ? 'Feed' : 'Tips';
-  
-    // L'upload continue en arrière-plan
+    logEvent(LOG_CONTEXT.UPLOAD_START, { contentType, game, console: selectedConsole }, user?.uid).catch(() => {});
+
+    // Helper : naviguer vers Feed depuis n'importe quel niveau de stack
+    const goToFeed = () => {
+      try { navigation.popToTop(); } catch(e) {}
+      try { globalNavigate('Feed'); } catch(e) {}
+    };
+
     try {
-      // ── Upload vers Mux (remplace Cloudinary) ─────────────────────────────
-      // 1. Demander une URL d'upload temporaire à notre Cloud Function
+      // ── 1. Obtenir l'URL d'upload Mux ──────────────────────────────────
       const urlResponse = await fetch(
         'https://us-central1-gamingactions-app.cloudfunctions.net/muxGetUploadUrl',
         { method: 'POST' }
       );
-      if (!urlResponse.ok) throw new Error("Impossible d'obtenir l'URL d'upload Mux");
+      if (!urlResponse.ok) throw new Error("Impossible d'obtenir l'URL Mux: " + urlResponse.status);
       const { uploadUrl, uploadId } = await urlResponse.json();
+      if (!uploadUrl) throw new Error('uploadUrl manquant dans la réponse');
 
-      // 2. Uploader directement depuis l'app vers Mux (Direct Upload)
-      const videoFile = { uri: videoUri, type: 'video/mp4', name: `clip_${Date.now()}.mp4` };
-      const formData = new FormData();
-      formData.append('file', videoFile);
-      const muxResponse = await fetch(uploadUrl, {
-        method: 'PUT',
+      // ── 2. PUT binaire vers Mux — accepte tout 2xx (200 ou 204) ────────
+      const uploadResult = await FileSystem.uploadAsync(uploadUrl, videoUri, {
+        httpMethod: 'PUT',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
         headers: { 'Content-Type': 'video/mp4' },
-        body: { uri: videoUri, type: 'video/mp4', name: `clip_${Date.now()}.mp4` },
       });
-      if (!muxResponse.ok) throw new Error("Echec de l'upload vers Mux");
+      if (uploadResult.status < 200 || uploadResult.status >= 300) {
+        throw new Error('Mux upload failed: ' + uploadResult.status);
+      }
 
-      // 3. Créer un objet "uploaded" compatible avec le reste du code
-      // muxPlaybackId sera rempli par le webhook quand Mux finit le transcodage.
-      // La vidéo affiche un placeholder pendant le processing (~30-60 sec).
-      const uploaded = {
-        url: null,           // sera rempli par le webhook
-        publicId: uploadId,  // muxUploadId — permet au webhook de trouver ce doc
-        thumbnail: null,     // sera rempli par le webhook
-        duration: 0,         // sera rempli par le webhook
-        muxUploadId: uploadId,
-        muxStatus: 'processing',
-      };
-
-      // Si l'utilisateur a saisi un jeu custom, l'ajouter à la liste partagée (s'il n'existe pas déjà)
+      // ── 3. Jeu custom ──────────────────────────────────────────────────
       if (showCustomGame && customGame.trim()) {
         try {
           const exists = await getDocs(query(collection(db, 'custom_games'), where('name', '==', customGame.trim())));
@@ -237,18 +230,18 @@ export default function UploadScreen({ navigation, route }) {
         } catch (e) {}
       }
 
-      // Extract hashtags from title + caption for search indexing
+      // ── 4. Hashtags ────────────────────────────────────────────────────
       const allText = (title.trim() + ' ' + caption).toLowerCase();
-      const hashtagMatches = allText.match(/#(\w+)/g) || [];
-      const hashtags = [...new Set(hashtagMatches.map(h => h.slice(1)))];
+      const hashtags = [...new Set((allText.match(/#(\w+)/g) || []).map(h => h.slice(1)))];
 
+      // ── 5. Doc Firestore — muxPlaybackId rempli par le webhook ─────────
       await addDoc(collection(db, 'videos'), {
         userId: user?.uid,
         username: userProfile?.username || 'PLAYER',
         avatar: userProfile?.avatar || '',
         title: title.trim(),
         caption,
-        hashtags, // indexed array for HashtagScreen queries
+        hashtags,
         game,
         genre: selectedGenre,
         console: selectedConsole,
@@ -256,53 +249,44 @@ export default function UploadScreen({ navigation, route }) {
         videoFrame,
         isLegendaryFrame: videoFrame !== 'none',
         isFanbaseExclusive,
-        videoUrl: uploaded.url,              // null → rempli par webhook Mux
-        thumbnail: uploaded.thumbnail,         // null → rempli par webhook Mux
-        publicId: uploaded.publicId,           // muxUploadId pour le webhook
-        muxUploadId: uploaded.muxUploadId,     // ID de l'upload Mux
-        muxPlaybackId: null,                   // rempli par webhook quand prêt
-        muxStatus: uploaded.muxStatus,         // 'processing' → 'ready'
-        duration: uploaded.duration || 0,
+        videoUrl: null,
+        thumbnail: null,
+        publicId: uploadId,
+        muxUploadId: uploadId,
+        muxPlaybackId: null,
+        muxStatus: 'processing',
+        duration: 0,
         ggCount: 0,
         commentsCount: 0,
         viewCount: 0,
         createdAt: serverTimestamp(),
-        // randomOrder: timestamp-seeded unique value for feed shuffle.
-        // Using Date.now() as base + random suffix ensures no two videos
-        // ever get the same value, even if uploaded simultaneously.
-        // Cloud Function reshuffles all values every 6h for true feed variety.
         randomOrder: Date.now() + Math.floor(Math.random() * 100000),
       });
-  
+
+      // ── 6. Points + videoCount ─────────────────────────────────────────
       if (user?.uid) {
         await awardPoints(user.uid, POINTS.POST_CLIP, 0, 'Posted a clip');
-        // Sync videoCount sur le profil (utilisé par Gift Cards)
         updateDoc(doc(db, 'users', user.uid), { videoCount: increment(1) }).catch(() => {});
       }
-      await logEvent(LOG_CONTEXT.UPLOAD_SUCCESS, { contentType, game }, user?.uid);
+      logEvent(LOG_CONTEXT.UPLOAD_SUCCESS, { contentType, game }, user?.uid).catch(() => {});
 
-      // Store review — uniquement sur le 1er clip (meilleur timing UX + Apple préfère)
-      // Apple gère la fréquence max (3x/an) mais on ne demande qu'au premier clip.
+      // ── 7. Store review (1er clip seulement) ──────────────────────────
       try {
         const isAvailable = await StoreReview.isAvailableAsync();
         const currentCount = (userProfile?.videoCount || 0) + 1;
         if (isAvailable && currentCount === 1) await StoreReview.requestReview();
       } catch (e) {}
 
-      // Reset état upload
+      // ── 8. Succès : reset état → naviguer → alerte ────────────────────
       setUploading(false);
       setUploadState({ isUploading: false, progress: 0 });
 
-      // 1. Quitter l'écran upload → retourner au Feed
-      try { navigation.popToTop(); } catch(e) {}
-      try { globalNavigate('Feed'); } catch(e) {}
+      goToFeed();
 
-      // 2. Afficher l'alerte par-dessus le Feed (GAAlert est dans AppOverlays,
-      //    toujours monté indépendamment de la navigation)
       setTimeout(() => {
         showAlert({
           title: '✅ Published!',
-          message: 'Your content is now live. +25 GA Points earned! 🎮',
+          message: 'Your clip is being processed and will appear soon. +25 GA Points earned! 🎮',
           type: 'success',
           buttons: [
             { text: 'OK 🎮', style: 'default' },
@@ -314,12 +298,18 @@ export default function UploadScreen({ navigation, route }) {
       }, 300);
 
     } catch (e) {
+      setUploading(false);
       setUploadState({ isUploading: false, progress: 0 });
-      setUploading(false);
-      await logError(LOG_CONTEXT.UPLOAD_FAIL, e, user?.uid);
-      showAlert({ title: '❌ Upload Failed', message: 'Something went wrong. Please try again.', type: 'danger' });
-    } finally {
-      setUploading(false);
+      logError(LOG_CONTEXT.UPLOAD_FAIL, e, user?.uid).catch(() => {});
+      // Naviguer vers Feed même en cas d'échec — l'user ne doit pas rester bloqué
+      goToFeed();
+      setTimeout(() => {
+        showAlert({
+          title: '❌ Upload Failed',
+          message: 'Something went wrong. Please try again.\n\n' + (e?.message || ''),
+          type: 'danger',
+        });
+      }, 300);
     }
   };
 

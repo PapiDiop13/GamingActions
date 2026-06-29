@@ -21,16 +21,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
-  Platform, KeyboardAvoidingView, ActivityIndicator, Animated,
+  Platform, KeyboardAvoidingView, ActivityIndicator, Animated, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import {
   collection, query, where, orderBy, onSnapshot, addDoc,
   serverTimestamp, updateDoc, doc, increment, getDoc, arrayUnion, arrayRemove,
-  getDocs,
+  getDocs, deleteDoc,
 } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
+import { USERNAME_EFFECTS } from '../../constants/cosmetics';
 import { db } from '../../config/firebase';
 import useAuthStore from '../../store/useAuthStore';
 import { commentFrameStyle } from '../../constants/frames';
@@ -136,7 +138,7 @@ async function getLiveProfile(userId) {
  *  - Reply button (calls onReply with parentId + username)
  *  - Inline replies (indented, shown when expanded)
  */
-function CommentItem({ item, replies = [], onReply, currentUserId, isReply = false }) {
+function CommentItem({ item, replies = [], onReply, onDelete, currentUserId, isReply = false, onAuthRequired }) {
   const [liveUser, setLiveUser] = useState(item);
   const [liked, setLiked] = useState(!!(item.likedBy || []).includes(currentUserId));
   const [likeCount, setLikeCount] = useState(item.likes || 0);
@@ -160,7 +162,7 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
   const hasBorder = cf && cf.id !== 'none';
 
   const handleLike = async () => {
-    if (!currentUserId) return;
+    if (!currentUserId) { onAuthRequired?.(); return; }
     const newLiked = !liked;
     // Optimistic update — revert on error
     setLiked(newLiked);
@@ -186,16 +188,60 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
     creator:   { label: 'CR',   bg: COLORS.blue },
   };
   const badge = BADGES[liveUser?.accountType];
-  const nameColor = liveUser?.accountType === 'gameconic' ? COLORS.red
+  const baseNameColor = liveUser?.accountType === 'gameconic' ? COLORS.red
     : liveUser?.accountType === 'creator' ? COLORS.blue
     : liveUser?.plan === 'legendary'      ? COLORS.gold
     : COLORS.white;
+
+  // Username effect from live profile
+  const ueId   = liveUser?.equippedUsernameEffect;
+  const ueItem = ueId ? USERNAME_EFFECTS?.find(e => e.id === ueId) : null;
+  const nameColor  = ueItem ? (ueItem.color || ueItem.colors?.[0] || baseNameColor) : baseNameColor;
+  const nameGlow   = ueItem?.glow || false;
+  const nameAnim   = ueItem?.animated || false;
+
+  // useNativeDriver:true — opacity only, textShadowRadius stays static (no JS thread cost)
+  // Animated border for animated comment frames (sakura, void_pulse, holographic, etc.)
+  const cfPulse = React.useRef(new Animated.Value(0.5)).current;
+  React.useEffect(() => {
+    if (!cf?.animated || !cf?.glow) { cfPulse.setValue(0.65); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(cfPulse, { toValue: 1.0, duration: 700, useNativeDriver: true }),
+      Animated.timing(cfPulse, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [cf?.id]);
+
+  const uePulse = React.useRef(new Animated.Value(1)).current;
+  React.useEffect(() => {
+    if (!nameAnim) { uePulse.setValue(1); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(uePulse, { toValue: 0.6, duration: 700, useNativeDriver: true }),
+      Animated.timing(uePulse, { toValue: 1,   duration: 700, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [nameAnim, ueId]);
+  const ueOpacity = uePulse;
 
   return (
     <View style={isReply ? styles.replyWrapper : null}>
       {/* Indent line for replies */}
       {isReply && <View style={styles.replyLine} />}
 
+      <TouchableOpacity
+        activeOpacity={1}
+        onLongPress={() => {
+          if (onDelete && (item.userId === currentUserId)) {
+            Alert.alert('Supprimer', 'Supprimer ce commentaire ?', [
+              { text: 'Annuler', style: 'cancel' },
+              { text: 'Supprimer', style: 'destructive', onPress: () => onDelete(item) },
+            ]);
+          }
+        }}
+        delayLongPress={400}
+      >
       <View style={[
         styles.commentCard,
         hasBorder && { borderColor, borderWidth: 1.5 },
@@ -208,11 +254,20 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
           </View>
         )}
         {hasBorder && !isChampionFrame && cf.glow && (
-          <View style={[StyleSheet.absoluteFill, {
-            borderRadius: 12, borderWidth: 1.5, borderColor,
-            shadowColor: borderColor, shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.6, shadowRadius: 6,
-          }]} pointerEvents="none" />
+          cf.animated ? (
+            <Animated.View style={[StyleSheet.absoluteFill, {
+              borderRadius: 12, borderWidth: 2, borderColor,
+              shadowColor: borderColor, shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 1, shadowRadius: 14,
+              opacity: cfPulse,
+            }]} pointerEvents="none" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, {
+              borderRadius: 12, borderWidth: 1.5, borderColor,
+              shadowColor: borderColor, shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.6, shadowRadius: 6,
+            }]} pointerEvents="none" />
+          )
         )}
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
@@ -230,9 +285,23 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
                 onPress={() => { if (item.userId) globalNavigate('UserProfile', { userId: item.userId }); }}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.commentName, { color: nameColor }]}>
-                  {liveUser?.username || item.username}
-                </Text>
+                {nameAnim ? (
+                  <Animated.Text style={[styles.commentName, {
+                    color: nameColor, opacity: ueOpacity,
+                    textShadowColor: nameColor, textShadowRadius: 9, textShadowOffset: { width: 0, height: 0 },
+                  }]}>
+                    {liveUser?.username || item.username}
+                  </Animated.Text>
+                ) : (
+                  <Text style={[styles.commentName, {
+                    color: nameColor,
+                    textShadowColor: nameGlow ? nameColor : 'transparent',
+                    textShadowRadius: nameGlow ? 6 : 0,
+                    textShadowOffset: { width: 0, height: 0 },
+                  }]}>
+                    {liveUser?.username || item.username}
+                  </Text>
+                )}
               </TouchableOpacity>
               {badge && (
                 <View style={[styles.badge, { backgroundColor: badge.bg }]}>
@@ -255,7 +324,10 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
               {/* Reply button — only on top-level comments (1 level deep) */}
               {!isReply && (
                 <TouchableOpacity
-                  onPress={() => onReply({ parentId: item.id, username: liveUser?.username || item.username })}
+                  onPress={() => {
+                    if (!currentUserId) { onAuthRequired?.(); return; }
+                    onReply({ parentId: item.id, username: liveUser?.username || item.username });
+                  }}
                   style={styles.replyBtn}
                 >
                   <Ionicons name="chatbubble-outline" size={12} color={COLORS.gray} />
@@ -287,6 +359,7 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
           </View>
         </View>
       </View>
+      </TouchableOpacity>
 
       {/* Expand/collapse replies */}
       {!isReply && replies.length > 0 && (
@@ -313,7 +386,9 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
           item={reply}
           replies={[]}
           onReply={onReply}
+          onDelete={onDelete}
           currentUserId={currentUserId}
+          onAuthRequired={onAuthRequired}
           isReply={true}
         />
       ))}
@@ -325,6 +400,14 @@ function CommentItem({ item, replies = [], onReply, currentUserId, isReply = fal
 export default function CommentsScreen({ navigation, route }) {
   const { video } = route?.params || {};
   const { user, userProfile } = useAuthStore();
+  const insets = useSafeAreaInsets();
+
+  const handleAuthRequired = () => {
+    Alert.alert('Connecte-toi', 'Crée un compte pour interagir avec les commentaires !', [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+    ]);
+  };
 
   const [comments, setComments] = useState([]);     // top-level comments only
   const [replies, setReplies]   = useState({});     // { [parentId]: [reply, ...] }
@@ -475,6 +558,30 @@ export default function CommentsScreen({ navigation, route }) {
     }
   };
 
+  // ── Delete comment ────────────────────────────────────────────────────────
+  const handleDelete = async (comment) => {
+    if (!comment?.id || !video?.id) return;
+    try {
+      // Supprimer le commentaire lui-même
+      await deleteDoc(doc(db, 'comments', comment.id));
+
+      // Compter les replies de ce commentaire pour décrémenter correctement
+      const repliesOfComment = replies[comment.id] || [];
+      const totalDeleted = 1 + repliesOfComment.length;
+
+      // Supprimer les replies orphelines
+      for (const reply of repliesOfComment) {
+        try { await deleteDoc(doc(db, 'comments', reply.id)); } catch (_) {}
+      }
+
+      await updateDoc(doc(db, 'videos', video.id), {
+        commentsCount: increment(-totalDeleted),
+      });
+    } catch (e) {
+      Alert.alert('Erreur', 'Impossible de supprimer ce commentaire.');
+    }
+  };
+
   const handleReply = ({ parentId, username }) => {
     const target = { parentId, username };
     replyTargetRef.current = target;   // ref is always up-to-date, immune to re-render
@@ -489,7 +596,8 @@ export default function CommentsScreen({ navigation, route }) {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
       <StatusBar style="light" />
 
@@ -510,12 +618,15 @@ export default function CommentsScreen({ navigation, route }) {
         <FlatList
           data={comments}
           keyExtractor={item => item.id}
+          style={{ flex: 1 }}
           renderItem={({ item }) => (
             <CommentItem
               item={item}
               replies={replies[item.id] || []}
               onReply={handleReply}
+              onDelete={handleDelete}
               currentUserId={user?.uid}
+              onAuthRequired={handleAuthRequired}
             />
           )}
           contentContainerStyle={{ padding: 12, paddingBottom: 20 }}
@@ -541,7 +652,7 @@ export default function CommentsScreen({ navigation, route }) {
       )}
 
       {/* Input bar */}
-      <View style={styles.inputBar}>
+      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <FramedAvatar user={userProfile} size={28} />
         <View style={{ flex: 1, marginLeft: 10 }}>
           <TextInput
@@ -553,6 +664,8 @@ export default function CommentsScreen({ navigation, route }) {
             style={styles.input}
             multiline
             maxLength={MAX_CHARS}
+            editable={!!user}
+            onPressIn={!user ? handleAuthRequired : undefined}
           />
           {text.length > 100 && (
             <Text style={[styles.charCount, remaining < 20 && { color: COLORS.red }]}>
@@ -626,9 +739,9 @@ const styles = StyleSheet.create({
 
   // ── Input bar ───────────────────────────────────────────────────────────────
   inputBar: {
-    flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingVertical: 10,
+    flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12, paddingTop: 10,
     borderTopWidth: 0.5, borderTopColor: COLORS.gray3, backgroundColor: COLORS.dark,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+    flexShrink: 0,
   },
   input: { fontSize: 14, color: COLORS.white, maxHeight: 80, paddingVertical: 6 },
   charCount: { fontSize: 10, color: COLORS.gray, textAlign: 'right', marginTop: 2 },

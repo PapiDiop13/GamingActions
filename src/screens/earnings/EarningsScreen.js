@@ -10,7 +10,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import {
   doc, getDoc, collection, query, where, orderBy,
-  getDocs, addDoc, serverTimestamp, updateDoc,
+  getDocs, addDoc, serverTimestamp, updateDoc, runTransaction,
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { COLORS } from '../../constants/colors';
@@ -73,8 +73,8 @@ function WithdrawModal({ visible, onClose, balance, onSubmit }) {
                 <Text style={st.modalNoteText}>Withdrawals processed manually within 5–7 business days.</Text>
               </View>
 
-              <TouchableOpacity onPress={submit} style={st.submitBtn}>
-                <Text style={st.submitBtnText}>Request CA${amount || '0'}</Text>
+              <TouchableOpacity onPress={() => { onClose(); Alert.alert('🚀 Bientôt disponible', 'Le retrait sera activé très prochainement.'); }} style={st.submitBtn}>
+                <Text style={st.submitBtnText}>Bientôt disponible 🚀</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={onClose} style={{ alignItems: 'center', marginTop: 12 }}>
                 <Text style={{ color: COLORS.gray, fontSize: 13 }}>Cancel</Text>
@@ -111,19 +111,30 @@ export default function EarningsScreen({ navigation }) {
 
   const handleWithdraw = async ({ amount, method, paymentInfo }) => {
     try {
-      await addDoc(collection(db, 'withdrawal_requests'), {
-        creatorId: user.uid, creatorUsername: userProfile?.username || '',
-        amount, method, paymentInfo, status: 'pending',
-        requestedAt: serverTimestamp(), processedAt: null, note: '',
-      });
-      await updateDoc(doc(db, 'creator_earnings', user.uid), {
-        balance: (earnings?.balance || 0) - amount,
-        pendingWithdrawal: ((earnings?.pendingWithdrawal || 0) + amount),
+      const earningsRef = doc(db, 'creator_earnings', user.uid);
+      const withdrawalRef = doc(collection(db, 'withdrawal_requests'));
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(earningsRef);
+        const currentBalance = snap.data()?.balance ?? 0;
+        if (currentBalance < amount) throw new Error('insufficient_balance');
+        const currentPending = snap.data()?.pendingWithdrawal ?? 0;
+        transaction.update(earningsRef, {
+          balance: currentBalance - amount,
+          pendingWithdrawal: currentPending + amount,
+        });
+        transaction.set(withdrawalRef, {
+          creatorId: user.uid, creatorUsername: userProfile?.username || '',
+          amount, method, paymentInfo, status: 'pending',
+          requestedAt: serverTimestamp(), processedAt: null, note: '',
+        });
       });
       setShowModal(false);
       Alert.alert('✅ Request sent!', "Your withdrawal request has been submitted. You'll receive payment within 5–7 business days and we'll notify you when it's sent.");
       loadData();
-    } catch (e) { Alert.alert('Error', 'Failed to submit. Please try again.'); }
+    } catch (e) {
+      if (e.message === 'insufficient_balance') Alert.alert('Insufficient balance', 'Your current balance is too low for this withdrawal.');
+      else Alert.alert('Error', 'Failed to submit. Please try again.');
+    }
   };
 
   const balance = earnings?.balance || 0;
@@ -154,12 +165,18 @@ export default function EarningsScreen({ navigation }) {
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
 
+          {/* Coming Soon Banner */}
+          <View style={{ margin: 14, backgroundColor: 'rgba(201,168,76,0.12)', borderRadius: 12, padding: 14, borderWidth: 0.5, borderColor: COLORS.gold + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Text style={{ fontSize: 20 }}>🚀</Text>
+            <Text style={{ color: COLORS.gold, fontSize: 13, fontWeight: '700', flex: 1 }}>Le retrait des gains sera disponible très prochainement. Tes gains sont enregistrés !</Text>
+          </View>
+
           {/* Balance */}
           <View style={st.balanceCard}>
             <Text style={st.balanceLabel}>Available Balance</Text>
             <Text style={st.balanceValue}>CA${balance.toFixed(2)}</Text>
             {earnings?.pendingWithdrawal > 0 && <Text style={{ color: COLORS.gold, fontSize: 12, marginTop: 4 }}>CA${earnings.pendingWithdrawal.toFixed(2)} pending</Text>}
-            <TouchableOpacity onPress={() => balance >= MIN_WITHDRAWAL ? setShowModal(true) : Alert.alert('Minimum not reached', `You need at least CA$${MIN_WITHDRAWAL} to withdraw.`)} style={[st.withdrawBtn, balance < MIN_WITHDRAWAL && { opacity: 0.4 }]}>
+            <TouchableOpacity onPress={() => Alert.alert('🚀 Bientôt disponible', 'Le retrait des gains sera activé très prochainement.')} style={st.withdrawBtn}>
               <Ionicons name="cash-outline" size={16} color={COLORS.black} />
               <Text style={st.withdrawBtnText}>Request Withdrawal</Text>
             </TouchableOpacity>

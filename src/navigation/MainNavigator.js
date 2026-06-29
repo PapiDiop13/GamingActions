@@ -141,6 +141,11 @@ function TipsStack() {
       <Stack.Screen name="Help" component={HelpScreen} />
       <Stack.Screen name="NotificationsSettings" component={NotificationsSettingsScreen} />
       <Stack.Screen name="CommunityGuidelines" component={CommunityGuidelinesScreen} />
+      <Stack.Screen name="ProfileFeed" component={ProfileFeedScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="Comments" component={CommentsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="EditVideo" component={EditVideoScreen} />
+      <Stack.Screen name="Earnings" component={EarningsScreen} />
+      <Stack.Screen name="Subscription" component={SubscriptionScreen} />
     </Stack.Navigator>
   );
 }
@@ -162,6 +167,14 @@ function RankingsStack() {
       <Stack.Screen name="PointsHistory" component={PointsHistoryScreen} />
       <Stack.Screen name="Purchases" component={PurchasesScreen} />
       <Stack.Screen name="MyFanbase" component={MyFanbaseScreen} />
+      <Stack.Screen name="ProfileFeed" component={ProfileFeedScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="Comments" component={CommentsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="EditVideo" component={EditVideoScreen} />
+      <Stack.Screen name="Report" component={ReportScreen} />
+      <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="Earnings" component={EarningsScreen} />
+      <Stack.Screen name="Subscription" component={SubscriptionScreen} />
     </Stack.Navigator>
   );
 }
@@ -173,6 +186,7 @@ function ShopStack() {
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
       <Stack.Screen name="Earnings" component={EarningsScreen} />
       <Stack.Screen name="ProfileFeed" component={ProfileFeedScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="Comments" component={CommentsScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="GiftCards" component={GiftCardsScreen} />
       <Stack.Screen name="Purchases" component={PurchasesScreen} />
       <Stack.Screen name="PointsHistory" component={PointsHistoryScreen} />
@@ -186,6 +200,7 @@ function UploadStack() {
       <Stack.Screen name="ContentType" component={ContentTypeScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="UploadMain" component={UploadScreen} />
       <Stack.Screen name="HowToUpload" component={HowToUploadScreen} />
+      <Stack.Screen name="Subscription" component={SubscriptionScreen} />
     </Stack.Navigator>
   );
 }
@@ -212,7 +227,7 @@ function CustomTabBar({ state, descriptors, navigation }) {
     'Crée un compte gratuit pour accéder à toutes les fonctionnalités.',
     [
       { text: 'Pas maintenant', style: 'cancel' },
-      { text: 'Créer un compte', onPress: () => { exitGuest(); navigation.navigate('Auth'); } },
+      { text: 'Créer un compte', onPress: () => exitGuest() },
     ]
   );
 

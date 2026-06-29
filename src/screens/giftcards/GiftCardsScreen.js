@@ -29,7 +29,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import {
   doc, getDoc, collection, query, where, orderBy,
-  getDocs, addDoc, updateDoc, serverTimestamp, increment,
+  getDocs, updateDoc, serverTimestamp, increment, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { COLORS } from '../../constants/colors';
@@ -241,7 +241,7 @@ export default function GiftCardsScreen({ navigation }) {
   const handleConfirm = async ({ platform, email }) => {
     if (!selectedCard || !user?.uid) return;
     try {
-      // Check points one more time
+      // Check points one more time before committing
       const uSnap = await getDoc(doc(db, 'users', user.uid));
       const currentPoints = uSnap.data()?.gaPoints || 0;
       if (currentPoints < selectedCard.pointsCost) {
@@ -249,15 +249,13 @@ export default function GiftCardsScreen({ navigation }) {
         return;
       }
 
-      // Deduct points via increment (atomique — évite la race condition si deux
-      // actions modifient gaPoints en parallèle)
-      await updateDoc(doc(db, 'users', user.uid), {
-        gaPoints: increment(-selectedCard.pointsCost),
-      });
-
-      // Create request
+      // Atomic batch: deduct points + create request in a single commit
       const newPoints = currentPoints - selectedCard.pointsCost;
-      await addDoc(collection(db, 'gift_card_requests'), {
+      const batch = writeBatch(db);
+      const userRef = doc(db, 'users', user.uid);
+      batch.update(userRef, { gaPoints: increment(-selectedCard.pointsCost) });
+      const reqRef = doc(collection(db, 'gift_card_requests'));
+      batch.set(reqRef, {
         userId: user.uid,
         username: userProfile?.username || '',
         email,
@@ -272,6 +270,7 @@ export default function GiftCardsScreen({ navigation }) {
         note: '',
         adminNote: '',
       });
+      await batch.commit();
 
       setShowModal(false);
       setSelectedCard(null);

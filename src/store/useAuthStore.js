@@ -101,7 +101,7 @@ const useAuthStore = create((set, get) => ({
         gaPoints: 0, streakPoints: 0, streakLevel: 'noob', ggReceived: 0,
         followers: 0, following: 0, isChampion: false, isCurrentLeader: false,
         ownedFrames: [], ownedVideoFrames: [], equippedFrame: 'none',
-        fcmToken: '', lastSeen: serverTimestamp(), banned: false, plan: 'free',
+        fcmToken: '', lastSeen: serverTimestamp(), banned: false, plan: 'free', isAdmin: false,
       });
       await sendEmailVerification(user);
       await firebaseSignOut(auth);

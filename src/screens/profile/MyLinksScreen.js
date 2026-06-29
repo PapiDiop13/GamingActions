@@ -3,6 +3,9 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Platfo
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../../config/firebase';
+import useAuthStore from '../../store/useAuthStore';
 
 const PLATFORMS = [
   { id: 'youtube', label: 'YouTube', icon: 'logo-youtube', color: '#FF0000' },
@@ -14,11 +17,26 @@ const PLATFORMS = [
 ];
 
 export default function MyLinksScreen({ navigation }) {
+  const { user } = useAuthStore();
   const [links, setLinks] = useState({});
 
-  const handleSave = () => {
-    Alert.alert('Saved!', 'Your links have been updated.');
-    navigation.goBack();
+  const handleSave = async () => {
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        links: {
+          youtube: links.youtube || '',
+          twitch: links.twitch || '',
+          twitter: links.twitter || '',
+          tiktok: links.tiktok || '',
+          instagram: links.instagram || '',
+          discord: links.discord || '',
+        },
+      });
+      Alert.alert('Saved!', 'Your links have been updated.');
+      navigation.goBack();
+    } catch (e) {
+      Alert.alert('Error', 'Could not save links. Please try again.');
+    }
   };
 
   return (

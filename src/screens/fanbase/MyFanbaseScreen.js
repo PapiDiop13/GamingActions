@@ -86,7 +86,9 @@ export default function MyFanbaseScreen({ navigation }) {
     );
   };
 
-  const totalMonthly = subs.length * PRICE;
+  // Test mode — no real billing yet; always show $0.00 to avoid contradiction
+  // with the "pas de facturation" label shown on each subscription card.
+  const totalMonthly = 0;
 
   return (
     <View style={styles.container}>
@@ -174,7 +176,7 @@ export default function MyFanbaseScreen({ navigation }) {
               <Ionicons name="lock-closed-outline" size={48} color={COLORS.gray2} />
               <Text style={styles.emptyTitle}>No Fanbase yet</Text>
               <Text style={styles.emptyDesc}>Subscribe to your favorite creators to access exclusive content</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('TipsMain')} style={styles.exploreBtn}>
+              <TouchableOpacity onPress={() => { const p = navigation.getParent(); p ? p.navigate('Tips') : navigation.navigate('TipsMain'); }} style={styles.exploreBtn}>
                 <Text style={styles.exploreBtnText}>Explore Creators</Text>
               </TouchableOpacity>
             </View>

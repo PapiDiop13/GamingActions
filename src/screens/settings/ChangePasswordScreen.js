@@ -31,6 +31,7 @@ function Field({ label, value, onChangeText, show, onToggleShow }) {
 }
 
 export default function ChangePasswordScreen({ navigation }) {
+  const { user } = useAuthStore();
   const [current, setCurrent] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -53,6 +54,7 @@ export default function ChangePasswordScreen({ navigation }) {
         { text: 'OK', onPress: () => signOut() }
       ]);
     } catch (e) {
+      logError(LOG_CONTEXT.SETTINGS_FAIL || 'settings', e, user?.uid);
       if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential'
           || (e.message || '').includes('invalid-credential')
           || (e.message || '').includes('INVALID_LOGIN_CREDENTIALS')) {

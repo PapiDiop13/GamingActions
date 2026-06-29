@@ -16,16 +16,17 @@ const ICON_MAP = {
   'Daily login bonus': { icon: 'calendar-outline',     color: COLORS.purple },
   'Frame purchased':   { icon: 'scan-outline',         color: COLORS.gold },
   'Clip deleted':      { icon: 'trash-outline',        color: COLORS.red },
-  'default':           { icon: 'flash-outline',        color: COLORS.gray },
 };
+
+const DEFAULT_ICON = { icon: 'flash-outline', color: COLORS.gray };
 
 function getIcon(reason = '') {
   for (const key of Object.keys(ICON_MAP)) {
-    if (reason.includes(key) || key === 'default') {
+    if (reason.includes(key)) {
       return ICON_MAP[key];
     }
   }
-  return ICON_MAP['default'];
+  return DEFAULT_ICON;
 }
 
 function fmtDate(ts) {

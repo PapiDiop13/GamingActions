@@ -29,16 +29,16 @@ export default function CompleteProfileScreen({ navigation }) {
 
   const handleComplete = async () => {
     const trimmed = username.trim();
-    if (!trimmed) return setError('G is required');
-    if (trimmed.length < 3) return setError('G must be at least 3 characters');
-    if (trimmed.length > 20) return setError('G must be under 20 characters');
-    if (!/^[A-Z0-9_]+$/i.test(trimmed)) return setError('G can only contain letters, numbers and _');
+    if (!trimmed) return setError('GamerTag is required');
+    if (trimmed.length < 3) return setError('GamerTag must be at least 3 characters');
+    if (trimmed.length > 20) return setError('GamerTag must be under 20 characters');
+    if (!/^[A-Z0-9_]+$/i.test(trimmed)) return setError('GamerTag can only contain letters, numbers and _');
     setError('');
     setLoading(true);
     try {
       const available = await checkUsernameAvailable(trimmed);
       if (!available) {
-        setError('This G is already taken — try another one');
+        setError('This GamerTag is already taken — try another one');
         setLoading(false);
         return;
       }

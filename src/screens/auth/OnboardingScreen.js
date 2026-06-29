@@ -4,12 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 
-// Static import — dynamic import can crash in production builds on iOS.
-// If expo-tracking-transparency is not available (Expo Go, Android), the try/catch handles it.
-let TrackingTransparency = null;
-try {
-  TrackingTransparency = require('expo-tracking-transparency');
-} catch (_) {}
+// ATT est géré dans App.js au lancement — plus besoin ici.
 
 const { width } = Dimensions.get('window');
 const LOGO_URI = require('../../../assets/logo.png');
@@ -40,30 +35,10 @@ const SLIDES = [
 
 export default function OnboardingScreen({ navigation }) {
   const [index, setIndex] = useState(0);
-  const [askedTracking, setAskedTracking] = useState(false);
   const flatRef = useRef(null);
   const scrollX = useRef(new Animated.Value(0)).current;
 
-  // Demande la permission de tracking (ATT) au premier clic — jamais au démarrage (évite le crash)
-  const askTrackingOnce = async () => {
-    if (askedTracking) return;
-    setAskedTracking(true);
-    // Guard: module unavailable (Expo Go, Android) or already asked
-    if (!TrackingTransparency) return;
-    try {
-      // Small delay — iOS requires the app UI to be fully rendered before showing ATT prompt
-      await new Promise(resolve => setTimeout(resolve, 300));
-      const { status } = await TrackingTransparency.getTrackingPermissionsAsync();
-      if (status === 'undetermined') {
-        await TrackingTransparency.requestTrackingPermissionsAsync();
-      }
-    } catch (e) {
-      // Silently ignore — tracking permission is optional, never crash the app
-    }
-  };
-
-  const goNext = async () => {
-    await askTrackingOnce();
+  const goNext = () => {
     if (index < SLIDES.length - 1) {
       flatRef.current?.scrollToIndex({ index: index + 1 });
       setIndex(index + 1);
@@ -77,7 +52,7 @@ export default function OnboardingScreen({ navigation }) {
       <StatusBar style="light" />
 
       {/* Skip */}
-      <TouchableOpacity onPress={async () => { await askTrackingOnce(); navigation.replace('SignUp'); }} style={styles.skip}>
+      <TouchableOpacity onPress={() => navigation.replace('SignUp')} style={styles.skip}>
         <Text style={styles.skipText}>Skip</Text>
       </TouchableOpacity>
 
@@ -131,7 +106,7 @@ export default function OnboardingScreen({ navigation }) {
           <Text style={styles.nextBtnText}>{index === SLIDES.length - 1 ? 'Get Started 🎮' : 'Next'}</Text>
           <Ionicons name="arrow-forward" size={18} color={COLORS.black} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={async () => { await askTrackingOnce(); navigation.replace('Login'); }}>
+        <TouchableOpacity onPress={() => navigation.replace('Login')}>
           <Text style={styles.loginLink}>
             Already a gamer? <Text style={{ color: COLORS.gold, fontWeight: '700' }}>Sign in</Text>
           </Text>

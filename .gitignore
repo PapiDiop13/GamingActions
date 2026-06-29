@@ -40,3 +40,4 @@ yarn-error.*
 /ios
 /android
 scripts/service-account.json
+functions/.env

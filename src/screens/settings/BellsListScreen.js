@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Platform, Alert, Image, ActivityIndicator,
+  TextInput, Platform, Alert, ActivityIndicator,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,30 +9,13 @@ import { collection, query, where, getDocs, getDoc, doc, deleteDoc } from 'fireb
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
 import useAuthStore from '../../store/useAuthStore';
+import FramedAvatar from '../../components/FramedAvatar';
 
 const BADGE = {
   gameconic: { bg: COLORS.red, label: 'ICON' },
   creator: { bg: COLORS.blue, label: 'CR' },
   gamer: { bg: COLORS.gray2, label: 'GA' },
 };
-
-function Avatar({ user, size = 42 }) {
-  const ringColor = user?.plan === 'legendary' ? COLORS.gold : COLORS.gray3;
-  return (
-    <View style={{ width: size + 4, height: size + 4, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', width: size + 4, height: size + 4, borderRadius: (size + 4) / 2, borderWidth: 1.5, borderColor: ringColor, opacity: 0.6 }} />
-      {user?.avatar ? (
-        <Image source={{ uri: user.avatar }} style={{ width: size, height: size, borderRadius: size / 2 }} resizeMode="cover" />
-      ) : (
-        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: 'rgba(201,168,76,0.12)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: ringColor }}>
-          <Text style={{ color: COLORS.gold, fontWeight: '800', fontSize: size * 0.35 }}>
-            {(user?.username || 'GA').slice(0, 2).toUpperCase()}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-}
 
 export default function BellsListScreen({ navigation }) {
   const { user: authUser } = useAuthStore();
@@ -138,7 +121,7 @@ export default function BellsListScreen({ navigation }) {
             return (
               <View style={styles.row}>
                 <TouchableOpacity onPress={() => navigation.navigate('UserProfile', { userId: item.uid })}>
-                  <Avatar user={item} size={42} />
+                  <FramedAvatar user={item} size={42} />
                 </TouchableOpacity>
                 <View style={styles.info}>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>

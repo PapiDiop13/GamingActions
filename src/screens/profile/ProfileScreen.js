@@ -1,19 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform,
   Dimensions, Share, Modal, Image, Alert, Linking, RefreshControl,
-  TouchableWithoutFeedback, Animated,
+  TouchableWithoutFeedback, Animated, ActivityIndicator,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
+import useGuestGuard from '../../hooks/useGuestGuard';
 import useUserStore from '../../store/useUserStore';
 import useFanbaseStore from '../../store/useFanbaseStore';
 import { db } from '../../config/firebase';
 import { POINTS } from '../../utils/points';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
-import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, doc, getDoc, getDocs, setDoc, deleteDoc, serverTimestamp, updateDoc, limit, startAfter } from 'firebase/firestore';
 import { showAlert } from '../../store/useAlertStore';
 import { ringColorForUser, glowColorForUser, getFrameById, getVideoFrameById } from '../../constants/frames';
 import { getCosmeticById, PROFILE_BACKGROUNDS, PROFILE_BANNERS, USERNAME_EFFECTS, PROFILE_BADGES, CARD_BORDERS } from '../../constants/cosmetics';
@@ -202,7 +203,7 @@ function GAPointsPopup({ visible, onClose, navigation }) {
               <TouchableOpacity onPress={() => { onClose(); navigation.navigate('PointsHistory'); }} style={popS.secondBtn}>
                 <Text style={popS.secondBtnText}>📋 History</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => { onClose(); navigation.navigate('Shop'); }} style={popS.secondBtn}>
+              <TouchableOpacity onPress={() => { onClose(); navigation.getParent()?.navigate('Shop'); }} style={popS.secondBtn}>
                 <Text style={popS.secondBtnText}>Shop</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={onClose} style={popS.mainBtn}>
@@ -384,19 +385,159 @@ function AnimatedUsername({ username, color, glow, isAnimated, baseStyle }) {
   );
 }
 
+const EXCLUDED_ACCOUNT_TYPES = ['creator', 'gameconic'];
+
+// ─── Theme border colors ──────────────────────────────────────────────────────
+const THEME_COLORS_MAP = {
+  theme_champion:    '#C9A84C',
+  theme_phantom:     '#BF5AF2',
+  theme_inferno:     '#FF3D00',
+  theme_storm:       '#00D4FF',
+  theme_cosmic:      '#E040FB',
+  theme_matrix:      '#00FF41',
+  theme_sakura:      '#FF69B4',
+  theme_cyber:       '#FF0080',
+  theme_arctic:      '#A0E8FF',
+  theme_void_walker: '#7C4DFF',
+  theme_neon_city:   '#FF00FF',
+};
+
+// Derives theme id from equipped background if equippedTheme not set
+const THEME_BG_MAP = {
+  bg_gold_fade: 'theme_champion', bg_midnight: 'theme_phantom',
+  bg_fire_animated: 'theme_inferno', bg_lightning_bg: 'theme_storm',
+  bg_cosmic: 'theme_cosmic', bg_matrix: 'theme_matrix',
+  bg_cherry_bloom: 'theme_sakura', bg_glitch: 'theme_cyber',
+  bg_ice_storm: 'theme_arctic', bg_void_pulse: 'theme_void_walker',
+  bg_vaporwave: 'theme_neon_city',
+};
+
+// Animated glow effect around the banner when a cosmetic banner is equipped
+function BannerGlowEffect({ color }) {
+  const shimmer = React.useRef(new Animated.Value(0)).current;
+  const pulse   = React.useRef(new Animated.Value(0.4)).current;
+  React.useEffect(() => {
+    const a = Animated.loop(Animated.timing(shimmer, { toValue: 1, duration: 2800, useNativeDriver: true }));
+    const b = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1,   duration: 900, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.4, duration: 900, useNativeDriver: true }),
+    ]));
+    a.start(); b.start();
+    return () => { a.stop(); b.stop(); };
+  }, [color]);
+  const tx = shimmer.interpolate({ inputRange: [0, 1], outputRange: [-180, SW + 180] });
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} pointerEvents="none">
+      {/* Shimmer sweep */}
+      <Animated.View style={{
+        position: 'absolute', top: 0, bottom: 0, width: 180,
+        backgroundColor: color, opacity: 0.18, borderRadius: 6,
+        transform: [{ translateX: tx }, { skewX: '-14deg' }],
+        shadowColor: color, shadowOpacity: 0.7, shadowRadius: 24, shadowOffset: { width: 0, height: 0 },
+      }} />
+      {/* Pulsing top edge */}
+      <Animated.View style={{
+        position: 'absolute', top: 0, left: 0, right: 0, height: 2.5,
+        backgroundColor: color, opacity: pulse,
+        shadowColor: color, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width: 0, height: 0 },
+      }} />
+      {/* Pulsing bottom edge */}
+      <Animated.View style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: 2.5,
+        backgroundColor: color, opacity: pulse,
+        shadowColor: color, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width: 0, height: 0 },
+      }} />
+    </View>
+  );
+}
+
+function BannerThemeShimmer({ color, width, height }) {
+  const shimmer = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const a = Animated.loop(Animated.timing(shimmer, { toValue: 1, duration: 2000, useNativeDriver: true }));
+    a.start();
+    return () => a.stop();
+  }, [color]);
+  const tx = shimmer.interpolate({ inputRange: [0,1], outputRange: [-220, width + 220] });
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} pointerEvents="none">
+      {/* Sweep shimmer across banner */}
+      <Animated.View style={{
+        position: 'absolute', top: 0, bottom: 0, width: 220,
+        backgroundColor: color, opacity: 0.12,
+        borderRadius: 4,
+        transform: [{ translateX: tx }, { skewX: '-15deg' }],
+        shadowColor: color, shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 0 },
+      }} />
+      {/* Colored bottom border line */}
+      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, backgroundColor: color, opacity: 0.8, shadowColor: color, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width: 0, height: 0 } }} />
+    </View>
+  );
+}
+
+function ThemeBorderEffect({ color }) {
+  const SH = Dimensions.get('window').height;
+  const PERIOD = 2200;
+  const WS = 170;
+  const HS = 200;
+
+  const p1 = React.useRef(new Animated.Value(0)).current;
+  const p2 = React.useRef(new Animated.Value(0)).current;
+  const p3 = React.useRef(new Animated.Value(0)).current;
+  const p4 = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const mk = (v) => Animated.loop(Animated.timing(v, { toValue: 1, duration: PERIOD, useNativeDriver: true }));
+    const a1 = mk(p1); a1.start();
+    const a2 = Animated.sequence([Animated.delay(PERIOD * 0.25), mk(p2)]); a2.start();
+    const a3 = Animated.sequence([Animated.delay(PERIOD * 0.50), mk(p3)]); a3.start();
+    const a4 = Animated.sequence([Animated.delay(PERIOD * 0.75), mk(p4)]); a4.start();
+    return () => { a1.stop(); a2.stop(); a3.stop(); a4.stop(); };
+  }, [color]);
+
+  const tx1 = p1.interpolate({ inputRange: [0,1], outputRange: [-WS, SW + WS] });   // top L→R
+  const ty2 = p2.interpolate({ inputRange: [0,1], outputRange: [-HS, SH + HS] });   // right T→B
+  const tx3 = p3.interpolate({ inputRange: [0,1], outputRange: [SW + WS, -WS] });   // bottom R→L
+  const ty4 = p4.interpolate({ inputRange: [0,1], outputRange: [SH + HS, -HS] });   // left B→T
+
+  const PILL_H = { borderRadius: 5, backgroundColor: color, shadowColor: color, shadowOpacity: 0.95, shadowRadius: 14, shadowOffset: { width: 0, height: 0 } };
+  const PILL_V = { borderRadius: 5, backgroundColor: color, shadowColor: color, shadowOpacity: 0.95, shadowRadius: 14, shadowOffset: { width: 0, height: 0 } };
+
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99, pointerEvents: 'none' }}>
+      {/* Permanent 2px colored frame */}
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, backgroundColor: color, opacity: 0.45 }} />
+      <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 2, backgroundColor: color, opacity: 0.45 }} />
+      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 2, backgroundColor: color, opacity: 0.45 }} />
+      <View style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 2, backgroundColor: color, opacity: 0.45 }} />
+      {/* Traveling shimmer */}
+      <Animated.View style={[PILL_H, { position: 'absolute', top: -3, left: 0, width: WS, height: 8, transform: [{ translateX: tx1 }] }]} />
+      <Animated.View style={[PILL_V, { position: 'absolute', top: 0, right: -3, width: 8, height: HS, transform: [{ translateY: ty2 }] }]} />
+      <Animated.View style={[PILL_H, { position: 'absolute', bottom: -3, left: 0, width: WS, height: 8, transform: [{ translateX: tx3 }] }]} />
+      <Animated.View style={[PILL_V, { position: 'absolute', top: 0, left: -3, width: 8, height: HS, transform: [{ translateY: ty4 }] }]} />
+    </View>
+  );
+}
+
 export default function ProfileScreen({ navigation, route }) {
-    const { user: authUser, userProfile, saveProfile } = useAuthStore();
+    const { user: authUser, userProfile, saveProfile, isGuest } = useAuthStore();
+    const guestGuard = useGuestGuard(navigation);
     const { toggleFollow, checkIsFollowing, isFollowing, fetchFollowing } = useUserStore();
     const { isSubscribedTo, checkIsSubscribed } = useFanbaseStore();
     const userId = route?.params?.userId;
     const showBack = route?.params?.showBack || false;
-  
+
     const isOwn = !userId || userId === authUser?.uid;  
     const [externalProfile, setExternalProfile] = useState(null);    const [activeTab, setActiveTab] = useState('clips');
     const [bellActive, setBellActive] = useState(false);
     const [showGGPopup, setShowGGPopup] = useState(false);
     const [showPointsPopup, setShowPointsPopup] = useState(false);
     const [userVideos, setUserVideos] = useState([]);
+    const [videosLoading, setVideosLoading] = useState(true);
+    const [lastVideoDoc, setLastVideoDoc] = useState(null);
+    const [hasMoreVideos, setHasMoreVideos] = useState(true);
+    const [loadingMoreVideos, setLoadingMoreVideos] = useState(false);
+    const PAGE_SIZE = 18;
     const [refreshing, setRefreshing] = useState(false);
     const [showStreakInfo, setShowStreakInfo] = useState(false);
   
@@ -431,15 +572,18 @@ export default function ProfileScreen({ navigation, route }) {
 
     const onRefresh = async () => {
         setRefreshing(true);
-        // Force reload videos
+        setVideosLoading(true);
         const targetId = isOwn ? authUser?.uid : userId;
         if (targetId) {
-          const { getDocs, collection, query, where, orderBy } = await import('firebase/firestore');
           try {
-            const snap = await getDocs(query(collection(db, 'videos'), where('userId', '==', targetId), orderBy('createdAt', 'desc')));
+            const snap = await getDocs(query(collection(db, 'videos'), where('userId', '==', targetId), orderBy('createdAt', 'desc'), limit(PAGE_SIZE)));
             setUserVideos(snap.docs.map(d => ({ id: d.id, ...d.data(), thumbnailUrl: d.data().thumbnail || d.data().thumbnailUrl || null })));
+            setLastVideoDoc(snap.docs[snap.docs.length - 1] || null);
+            setHasMoreVideos(snap.docs.length === PAGE_SIZE);
           } catch (e) {
             await logError(LOG_CONTEXT.PROFILE_FAIL, e, targetId);
+          } finally {
+            setVideosLoading(false);
           }
         }
         setRefreshing(false);
@@ -481,20 +625,65 @@ export default function ProfileScreen({ navigation, route }) {
       useEffect(() => {
         const targetId = isOwn ? authUser?.uid : userId;
         if (!targetId) return;
-        const q = query(
+        // Reset pagination on user switch
+        setUserVideos([]);
+        setLastVideoDoc(null);
+        setHasMoreVideos(true);
+        setVideosLoading(true);
+        getDocs(query(
           collection(db, 'videos'),
           where('userId', '==', targetId),
-          orderBy('createdAt', 'desc')
-        );
-        const unsub = onSnapshot(q, (snap) => {
+          orderBy('createdAt', 'desc'),
+          limit(PAGE_SIZE)
+        )).then(snap => {
           setUserVideos(snap.docs.map(d => ({
             id: d.id,
             ...d.data(),
             thumbnailUrl: d.data().thumbnail || d.data().thumbnailUrl || null,
           })));
-        });
-        return () => unsub();
+          setLastVideoDoc(snap.docs[snap.docs.length - 1] || null);
+          setHasMoreVideos(snap.docs.length === PAGE_SIZE);
+          setVideosLoading(false);
+        }).catch(e => { logError(LOG_CONTEXT.PROFILE_FAIL, e, targetId); setVideosLoading(false); });
       }, [authUser?.uid, userId, isOwn]);
+
+      const loadMoreVideos = useCallback(async () => {
+        if (loadingMoreVideos || !hasMoreVideos || !lastVideoDoc) return;
+        const targetId = isOwn ? authUser?.uid : userId;
+        if (!targetId) return;
+        setLoadingMoreVideos(true);
+        try {
+          const snap = await getDocs(query(
+            collection(db, 'videos'),
+            where('userId', '==', targetId),
+            orderBy('createdAt', 'desc'),
+            startAfter(lastVideoDoc),
+            limit(PAGE_SIZE)
+          ));
+          setUserVideos(prev => [
+            ...prev,
+            ...snap.docs.map(d => ({
+              id: d.id,
+              ...d.data(),
+              thumbnailUrl: d.data().thumbnail || d.data().thumbnailUrl || null,
+            })),
+          ]);
+          setLastVideoDoc(snap.docs[snap.docs.length - 1] || null);
+          setHasMoreVideos(snap.docs.length === PAGE_SIZE);
+        } catch (e) {
+          await logError(LOG_CONTEXT.PROFILE_FAIL, e, targetId);
+        } finally {
+          setLoadingMoreVideos(false);
+        }
+      }, [loadingMoreVideos, hasMoreVideos, lastVideoDoc, isOwn, authUser?.uid, userId]);
+
+  const handleGridScroll = useCallback(({ nativeEvent }) => {
+    if (activeTab !== 'clips') return;
+    const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 300) {
+      loadMoreVideos();
+    }
+  }, [activeTab, loadMoreVideos]);
 
   // Tabs visible depend on account type:
   // - gamer      → Clips, Infos (no Fanbase, no Tips)
@@ -560,8 +749,15 @@ export default function ProfileScreen({ navigation, route }) {
   const containerBgColor = (_bg && _bg.id !== 'bg_none' && _bg.colors?.[0]) ? _bg.colors[0] : '#080810';
   const accentBgColor = _bg ? (_bg.colors?.[ _bg.colors.length - 1] || _bg.colors?.[0]) : null;
 
+  // Detect equipped theme for animated borders
+  const equippedThemeId = user?.equippedTheme || THEME_BG_MAP[_bgId] || null;
+  const themeGlowColor  = THEME_COLORS_MAP[equippedThemeId] || null;
+
   return (
     <View style={[styles.container, { backgroundColor: containerBgColor }]}>
+      {/* Animated theme border */}
+      {themeGlowColor && <ThemeBorderEffect color={themeGlowColor} />}
+
       {/* Accent circles — fixed position below banner */}
       {accentBgColor && (
         <View style={{ position: 'absolute', top: BANNER_H + (Platform.OS === 'ios' ? 54 : 30), left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}>
@@ -642,20 +838,20 @@ export default function ProfileScreen({ navigation, route }) {
 ) : <View style={{ width: 22 }} />}
         <Text style={styles.headerTitle}>{user?.username || 'Profile'}</Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity onPress={() => setShowQR(true)} style={{ marginRight: 14 }}>
-            <Ionicons name="qr-code-outline" size={22} color={COLORS.white} />
+          <TouchableOpacity onPress={() => setShowQR(true)} style={styles.headerIconBtn}>
+            <Ionicons name="qr-code-outline" size={20} color={COLORS.white} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={handleShare} style={{ marginRight: 14 }}>
-            <Ionicons name="share-outline" size={22} color={COLORS.white} />
+          <TouchableOpacity onPress={handleShare} style={styles.headerIconBtn}>
+            <Ionicons name="share-outline" size={20} color={COLORS.white} />
           </TouchableOpacity>
           {isOwn && (
-            <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
-              <Ionicons name="settings-outline" size={22} color={COLORS.white} />
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')} style={styles.headerIconBtn}>
+              <Ionicons name="settings-outline" size={20} color={COLORS.white} />
             </TouchableOpacity>
           )}
           {isOwn && isCreator && (
-            <TouchableOpacity onPress={() => navigation.navigate('Earnings')} style={{ marginLeft: 8 }}>
-              <Ionicons name="cash-outline" size={22} color={COLORS.gold} />
+            <TouchableOpacity onPress={() => navigation.navigate('Earnings')} style={styles.headerIconBtn}>
+              <Ionicons name="cash-outline" size={20} color={COLORS.gold} />
             </TouchableOpacity>
           )}
           {!isOwn && userId && (
@@ -663,7 +859,12 @@ export default function ProfileScreen({ navigation, route }) {
               onPress={() => Alert.alert(
                 `@${user?.username}`,
                 '',
-                [
+                isGuest
+                  ? [
+                      { text: 'Report User', onPress: () => guestGuard(() => navigation.navigate('Report', { target: user, targetType: 'profile' })) },
+                      { text: 'Cancel', style: 'cancel' },
+                    ]
+                  : [
                   { text: 'Report User', onPress: () => navigation.navigate('Report', { target: user, targetType: 'profile' }) },
                   { text: (userProfile?.blockedUsers || []).includes(userId) ? 'Unblock User' : 'Block User', style: 'destructive', onPress: async () => {
                     const isBlocked = (userProfile?.blockedUsers || []).includes(userId);
@@ -690,9 +891,9 @@ export default function ProfileScreen({ navigation, route }) {
                   { text: 'Cancel', style: 'cancel' },
                 ]
               )}
-              style={{ marginLeft: 8 }}
+              style={styles.headerIconBtn}
             >
-              <Ionicons name="ellipsis-horizontal" size={22} color={COLORS.white} />
+              <Ionicons name="ellipsis-horizontal" size={20} color={COLORS.white} />
             </TouchableOpacity>
           )}
         </View>
@@ -717,21 +918,21 @@ export default function ProfileScreen({ navigation, route }) {
               const accentColor = banner.colors?.[banner.colors.length - 1] || '#C9A84C';
               return (
                 <>
-                  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: accentColor, opacity: 0.9 }} />
+                  {/* Ambient color blobs */}
                   <View style={{ position: 'absolute', right: -30, top: -30, width: 120, height: 120, borderRadius: 60, backgroundColor: accentColor, opacity: 0.2 }} />
                   <View style={{ position: 'absolute', left: -20, bottom: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: accentColor, opacity: 0.12 }} />
-                  <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1.5, backgroundColor: accentColor, opacity: 0.5 }} />
                   <Text style={[styles.bannerBg, { color: accentColor }]}>GA</Text>
+                  {/* Animated glow — shimmer + pulsing edges */}
+                  <BannerGlowEffect color={accentColor} />
                 </>
               );
             }
             return <Text style={styles.bannerBg}>GA</Text>;
           })()}
-          {user?.isChampion && <ElectricBanner width={SW} height={BANNER_H} />}
-          {(user?.isChampion || user?.isCurrentLeader) && (
-            <View style={{ position: 'absolute', top: 10, right: 12 }}>
-              {user?.isChampion ? <ChampionBadge /> : <LeaderBadge />}
-            </View>
+          {user?.isChampion && !EXCLUDED_ACCOUNT_TYPES.includes(user?.accountType) && <ElectricBanner width={SW} height={BANNER_H} />}
+          {/* Theme shimmer overlay on banner */}
+          {themeGlowColor && (
+            <BannerThemeShimmer color={themeGlowColor} width={SW} height={BANNER_H} />
           )}
         </View>
 
@@ -768,7 +969,7 @@ export default function ProfileScreen({ navigation, route }) {
             ) : (
               <View style={styles.ownActions}>
                 <TouchableOpacity
-  onPress={() => toggleFollow(authUser?.uid, userId || user?.uid, userProfile?.username)}
+  onPress={() => guestGuard(() => toggleFollow(authUser?.uid, userId || user?.uid, userProfile?.username))}
   style={[styles.followBtn, isFollowing(userId) && { backgroundColor: 'transparent', borderColor: COLORS.gray3 }]}
 >
   <Text style={[styles.followBtnText, isFollowing(userId) && { color: COLORS.gray }]}>
@@ -776,7 +977,7 @@ export default function ProfileScreen({ navigation, route }) {
   </Text>
 </TouchableOpacity>
 <TouchableOpacity
-  onPress={async () => {
+  onPress={() => guestGuard(async () => {
     const bellId = `${authUser?.uid}_${userId}`;
     const bellRef = doc(db, 'bells', bellId);
     if (bellActive) {
@@ -790,20 +991,20 @@ export default function ProfileScreen({ navigation, route }) {
       });
       setBellActive(true);
     }
-  }}
+  })}
   style={[styles.bellBtn, bellActive && { borderColor: COLORS.gold, backgroundColor: 'rgba(201,168,76,0.12)' }]}
 >
   <Ionicons name={bellActive ? 'notifications' : 'notifications-outline'} size={16} color={bellActive ? COLORS.gold : COLORS.gray} />
 </TouchableOpacity>
                 {isCreator && (
                   <TouchableOpacity
-                    onPress={() => {
+                    onPress={() => guestGuard(() => {
                       if (isSubscribed) {
                         navigation.navigate('FanbaseContent', { creator: user });
                       } else {
                         navigation.navigate('Fanbase', { creator: user });
                       }
-                    }}
+                    })}
                     style={[styles.fanbaseBtn, isSubscribed && { borderColor: GREEN, backgroundColor: 'rgba(0,200,83,0.08)' }]}
                   >
                     <Ionicons name={isSubscribed ? 'lock-open' : 'lock-closed'} size={14} color={isSubscribed ? GREEN : COLORS.blue} />
@@ -836,7 +1037,7 @@ export default function ProfileScreen({ navigation, route }) {
             {user?.plan === 'legendary' && <View style={styles.legBadge}><Text style={styles.legBadgeText}>LEGENDARY</Text></View>}
             {user?.accountType === 'gameconic' && <View style={[styles.legBadge, { backgroundColor: COLORS.red }]}><Text style={styles.legBadgeText}>GAMECONIC</Text></View>}
             {user?.accountType === 'creator' && <View style={[styles.legBadge, { backgroundColor: COLORS.blue }]}><Text style={[styles.legBadgeText, { color: COLORS.dark }]}>CREATOR</Text></View>}
-            {user?.isChampion ? <ChampionBadge /> : user?.isCurrentLeader ? <LeaderBadge /> : null}
+            {!EXCLUDED_ACCOUNT_TYPES.includes(user?.accountType) && (user?.isChampion ? <ChampionBadge /> : user?.isCurrentLeader ? <LeaderBadge /> : null)}
           </View>
           {/* Profile Badge / Title cosmétique */}
           {(() => {
@@ -860,11 +1061,11 @@ export default function ProfileScreen({ navigation, route }) {
 
           {/* Stats */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
-          <TouchableOpacity onPress={() => navigation.navigate('Followers', { userId: user?.uid })} style={[styles.stat, { backgroundColor: tc.statBg, borderColor: tc.statBorder }]}>
+          <TouchableOpacity onPress={() => guestGuard(() => navigation.navigate('Followers', { userId: user?.uid }))} style={[styles.stat, { backgroundColor: tc.statBg, borderColor: tc.statBorder }]}>
               <Text style={[styles.statNum, { color: tc.primary }]}>{user?.followers || 0}</Text>
               <Text style={[styles.statLabel, { color: tc.secondary }]}>Followers</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('Following', { userId: user?.uid })} style={[styles.stat, { backgroundColor: tc.statBg, borderColor: tc.statBorder }]}>
+            <TouchableOpacity onPress={() => guestGuard(() => navigation.navigate('Following', { userId: user?.uid }))} style={[styles.stat, { backgroundColor: tc.statBg, borderColor: tc.statBorder }]}>
               <Text style={[styles.statNum, { color: tc.primary }]}>{user?.following || 0}</Text>
               <Text style={[styles.statLabel, { color: tc.secondary }]}>Following</Text>
             </TouchableOpacity>
@@ -916,11 +1117,17 @@ export default function ProfileScreen({ navigation, route }) {
         style={{ flex: 1 }}
         contentContainerStyle={{ flexGrow: 1 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} />}
+        onScroll={handleGridScroll}
+        scrollEventThrottle={400}
       >
         {/* CLIPS */}
         {activeTab === 'clips' && (
           <View style={styles.grid}>
-            {userVideos.filter(v => (v.contentType === 'clip' || !v.contentType) && (isOwn || (!v.restricted && !v.banned))).length === 0 ? (
+            {videosLoading ? (
+              <View style={styles.emptyTab}>
+                <ActivityIndicator size="small" color={COLORS.gold} />
+              </View>
+            ) : userVideos.filter(v => (v.contentType === 'clip' || !v.contentType) && (isOwn || (!v.restricted && !v.banned))).length === 0 ? (
               <View style={styles.emptyTab}>
                 <Ionicons name="game-controller-outline" size={40} color={COLORS.gray2} />
                 <Text style={styles.emptyTabText}>No clips yet</Text>
@@ -975,6 +1182,10 @@ export default function ProfileScreen({ navigation, route }) {
               </TouchableOpacity>
             ))}
           </View>
+        )}
+        {/* End-of-list indicator inside scroll */}
+        {activeTab === 'clips' && !hasMoreVideos && userVideos.length > 0 && (
+          <Text style={{ textAlign: 'center', color: COLORS.gray2, paddingVertical: 20, fontSize: 11, letterSpacing: 3 }}>• • •</Text>
         )}
 
         {/* TIPS */}
@@ -1154,6 +1365,14 @@ export default function ProfileScreen({ navigation, route }) {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* ─── Sticky load-more banner (always visible regardless of scroll position) ─── */}
+      {activeTab === 'clips' && loadingMoreVideos && (
+        <View style={styles.loadMoreBanner}>
+          <ActivityIndicator size="small" color={COLORS.gold} />
+          <Text style={styles.loadMoreText}>Chargement…</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -1162,7 +1381,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#080810' }, // overridden dynamically
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 10, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   headerTitle: { fontSize: 16, fontWeight: '800', color: COLORS.white, letterSpacing: 0.5 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerIconBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(0,0,0,0.50)', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
   banner: { width: '100%', height: BANNER_H + (Platform.OS === 'ios' ? 54 : 30), backgroundColor: '#0d0820', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', zIndex: 2 },
   bannerBg: { fontSize: 80, fontWeight: '900', color: COLORS.gold, opacity: 0.04, letterSpacing: 10 },
   infoSection: { paddingHorizontal: 14, paddingTop: 0, paddingBottom: 8, backgroundColor: 'transparent' },
@@ -1200,6 +1420,8 @@ const styles = StyleSheet.create({
   thumbGGText: { fontSize: 8, color: COLORS.gold, fontWeight: '800' },
   thumbViews: { position: 'absolute', bottom: 4, right: 4, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
   thumbViewsText: { fontSize: 8, color: COLORS.white, fontWeight: '700', marginLeft: 2 },
+  loadMoreBanner: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, backgroundColor: 'rgba(8,8,16,0.92)', borderTopWidth: 0.5, borderTopColor: 'rgba(201,168,76,0.25)', gap: 8 },
+  loadMoreText: { fontSize: 11, color: COLORS.gold, fontWeight: '700', letterSpacing: 0.3 },
   emptyTab: { alignItems: 'center', paddingTop: 60, paddingBottom: 20, width: '100%' },
   emptyTabText: { fontSize: 14, color: COLORS.gray, marginTop: 12, textAlign: 'center', paddingHorizontal: 40, lineHeight: 20 },
   fanbaseJoinBtn: { marginTop: 12, paddingHorizontal: 24, paddingVertical: 13, backgroundColor: COLORS.blue, borderRadius: 22 },

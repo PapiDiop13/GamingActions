@@ -19,7 +19,7 @@
 import {
   collection, addDoc, serverTimestamp,
   query, where, orderBy, getDocs, limit,
-  doc, setDoc, increment, getDoc,
+  doc, setDoc, increment,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
@@ -177,23 +177,14 @@ export async function logError(context, e, userId = null) {
 
     // 2. Aggregated counter — key = context with "/" replaced by "_"
     //    (Firestore doc IDs cannot contain "/")
+    // Atomic increment with merge avoids TOCTOU race when concurrent errors
+    // both read count:0 and both write count:1.
     const counterRef = doc(db, 'errorCounters', context.replace(/\//g, '_'));
-    const snap = await getDoc(counterRef);
-    if (snap.exists()) {
-      await setDoc(counterRef, {
-        context,
-        count:    increment(1),
-        lastSeen: serverTimestamp(),
-      }, { merge: true });
-    } else {
-      // First occurrence — record firstSeen for trend analysis
-      await setDoc(counterRef, {
-        context,
-        count:      1,
-        firstSeen:  serverTimestamp(),
-        lastSeen:   serverTimestamp(),
-      });
-    }
+    await setDoc(counterRef, {
+      context,
+      count:    increment(1),
+      lastSeen: serverTimestamp(),
+    }, { merge: true });
   } catch (_) {
     // Silently swallow — logging must never trigger an infinite error loop
   }
@@ -217,20 +208,26 @@ export async function fetchPeriodStats(period = 'today') {
   }
 
   try {
+    // For 'total' (no date filter), use limit to avoid full collection scan timeout
     const baseQ = (col) => from
       ? query(collection(db, col), where('createdAt', '>=', from), orderBy('createdAt', 'desc'))
-      : query(collection(db, col), orderBy('createdAt', 'desc'));
+      : query(collection(db, col), limit(5000));
+
+    // safeGet — one failing query doesn't null the whole result
+    const safeGet = async (q) => { try { return await getDocs(q); } catch(_) { return { size: 0, docs: [] }; } };
 
     const [usersSnap, videosSnap, ggsSnap, errorsSnap, logsSnap] = await Promise.all([
-      getDocs(baseQ('users')),
-      getDocs(baseQ('videos')),
-      getDocs(baseQ('ggs')),
-      getDocs(query(collection(db, 'errorLogs'),
+      safeGet(baseQ('users')),
+      safeGet(baseQ('videos')),
+      safeGet(baseQ('ggs')),
+      safeGet(query(collection(db, 'errorLogs'),
         ...(from ? [where('createdAt', '>=', from)] : []),
-        orderBy('createdAt', 'desc'), limit(200))),
-      getDocs(query(collection(db, 'appLogs'),
+        ...(from ? [orderBy('createdAt', 'desc')] : []),
+        limit(200))),
+      safeGet(query(collection(db, 'appLogs'),
         ...(from ? [where('createdAt', '>=', from)] : []),
-        orderBy('createdAt', 'desc'), limit(200))),
+        ...(from ? [orderBy('createdAt', 'desc')] : []),
+        limit(200))),
     ]);
 
     // Count upload success/fail from respective collections

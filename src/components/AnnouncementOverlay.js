@@ -5,12 +5,17 @@ import { db } from '../config/firebase';
 import { COLORS } from '../constants/colors';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const IMG_W = SW - 24 * 2 - 20 * 2; // largeur dispo dans la card
+const CARD_PADDING = 16;
+const CARD_H_MAX = SH * 0.92;
+const BTN_H = 52;      // paddingVertical 14 * 2 + fontSize ~24
+const INNER_W = SW - 48 - CARD_PADDING * 2; // backdrop padding 24*2, card padding 16*2
 
 export default function AnnouncementOverlay() {
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState(null);
-  const [imgSize, setImgSize] = useState({ width: IMG_W, height: 180 });
+  // aspect ratio de l'image (largeur / hauteur), défaut 16:9
+  const [imgAspect, setImgAspect] = useState(16 / 9);
+  const [imgReady, setImgReady] = useState(false);
 
   useEffect(() => { checkAnnouncement(); }, []);
 
@@ -21,38 +26,50 @@ export default function AnnouncementOverlay() {
         const d = snap.data();
         if (d.active) {
           setData(d);
-          setVisible(true);
-          // Récupère les dimensions réelles de l'image pour adapter le ratio
           if (d.imageUrl) {
             Image.getSize(
               d.imageUrl,
               (w, h) => {
-                const ratio = h / w;
-                const displayW = IMG_W;
-                // max 70% écran pour images portrait, sinon ratio naturel
-                const displayH = Math.min(displayW * ratio, SH * 0.70);
-                setImgSize({ width: displayW, height: displayH });
+                setImgAspect(w / h);
+                setImgReady(true);
+                setVisible(true);
               },
-              () => setImgSize({ width: IMG_W, height: IMG_W * 0.6 })
+              () => {
+                setImgAspect(16 / 9);
+                setImgReady(true);
+                setVisible(true);
+              }
             );
+          } else {
+            setVisible(true);
           }
         }
       }
-    } catch(e){}
+    } catch(e) {}
   };
 
   if (!visible || !data) return null;
+
+  // Hauteur max disponible pour l'image : card max - paddings - bouton - marges
+  const maxImgH = CARD_H_MAX - CARD_PADDING * 2 - BTN_H - 16 - (data.title ? 40 : 0) - (data.message ? 50 : 0) - 16;
+  // Hauteur naturelle de l'image à la largeur disponible
+  const naturalH = INNER_W / imgAspect;
+  const imgH = Math.min(naturalH, maxImgH, SH * 0.68);
 
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
       <View style={s.backdrop}>
         <View style={s.card}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 10 }}>
-            {data.imageUrl ? (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 8 }}
+            bounces={false}
+          >
+            {data.imageUrl && imgReady ? (
               <Image
                 source={{ uri: data.imageUrl }}
-                style={[s.image, { width: imgSize.width, height: imgSize.height }]}
-                resizeMode="contain"
+                style={{ width: INNER_W, height: imgH, borderRadius: 12, marginBottom: 14, alignSelf: 'center' }}
+                resizeMode="cover"
               />
             ) : null}
             {data.title ? <Text style={s.title}>{data.title}</Text> : null}
@@ -68,9 +85,8 @@ export default function AnnouncementOverlay() {
 }
 
 const s = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card: { backgroundColor: '#141420', borderRadius: 20, padding: 20, width: '100%', maxHeight: SH * 0.82, borderWidth: 0.5, borderColor: COLORS.gold + '40' },
-  image: { borderRadius: 12, marginBottom: 16, alignSelf: 'center' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  card: { backgroundColor: '#141420', borderRadius: 20, padding: CARD_PADDING, width: '100%', maxHeight: CARD_H_MAX, borderWidth: 0.5, borderColor: COLORS.gold + '40' },
   title: { fontSize: 22, fontWeight: '900', color: COLORS.white, textAlign: 'center', marginBottom: 10 },
   message: { fontSize: 14, color: COLORS.gray, textAlign: 'center', lineHeight: 21, marginBottom: 16 },
   btn: { backgroundColor: COLORS.gold, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 8 },

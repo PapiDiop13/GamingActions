@@ -21,13 +21,11 @@ export default function useGuestGuard(navigation) {
       'Rejoins Gaming Actions 🎮',
       'Crée un compte gratuit pour GG, commenter, uploader tes clips et bien plus.',
       [
-        { text: 'Pas maintenant', style: 'cancel' },
+        { text: 'Mode visiteur', style: 'cancel' },
         {
           text: 'Créer un compte',
-          onPress: () => {
-            exitGuest();
-            navigation?.navigate('Auth');
-          },
+          // exitGuest() triggers AppNavigator re-render → AuthNavigator shown automatically
+          onPress: () => exitGuest(),
         },
       ]
     );

@@ -123,7 +123,7 @@ export async function restorePurchases(userId) {
     // Restore frames
     const frames = customerInfo.nonSubscriptionTransactions
       ?.filter(t => t.productIdentifier.includes('frame_'))
-      ?.map(t => t.productIdentifier.replace('com.gamingactions.app.frame_', '').replace('frame_', ''))
+      ?.map(t => t.productIdentifier.replace('com.gamingactions.app.frame_', '').replace(/^frame_/, ''))
       || [];
     if (frames.length) {
       for (const f of frames) {

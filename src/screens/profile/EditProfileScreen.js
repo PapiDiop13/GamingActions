@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Platform, Alert, Image, ActivityIndicator, Dimensions, Switch,
@@ -32,6 +32,7 @@ const CONSOLES = ['PS5', 'PS4', 'Xbox', 'PC', 'Switch', 'Mobile'];
 
 export default function EditProfileScreen({ navigation }) {
   const { user, userProfile, saveProfile } = useAuthStore();
+  const isAdmin = useMemo(() => !!userProfile?.isAdmin, [userProfile?.isAdmin]);
 
   const [username, setUsername] = useState(userProfile?.username || '');
   const [bio, setBio] = useState(userProfile?.bio || '');
@@ -110,12 +111,12 @@ export default function EditProfileScreen({ navigation }) {
   };
 
   const handleSave = async () => {
-    if (!username.trim()) return Alert.alert('Error', 'G is required.');
-    // Vérifie l'unicité du G seulement si changé
+    if (!username.trim()) return Alert.alert('Error', 'GamerTag is required.');
+    // Vérifie l'unicité du GamerTag seulement si changé
     if (username.trim().toUpperCase() !== (userProfile?.username || '').toUpperCase()) {
       try {
         const snap = await getDocs(query(collection(db, 'users'), where('username', '==', username.trim().toUpperCase())));
-        if (!snap.empty) return Alert.alert('G already taken', 'This G is already used by someone else — choose another one.');
+        if (!snap.empty) return Alert.alert('GamerTag already taken', 'This GamerTag is already used by someone else — choose another one.');
       } catch (e) {}
     }
     setLoading(true);
@@ -212,16 +213,17 @@ export default function EditProfileScreen({ navigation }) {
 
         {/* Username */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>USERNAME</Text>
+          <Text style={styles.sectionLabel}>USERNAME (GAMERTAG)</Text>
           <TextInput
             value={username}
             onChangeText={setUsername}
-            style={styles.input}
+            style={[styles.input, { fontSize: SW < 375 ? 13 : 14 }]}
             placeholderTextColor={COLORS.gray}
-            maxLength={20}
+            maxLength={14}
             autoCapitalize="characters"
+            scrollEnabled
           />
-          <Text style={styles.hint}>20 chars max · Unique</Text>
+          <Text style={[styles.hint, { textAlign: 'right' }]}>{username.length}/14 · Unique</Text>
         </View>
 
         {/* Bio */}
@@ -379,14 +381,20 @@ export default function EditProfileScreen({ navigation }) {
         {/* Plan */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>SUBSCRIPTION PLAN</Text>
-          <TouchableOpacity style={styles.planRow} onPress={() => navigation.navigate('Subscription')}>
+          <TouchableOpacity
+            style={[styles.planRow, !isAdmin && { opacity: 0.6 }]}
+            onPress={() => isAdmin ? navigation.navigate('Subscription') : null}
+            activeOpacity={isAdmin ? 0.7 : 1}
+          >
             <View style={[styles.planBadge, { backgroundColor: userProfile?.plan === 'legendary' ? COLORS.gold : COLORS.gray3 }]}>
               <Text style={[styles.planBadgeText, { color: userProfile?.plan === 'legendary' ? COLORS.black : COLORS.gray }]}>
                 {userProfile?.plan === 'legendary' ? '⭐ LEGENDARY' : 'FREE'}
               </Text>
             </View>
             <Text style={styles.planUpgrade}>
-              {userProfile?.plan === 'legendary' ? 'Manage plan →' : 'Upgrade to Legendary →'}
+              {isAdmin
+                ? (userProfile?.plan === 'legendary' ? 'Manage plan →' : 'Upgrade to Legendary →')
+                : '🔒 Coming soon'}
             </Text>
           </TouchableOpacity>
         </View>

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import useAuthStore from '../../store/useAuthStore';
 import { COLORS } from '../../constants/colors';
 
 const BENEFITS = [
@@ -20,6 +21,7 @@ const FANBASE_BENEFITS = [
 ];
 
 export default function SubscriptionSuccessScreen({ navigation, route }) {
+  const { user } = useAuthStore();
   const type = route?.params?.type || 'legendary'; // 'legendary' or 'fanbase'
   const creator = route?.params?.creator;
   const isLegendary = type === 'legendary';
@@ -46,7 +48,7 @@ export default function SubscriptionSuccessScreen({ navigation, route }) {
           </Text>
           <View style={[styles.heroBadge, { backgroundColor: color + '18', borderColor: color }]}>
             <Text style={[styles.heroBadgeText, { color }]}>
-              {isLegendary ? '$2.99/month · Cancel anytime' : '$4.99/month · Cancel anytime'}
+              {isLegendary ? 'CA$3.99/month · Cancel anytime' : '$4.99/month · Cancel anytime'}
             </Text>
           </View>
         </View>
@@ -78,7 +80,7 @@ export default function SubscriptionSuccessScreen({ navigation, route }) {
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            onPress={() => navigation.navigate('UserProfile', { userId: 'me' })}
+            onPress={() => navigation.navigate('UserProfile', { userId: user?.uid })}
             style={[styles.primaryBtn, { backgroundColor: isLegendary ? COLORS.gold : COLORS.card, marginTop: 10 }]}
           >
             <Ionicons name="person-outline" size={18} color={isLegendary ? COLORS.black : COLORS.white} />

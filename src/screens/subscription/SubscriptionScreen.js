@@ -13,9 +13,8 @@ import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import { db } from '../../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { activateTestLegendary, cancelTestLegendary, purchaseLegendary, restorePurchases } from '../../hooks/useRevenueCat';
+import { activateTestLegendary, cancelTestLegendary } from '../../hooks/useRevenueCat';
 
-const ADMINS = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
 
 const PLANS = [
   {
@@ -92,16 +91,15 @@ function PlanCard({ plan, selected, onSelect }) {
 
 export default function SubscriptionScreen({ navigation }) {
   const { user, userProfile } = useAuthStore();
-  const ADMIN_EMAILS = ['admin@gamingactions.com', 'pdiop08@outlook.fr', 'free08man@gmail.com'];
   const isAdminUser = userProfile?.accountType === 'gameconic' || userProfile?.accountType === 'admin'
-    || userProfile?.isAdmin || ADMIN_EMAILS.includes(user?.email?.toLowerCase());
+    || !!userProfile?.isAdmin;
   const [selectedPlan, setSelectedPlan] = useState('legendary_yearly');
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(false);
   const glowAnim = useRef(new Animated.Value(0)).current;
 
   const isLegendary = userProfile?.plan === 'legendary';
-  const isAdmin = ADMINS.includes(user?.email);
+  const isAdmin = !!userProfile?.isAdmin;
   const gaPoints = typeof userProfile?.gaPoints === 'number' ? userProfile.gaPoints : 0;
 
   useEffect(() => {
@@ -110,10 +108,12 @@ export default function SubscriptionScreen({ navigation }) {
         if (snap.exists()) setSubscription(snap.data());
       });
     }
-    Animated.loop(Animated.sequence([
+    const glowLoop = Animated.loop(Animated.sequence([
       Animated.timing(glowAnim, { toValue: 1, duration: 2000, useNativeDriver: false }),
       Animated.timing(glowAnim, { toValue: 0, duration: 2000, useNativeDriver: false }),
-    ])).start();
+    ]));
+    glowLoop.start();
+    return () => glowLoop.stop();
   }, [user?.uid]);
 
   const handleSubscribe = async () => {
@@ -129,25 +129,11 @@ export default function SubscriptionScreen({ navigation }) {
       setLoading(false);
       return;
     }
-    // Redirige vers le site web pour le paiement Stripe
+    // Bientôt disponible — pas encore actif sur mobile
     Alert.alert(
-      '👑 Go Legendary',
-      'Subscribe via our website for CA$1.99/month.\n\nYour Legendary status will be active instantly in the app after payment.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Subscribe on Web 🌐', onPress: () => {
-          const { Linking } = require('react-native');
-          Linking.openURL('https://gamingactions.app/legendary');
-        }},
-      ]
+      '🚀 Bientôt disponible',
+      "Les abonnements Legendary sur mobile arrivent prochainement.\n\nReste connecté pour ne pas rater la sortie !"
     );
-  };
-
-  const handleRestore = async () => {
-    setLoading(true);
-    const result = await restorePurchases(user?.uid);
-    setLoading(false);
-    Alert.alert(result.isLegendary ? '✅ Restored!' : 'Nothing to restore', result.isLegendary ? 'Your Legendary subscription has been restored.' : 'No previous purchases found.');
   };
 
   const handleTestActivate = () => {
@@ -247,25 +233,14 @@ export default function SubscriptionScreen({ navigation }) {
             <Text style={s.sectionLabel}>CHOOSE YOUR PLAN</Text>
             {PLANS.map(p => <PlanCard key={p.id} plan={p} selected={selectedPlan === p.id} onSelect={setSelectedPlan} />)}
 
-            <View style={s.paymentInfo}>
-              <Ionicons name={Platform.OS === 'ios' ? 'logo-apple' : 'logo-google-playstore'} size={14} color={COLORS.gray} />
-              <Text style={s.paymentInfoText}>
-                {userProfile?.subscriptionSource === 'stripe_web'
-            ? 'Subscribed via gamingactions.app — manage on the website'
-            : Platform.OS === 'ios' ? 'Managed by App Store · Cancel anytime in Settings' : 'Managed by Google Play · Cancel anytime'}
-              </Text>
+            {/* Bientôt disponible — remplace le bouton d'abonnement (conformité Apple) */}
+            <View style={s.comingSoonCard}>
+              <Ionicons name="time-outline" size={20} color={COLORS.gold} />
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={s.comingSoonTitle}>Bientôt disponible sur mobile 🚀</Text>
+                <Text style={s.comingSoonDesc}>Les achats en application arrivent prochainement. Reste connecté !</Text>
+              </View>
             </View>
-
-            <TouchableOpacity onPress={handleSubscribe} style={s.subscribeBtn} disabled={loading}>
-              <Ionicons name="star" size={17} color={COLORS.black} />
-              <Text style={s.subscribeBtnText}>
-                {loading ? 'Processing...' : `Subscribe — ${PLANS.find(p => p.id === selectedPlan)?.priceCAD}${PLANS.find(p => p.id === selectedPlan)?.period}`}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={handleRestore} style={s.restoreBtn}>
-              <Text style={s.restoreBtnText}>Restore purchases</Text>
-            </TouchableOpacity>
 
             {isAdmin && (
               <TouchableOpacity onPress={handleTestActivate} style={s.testBtn}>
@@ -296,8 +271,14 @@ export default function SubscriptionScreen({ navigation }) {
               {[
                 { label: 'Plan',     value: subscription?.productId === 'legendary_yearly' ? 'Legendary Yearly' : 'Legendary Monthly' },
                 { label: 'Status',   value: subscription?.isTest ? '🧪 Test Mode' : '✅ Active' },
-                { label: 'Platform', value: subscription?.platform === 'ios' ? '🍎 App Store' : subscription?.platform === 'test' ? '🧪 Test' : '🤖 Google Play' },
-                { label: 'Renews',   value: periodEnd ? periodEnd.toLocaleDateString() : '—' },
+                { label: 'Plateforme', value:
+                    subscription?.platform === 'ios' ? '🍎 App Store' :
+                    subscription?.platform === 'android' ? '🤖 Google Play' :
+                    subscription?.platform === 'test' ? '🧪 Test' :
+                    (subscription?.platform === 'web' || subscription?.platform === 'stripe' || userProfile?.subscriptionSource === 'stripe_web') ? '🌐 Web' :
+                    '🤖 Google Play'
+                },
+                { label: 'Renouvellement', value: periodEnd ? periodEnd.toLocaleDateString('fr-CA') : '—' },
               ].map((row, i, arr) => (
                 <View key={i} style={[s.subRow, i < arr.length-1 && { borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }]}>
                   <Text style={s.subLabel}>{row.label}</Text>
@@ -305,6 +286,16 @@ export default function SubscriptionScreen({ navigation }) {
                 </View>
               ))}
             </View>
+
+            {/* Message de gestion — modèle Crunchyroll (texte seulement, pas de lien) */}
+            {(subscription?.platform === 'web' || subscription?.platform === 'stripe' || userProfile?.subscriptionSource === 'stripe_web') && (
+              <View style={s.manageInfoCard}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.gray} />
+                <Text style={s.manageInfoText}>
+                  Pour gérer votre abonnement, rendez-vous sur la plateforme où vous l'avez souscrit.
+                </Text>
+              </View>
+            )}
 
             {subscription?.isTest && isAdmin && (
               <TouchableOpacity onPress={handleTestCancel} style={s.cancelBtn}>
@@ -370,4 +361,9 @@ const s = StyleSheet.create({
   subValue: { fontSize: 13, color: COLORS.white, fontWeight: '600' },
   cancelBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: 14, marginTop: 12, paddingVertical: 13, borderRadius: 11, borderWidth: 0.5, borderColor: COLORS.red, gap: 6 },
   cancelBtnText: { fontSize: 13, color: COLORS.red, fontWeight: '700' },
+  comingSoonCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 6, padding: 16, backgroundColor: 'rgba(201,168,76,0.06)', borderRadius: 14, borderWidth: 1, borderColor: COLORS.gold + '40', gap: 0 },
+  comingSoonTitle: { fontSize: 14, fontWeight: '800', color: COLORS.gold, marginBottom: 4 },
+  comingSoonDesc: { fontSize: 11, color: COLORS.gray, lineHeight: 16 },
+  manageInfoCard: { flexDirection: 'row', alignItems: 'flex-start', marginHorizontal: 14, marginTop: 12, padding: 13, backgroundColor: COLORS.card, borderRadius: 11, borderWidth: 0.5, borderColor: COLORS.gray3, gap: 8 },
+  manageInfoText: { flex: 1, fontSize: 12, color: COLORS.gray, lineHeight: 17 },
 });

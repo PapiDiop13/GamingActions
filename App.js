@@ -35,7 +35,7 @@ async function handleDeepLink(url) {
         navigationRef.navigate('Feed', { screen: 'UserProfile', params: { userId: uSnap.data().uid } });
       }
     }
-  } catch (e) {}
+  } catch (e) { console.warn('DeepLink error:', e?.message); }
 }
 
 // ─── Notification tap handler ─────────────────────────────────────────────────
@@ -63,14 +63,31 @@ async function handleNotifNav(data) {
     } else {
       navigationRef.navigate('Feed');
     }
-  } catch (e) {}
+  } catch (e) { console.warn('NotifNav error:', e?.message); }
+}
+
+// ─── Retry navigator mount before cold-start navigation ──────────────────────
+function waitForNavAndNavigate(data, maxAttempts = 10) {
+  let attempts = 0;
+  const tryNav = () => {
+    if (navigationRef.isReady()) {
+      handleNotifNav(data);
+    } else if (attempts < maxAttempts) {
+      attempts++;
+      setTimeout(tryNav, 200);
+    }
+  };
+  setTimeout(tryNav, 200);
 }
 
 export default function App() {
   const init = useAuthStore((state) => state.init);
   const user = useAuthStore((state) => state.user);
 
-  useEffect(() => { init(); loadCustomBannedWords(); }, []);
+  useEffect(() => {
+    init();
+    loadCustomBannedWords();
+  }, []);
 
   useEffect(() => {
     if (user?.uid) {
@@ -99,8 +116,8 @@ export default function App() {
   useEffect(() => {
     Notifications.getLastNotificationResponseAsync().then((response) => {
       if (response?.notification?.request?.content?.data) {
-        // Delay slightly to let the navigator mount
-        setTimeout(() => handleNotifNav(response.notification.request.content.data), 500);
+        // Retry until navigator is ready (avoids fixed 500ms blind delay)
+        waitForNavAndNavigate(response.notification.request.content.data);
       }
     }).catch(() => {});
   }, []);
