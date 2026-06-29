@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPortalSession = exports.createCheckoutSession = exports.stripeWebhook = exports.broadcastPush = exports.onMentionNotif = exports.onVideoCreated = exports.notifYourRank = exports.migrateCloudinaryToMux = exports.muxWebhook = exports.muxGetUploadUrl = exports.exportDuplicates = exports.importVideoUpdates = exports.exportVideos = exports.exportGamesGenres = exports.adminCleanup = exports.reshuffleFeedOrder = exports.checkExpiredSubscriptions = exports.dailyLeaderBonus = exports.decayStreakPoints = exports.updateCurrentLeader = exports.assignMonthlyChampion = exports.notifWeekend = exports.notifRankingHeat = exports.notifUploadNudge = exports.notifInactiveUsers = exports.cleanOrphanData = exports.reconcileUserStats = exports.reconcileGGCounts = exports.onCommentCreated = exports.onVideoDeleted = exports.onFollowWritten = exports.onGGWritten = void 0;
+exports.createCosmeticCheckoutSession = exports.createPortalSession = exports.createCheckoutSession = exports.stripeWebhook = exports.notifRankingChanges = exports.broadcastPush = exports.onMentionNotif = exports.onVideoCreated = exports.notifYourRank = exports.migrateCloudinaryToMux = exports.muxWebhook = exports.muxGetUploadUrl = exports.exportDuplicates = exports.importVideoUpdates = exports.exportVideos = exports.exportGamesGenres = exports.adminCleanup = exports.reshuffleFeedOrder = exports.checkExpiredSubscriptions = exports.dailyLeaderBonus = exports.decayStreakPoints = exports.updateCurrentLeader = exports.assignMonthlyChampion = exports.notifWeekend = exports.notifRankingHeat = exports.notifUploadNudge = exports.notifInactiveUsers = exports.cleanOrphanData = exports.reconcileUserStats = exports.reconcileGGCounts = exports.onCommentCreated = exports.onVideoDeleted = exports.onFollowWritten = exports.onGGWritten = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1771,14 +1771,211 @@ exports.broadcastPush = (0, https_1.onRequest)({ region: "us-central1", timeoutS
     res.status(200).json({ ok: true, sent, failed, total: docs.length });
 });
 // ─────────────────────────────────────────────────────────────────────────────
+// RANKING CHANGE NOTIFICATIONS — Toutes les 15 minutes
+//
+// Détecte les mouvements dans le top 10 et envoie des notifs personnalisées :
+//   - Entrée dans le top 10 → notif immédiate
+//   - Montée de rang → "Tu passes de #X à #Y !"
+//   - Descente de rang → "Quelqu'un te rattrape!"
+//   - Chute hors top 10 → "Tu es sorti du top 10 !"
+//   - Rang 11-20 proches du top 10 → push quotidien de motivation
+//
+// Derniers 3 jours du mois :
+//   - Notif countdown quotidienne avec classement en temps réel au top 20
+//
+// Dernières 3 heures du mois :
+//   - Notif urgente toutes les 15 min au top 15 avec position + écart
+//
+// État stocké dans system/rankingState (top10 précédent)
+// Throttle court : 30-120 min selon le type (évite le flood sur positions stables)
+// ─────────────────────────────────────────────────────────────────────────────
+const RANKING_EXCLUDED = ["creator", "gameconic"];
+/** true si on est dans les N derniers jours du mois */
+function isLastNDaysOfMonth(date, n) {
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    return date.getDate() >= lastDay - n + 1;
+}
+/** true si on est dans les N dernières heures du mois */
+function isLastNHoursOfMonth(date, n) {
+    const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+    return endOfMonth.getTime() - date.getTime() <= n * 60 * 60 * 1000;
+}
+/** Throttle court (minutes) — indépendant du throttle hebdo */
+async function isThrottledMin(userId, type, minutes) {
+    var _a, _b, _c;
+    const key = `${userId}_${type}`;
+    const snap = await db.collection("notifThrottle").doc(key).get();
+    if (!snap.exists)
+        return false;
+    const sentAt = ((_c = (_b = (_a = snap.data()) === null || _a === void 0 ? void 0 : _a.sentAt) === null || _b === void 0 ? void 0 : _b.toMillis) === null || _c === void 0 ? void 0 : _c.call(_b)) || 0;
+    return Date.now() - sentAt < minutes * 60 * 1000;
+}
+exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * * *", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => {
+    var _a, _b;
+    const now = new Date();
+    const isLastDays = isLastNDaysOfMonth(now, 3);
+    const isLastHours = isLastNHoursOfMonth(now, 3);
+    // ── Charge le top 50 et filtre les comptes exclus ──────────────────────
+    const topSnap = await db.collection("users")
+        .orderBy("ggReceived", "desc")
+        .limit(60)
+        .get();
+    const ranked = [];
+    let rankPos = 1;
+    for (const d of topSnap.docs) {
+        const data = d.data();
+        if (RANKING_EXCLUDED.includes(data.accountType))
+            continue;
+        ranked.push({
+            id: d.id, rank: rankPos++,
+            ggReceived: data.ggReceived || 0,
+            username: data.username || "",
+            fcmToken: data.fcmToken || "",
+            accountType: data.accountType || "",
+        });
+        if (ranked.length >= 25)
+            break;
+    }
+    const currentTop10 = ranked.slice(0, 10);
+    // ── État précédent ─────────────────────────────────────────────────────
+    const stateRef = db.collection("system").doc("rankingState");
+    const stateSnap = await stateRef.get();
+    const prevTop10 = stateSnap.exists ? (((_a = stateSnap.data()) === null || _a === void 0 ? void 0 : _a.top10) || []) : [];
+    // ── Détection des changements : utilisateurs DANS le top 10 ─────────────
+    for (const user of currentTop10) {
+        if (!user.fcmToken)
+            continue;
+        const prev = prevTop10.find(p => p.id === user.id);
+        if (!prev) {
+            // Nouvelle entrée dans le top 10
+            if (await isThrottledMin(user.id, "rank_enter10", 60))
+                continue;
+            const above = ranked[user.rank - 2];
+            const gapAbove = above ? above.ggReceived - user.ggReceived : 0;
+            await sendPushNotif(user.fcmToken, "🔥 You entered the Top 10!", `You're #${user.rank}!${gapAbove > 0 ? ` ${gapAbove} GGs from #${user.rank - 1}.` : ""} Keep climbing! 🎯`, { screen: "Rankings" });
+            await setThrottle(user.id, "rank_enter10");
+        }
+        else if (prev.rank > user.rank) {
+            // Montée de rang
+            if (await isThrottledMin(user.id, "rank_up", 30))
+                continue;
+            const title = user.rank === 1
+                ? "🔥 You're #1 LEADER!"
+                : `⬆️ You climbed to #${user.rank}!`;
+            const body = user.rank === 1
+                ? "You just took the crown! Your leader frame is active 👑⚡"
+                : `Up from #${prev.rank} to #${user.rank}! ${user.rank <= 3 ? "You're on the podium! 🏅" : "Keep pushing!"}`;
+            await sendPushNotif(user.fcmToken, title, body, { screen: "Rankings" });
+            await setThrottle(user.id, "rank_up");
+        }
+        else if (prev.rank < user.rank) {
+            // Descente de rang
+            if (await isThrottledMin(user.id, "rank_down", 45))
+                continue;
+            const below = ranked[user.rank]; // juste en dessous
+            const gapBelow = below ? user.ggReceived - below.ggReceived : 0;
+            await sendPushNotif(user.fcmToken, `⚠️ You dropped to #${user.rank}`, `${gapBelow <= 3 ? `Only ${gapBelow} GG${gapBelow !== 1 ? "s" : ""} keeping you here! ` : ""}Post a clip to hold your spot! 🎯`, { screen: "Rankings" });
+            await setThrottle(user.id, "rank_down");
+        }
+    }
+    // ── Utilisateurs qui SORTENT du top 10 ──────────────────────────────────
+    for (const prev of prevTop10) {
+        if (currentTop10.find(u => u.id === prev.id))
+            continue;
+        const userSnap = await db.collection("users").doc(prev.id).get();
+        if (!userSnap.exists)
+            continue;
+        const token = (_b = userSnap.data()) === null || _b === void 0 ? void 0 : _b.fcmToken;
+        if (!token)
+            continue;
+        if (await isThrottledMin(prev.id, "rank_out10", 120))
+            continue;
+        await sendPushNotif(token, "😤 You fell out of the Top 10!", "Someone just passed you. Post a clip NOW to get back in! 🎯", { screen: "Rankings" });
+        await setThrottle(prev.id, "rank_out10");
+    }
+    // ── Rangs 11-20 proches du top 10 : push de motivation (≤20h) ───────────
+    const near = ranked.slice(10, 20);
+    for (const user of near) {
+        if (!user.fcmToken)
+            continue;
+        if (await isThrottledMin(user.id, "near_top10", 60 * 20))
+            continue;
+        const top10Last = currentTop10[currentTop10.length - 1];
+        const gap = top10Last ? top10Last.ggReceived - user.ggReceived : 0;
+        if (gap > 30)
+            continue; // trop loin, pas de notif
+        await sendPushNotif(user.fcmToken, `🎯 Top 10 is within reach! (#${user.rank})`, `Only ${gap} GG${gap !== 1 ? "s" : ""} from the Top 10! One clip can change everything. 🔥`, { screen: "Rankings" });
+        await setThrottle(user.id, "near_top10");
+    }
+    // ── 3 derniers jours du mois : countdown quotidien pour le top 20 ────────
+    if (isLastDays && !isLastHours) {
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const daysLeft = Math.ceil((endOfMonth.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+        for (const user of ranked.slice(0, 20)) {
+            if (!user.fcmToken)
+                continue;
+            if (await isThrottledMin(user.id, "endmonth_day", 60 * 22))
+                continue; // 1 fois/jour
+            const above = ranked[user.rank - 2];
+            const below = ranked[user.rank];
+            const gapAbove = above ? above.ggReceived - user.ggReceived : 0;
+            const gapBelow = below ? user.ggReceived - below.ggReceived : 0;
+            let extra = "";
+            if (user.rank === 1)
+                extra = " Hold your crown! 👑";
+            else if (gapAbove <= 8)
+                extra = ` Only ${gapAbove} GGs from #${user.rank - 1}! 🔥`;
+            else if (gapBelow <= 3)
+                extra = ` #${user.rank + 1} is only ${gapBelow} GGs behind!`;
+            await sendPushNotif(user.fcmToken, `⏳ ${daysLeft} day${daysLeft > 1 ? "s" : ""} left — You're #${user.rank}`, `${user.ggReceived} GGs this month.${extra} Rankings close ${daysLeft === 1 ? "tomorrow" : `in ${daysLeft} days`}!`, { screen: "Rankings" });
+            await setThrottle(user.id, "endmonth_day");
+        }
+    }
+    // ── 3 dernières heures : urgence toutes les 15 min pour le top 15 ────────
+    if (isLastHours) {
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const minLeft = Math.ceil((endOfMonth.getTime() - now.getTime()) / 60000);
+        const hLeft = Math.floor(minLeft / 60);
+        const mLeft = minLeft % 60;
+        const timeStr = hLeft > 0 ? `${hLeft}h${mLeft > 0 ? ` ${mLeft}m` : ""}` : `${minLeft}m`;
+        for (const user of ranked.slice(0, 15)) {
+            if (!user.fcmToken)
+                continue;
+            if (await isThrottledMin(user.id, "endmonth_hour", 14))
+                continue; // toutes les 14 min max
+            const above = ranked[user.rank - 2];
+            const gapAbove = above ? above.ggReceived - user.ggReceived : 0;
+            let title = `🚨 ${timeStr} LEFT THIS MONTH!`;
+            let body;
+            if (user.rank === 1) {
+                body = `You're the LEADER with ${user.ggReceived} GGs! Last push to defend the crown! 👑`;
+            }
+            else if (gapAbove <= 5) {
+                body = `#${user.rank} — only ${gapAbove} GG${gapAbove !== 1 ? "s" : ""} from #${user.rank - 1}! GO NOW!`;
+            }
+            else {
+                body = `You're #${user.rank} — ${timeStr} to climb. Post your last clip! 🎯`;
+            }
+            await sendPushNotif(user.fcmToken, title, body, { screen: "Rankings" });
+            await setThrottle(user.id, "endmonth_hour");
+        }
+    }
+    // ── Sauvegarde du nouvel état ─────────────────────────────────────────────
+    await stateRef.set({
+        top10: currentTop10.map(u => ({ id: u.id, rank: u.rank, ggReceived: u.ggReceived })),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    v2_1.logger.info(`notifRankingChanges: top10 updated | lastDays=${isLastDays} | lastHours=${isLastHours}`);
+});
+// ─────────────────────────────────────────────────────────────────────────────
 // STRIPE WEBHOOK — Gestion des abonnements Legendary via le site web
 // ─────────────────────────────────────────────────────────────────────────────
 const stripe_1 = __importDefault(require("stripe"));
-const STRIPE_PRICE_ID_MONTHLY = "price_1Tmex2097oI4jieSjbbA3ds3";
-const STRIPE_PRICE_ID_YEARLY = "price_1TmfVo097oI4jieSliHF5NNi";
+const STRIPE_PRICE_ID_MONTHLY = process.env.STRIPE_PRICE_ID_MONTHLY || "price_1Tmex2097oI4jieSjbbA3ds3";
+const STRIPE_PRICE_ID_YEARLY = process.env.STRIPE_PRICE_ID_YEARLY || "price_1TmfVo097oI4jieSliHF5NNi";
 // Webhook Stripe — reçoit les événements de paiement
 exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g;
     const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
     const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
     const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
@@ -1836,6 +2033,35 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
                 v2_1.logger.info(`User ${uid} plan updated to ${isActive ? "legendary" : "free"} (${status})`);
                 break;
             }
+            // ── Achat cosmétique one-time ──────────────────────────────────────
+            case "checkout.session.completed": {
+                const session = event.data.object;
+                const itemId = (_c = session.metadata) === null || _c === void 0 ? void 0 : _c.itemId;
+                const firebaseUid = (_d = session.metadata) === null || _d === void 0 ? void 0 : _d.firebaseUid;
+                // Only process cosmetic purchases (not subscriptions)
+                if (!itemId || !firebaseUid || session.mode === "subscription")
+                    break;
+                // Unlock cosmetic for the user
+                const userRef = db.collection("users").doc(firebaseUid);
+                const userSnap = await userRef.get();
+                if (!userSnap.exists)
+                    break;
+                const owned = ((_e = userSnap.data()) === null || _e === void 0 ? void 0 : _e.ownedCosmetics) || [];
+                if (!owned.includes(itemId)) {
+                    await userRef.update({
+                        ownedCosmetics: [...owned, itemId],
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    });
+                }
+                // Mark cosmetic_purchase as fulfilled
+                const purchaseSnap = await db.collection("cosmetic_purchases")
+                    .where("sessionId", "==", session.id).limit(1).get();
+                if (!purchaseSnap.empty) {
+                    await purchaseSnap.docs[0].ref.update({ status: "fulfilled" });
+                }
+                v2_1.logger.info(`Cosmetic ${itemId} unlocked for user ${firebaseUid}`);
+                break;
+            }
             // ── Abonnement annulé ──────────────────────────────────────────────
             case "customer.subscription.deleted": {
                 const sub = event.data.object;
@@ -1864,7 +2090,7 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
                 if (!subId)
                     break;
                 const sub = await stripe.subscriptions.retrieve(subId);
-                const priceId = (_d = (_c = sub.items.data[0]) === null || _c === void 0 ? void 0 : _c.price) === null || _d === void 0 ? void 0 : _d.id;
+                const priceId = (_g = (_f = sub.items.data[0]) === null || _f === void 0 ? void 0 : _f.price) === null || _g === void 0 ? void 0 : _g.id;
                 if (priceId !== STRIPE_PRICE_ID_MONTHLY && priceId !== STRIPE_PRICE_ID_YEARLY)
                     break;
                 const userSnap = await db.collection("users")
@@ -1988,6 +2214,67 @@ exports.createPortalSession = (0, https_1.onRequest)({ cors: true, region: "us-c
     }
     catch (err) {
         v2_1.logger.error("createPortalSession error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Stripe Checkout — Achat one-time d'un cosmétique en dollars (site web)
+// POST body: { uid, email, itemId, itemName, amountCents, successUrl, cancelUrl }
+// ─────────────────────────────────────────────────────────────────────────────
+exports.createCosmeticCheckoutSession = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_SECRET_KEY) {
+        res.status(500).json({ error: "Stripe key not configured" });
+        return;
+    }
+    const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+    if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+    }
+    const { uid, email, itemId, itemName, amountCents, successUrl, cancelUrl } = req.body;
+    if (!uid || !email || !itemId || !amountCents) {
+        res.status(400).json({ error: "uid, email, itemId, amountCents required" });
+        return;
+    }
+    try {
+        // Cherche ou crée le customer Stripe
+        const userRef = db.collection("users").doc(uid);
+        const userDoc = await userRef.get();
+        const userData = userDoc.data() || {};
+        let customerId = userData.stripeCustomerId;
+        if (!customerId) {
+            const customer = await stripe.customers.create({ email, metadata: { firebaseUid: uid } });
+            customerId = customer.id;
+            await userRef.update({ stripeCustomerId: customerId });
+        }
+        const session = await stripe.checkout.sessions.create({
+            customer: customerId,
+            payment_method_types: ["card"],
+            line_items: [{
+                    price_data: {
+                        currency: "cad",
+                        product_data: { name: itemName || itemId, description: `Cosmétique Gaming Actions — ${itemId}` },
+                        unit_amount: Math.round(amountCents),
+                    },
+                    quantity: 1,
+                }],
+            mode: "payment",
+            success_url: successUrl || `https://gamingactions.app/shop?purchased=${itemId}`,
+            cancel_url: cancelUrl || "https://gamingactions.app/shop",
+            metadata: { firebaseUid: uid, itemId },
+        });
+        // Pré-enregistre la commande en attente
+        await db.collection("cosmetic_purchases").add({
+            uid, itemId, amountCents,
+            sessionId: session.id,
+            status: "pending",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        res.status(200).json({ sessionId: session.id, url: session.url });
+    }
+    catch (err) {
+        v2_1.logger.error("createCosmeticCheckoutSession error:", err);
         res.status(500).json({ error: err.message });
     }
 });
