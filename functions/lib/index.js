@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createCosmeticCheckoutSession = exports.createPortalSession = exports.createCheckoutSession = exports.stripeWebhook = exports.notifRankingChanges = exports.broadcastPush = exports.onMentionNotif = exports.onVideoCreated = exports.notifYourRank = exports.migrateCloudinaryToMux = exports.muxWebhook = exports.muxGetUploadUrl = exports.exportDuplicates = exports.importVideoUpdates = exports.exportVideos = exports.exportGamesGenres = exports.adminCleanup = exports.reshuffleFeedOrder = exports.checkExpiredSubscriptions = exports.dailyLeaderBonus = exports.decayStreakPoints = exports.updateCurrentLeader = exports.assignMonthlyChampion = exports.notifWeekend = exports.notifRankingHeat = exports.notifUploadNudge = exports.notifInactiveUsers = exports.cleanOrphanData = exports.reconcileUserStats = exports.reconcileGGCounts = exports.onCommentCreated = exports.onVideoDeleted = exports.onFollowWritten = exports.onGGWritten = void 0;
+exports.cleanupOrphanCosmetics = exports.createFanbaseCheckoutSession = exports.createCosmeticCheckoutSession = exports.createPortalSession = exports.createCheckoutSession = exports.stripeWebhook = exports.notifRankingChanges = exports.broadcastPush = exports.onMentionNotif = exports.onVideoCreated = exports.notifYourRank = exports.migrateCloudinaryToMux = exports.muxWebhook = exports.muxGetUploadUrl = exports.exportDuplicates = exports.importVideoUpdates = exports.exportVideos = exports.exportGamesGenres = exports.adminCleanup = exports.reshuffleFeedOrder = exports.checkExpiredSubscriptions = exports.dailyLeaderBonus = exports.decayStreakPoints = exports.updateCurrentLeader = exports.assignMonthlyChampion = exports.notifWeekend = exports.notifRankingHeat = exports.notifUploadNudge = exports.notifInactiveUsers = exports.cleanOrphanData = exports.reconcileUserStats = exports.reconcileGGCounts = exports.onCommentCreated = exports.onVideoDeleted = exports.onFollowWritten = exports.onGGWritten = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -1975,7 +1975,7 @@ const STRIPE_PRICE_ID_MONTHLY = process.env.STRIPE_PRICE_ID_MONTHLY || "price_1T
 const STRIPE_PRICE_ID_YEARLY = process.env.STRIPE_PRICE_ID_YEARLY || "price_1TmfVo097oI4jieSliHF5NNi";
 // Webhook Stripe — reçoit les événements de paiement
 exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
     const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
     const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
@@ -2041,15 +2041,24 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
                 // Only process cosmetic purchases (not subscriptions)
                 if (!itemId || !firebaseUid || session.mode === "subscription")
                     break;
-                // Unlock cosmetic for the user
+                // Unlock cosmetic for the user — save to the right field based on itemType
+                const itemType = ((_e = session.metadata) === null || _e === void 0 ? void 0 : _e.itemType) || "cosmetic";
+                const fieldMap = {
+                    avatar_frame: "ownedFrames",
+                    video_frame: "ownedVideoFrames",
+                    comment_frame: "ownedCommentFrames",
+                    cosmetic: "ownedCosmetics",
+                    theme: "ownedCosmetics",
+                };
+                const field = fieldMap[itemType] || "ownedCosmetics";
                 const userRef = db.collection("users").doc(firebaseUid);
                 const userSnap = await userRef.get();
                 if (!userSnap.exists)
                     break;
-                const owned = ((_e = userSnap.data()) === null || _e === void 0 ? void 0 : _e.ownedCosmetics) || [];
+                const owned = ((_f = userSnap.data()) === null || _f === void 0 ? void 0 : _f[field]) || [];
                 if (!owned.includes(itemId)) {
                     await userRef.update({
-                        ownedCosmetics: [...owned, itemId],
+                        [field]: [...owned, itemId],
                         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                     });
                 }
@@ -2090,7 +2099,7 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
                 if (!subId)
                     break;
                 const sub = await stripe.subscriptions.retrieve(subId);
-                const priceId = (_g = (_f = sub.items.data[0]) === null || _f === void 0 ? void 0 : _f.price) === null || _g === void 0 ? void 0 : _g.id;
+                const priceId = (_h = (_g = sub.items.data[0]) === null || _g === void 0 ? void 0 : _g.price) === null || _h === void 0 ? void 0 : _h.id;
                 if (priceId !== STRIPE_PRICE_ID_MONTHLY && priceId !== STRIPE_PRICE_ID_YEARLY)
                     break;
                 const userSnap = await db.collection("users")
@@ -2158,6 +2167,16 @@ exports.createCheckoutSession = (0, https_1.onRequest)({ cors: true, region: "us
         const userDoc = await userRef.get();
         const userData = userDoc.data() || {};
         let customerId = userData.stripeCustomerId;
+        // Verify the customer exists in the current Stripe mode (test vs live)
+        if (customerId) {
+            try {
+                await stripe.customers.retrieve(customerId);
+            }
+            catch (e) {
+                // Customer doesn't exist in this mode (e.g. live ID used with test key)
+                customerId = null;
+            }
+        }
         if (!customerId) {
             const customer = await stripe.customers.create({
                 email,
@@ -2201,9 +2220,17 @@ exports.createPortalSession = (0, https_1.onRequest)({ cors: true, region: "us-c
     }
     try {
         const userDoc = await db.collection("users").doc(uid).get();
-        const customerId = (_a = userDoc.data()) === null || _a === void 0 ? void 0 : _a.stripeCustomerId;
+        let customerId = (_a = userDoc.data()) === null || _a === void 0 ? void 0 : _a.stripeCustomerId;
         if (!customerId) {
             res.status(404).json({ error: "No Stripe customer found" });
+            return;
+        }
+        // Verify customer exists in current Stripe mode
+        try {
+            await stripe.customers.retrieve(customerId);
+        }
+        catch (_b) {
+            res.status(404).json({ error: "No active Stripe customer in current mode" });
             return;
         }
         const session = await stripe.billingPortal.sessions.create({
@@ -2232,7 +2259,7 @@ exports.createCosmeticCheckoutSession = (0, https_1.onRequest)({ cors: true, reg
         res.status(405).send("Method Not Allowed");
         return;
     }
-    const { uid, email, itemId, itemName, amountCents, successUrl, cancelUrl } = req.body;
+    const { uid, email, itemId, itemType, itemName, amountCents, successUrl, cancelUrl } = req.body;
     if (!uid || !email || !itemId || !amountCents) {
         res.status(400).json({ error: "uid, email, itemId, amountCents required" });
         return;
@@ -2243,6 +2270,15 @@ exports.createCosmeticCheckoutSession = (0, https_1.onRequest)({ cors: true, reg
         const userDoc = await userRef.get();
         const userData = userDoc.data() || {};
         let customerId = userData.stripeCustomerId;
+        // Verify customer exists in current Stripe mode (test vs live)
+        if (customerId) {
+            try {
+                await stripe.customers.retrieve(customerId);
+            }
+            catch (e) {
+                customerId = null;
+            }
+        }
         if (!customerId) {
             const customer = await stripe.customers.create({ email, metadata: { firebaseUid: uid } });
             customerId = customer.id;
@@ -2262,7 +2298,7 @@ exports.createCosmeticCheckoutSession = (0, https_1.onRequest)({ cors: true, reg
             mode: "payment",
             success_url: successUrl || `https://gamingactions.app/shop?purchased=${itemId}`,
             cancel_url: cancelUrl || "https://gamingactions.app/shop",
-            metadata: { firebaseUid: uid, itemId },
+            metadata: { firebaseUid: uid, itemId, itemType: itemType || "cosmetic" },
         });
         // Pré-enregistre la commande en attente
         await db.collection("cosmetic_purchases").add({
@@ -2277,5 +2313,132 @@ exports.createCosmeticCheckoutSession = (0, https_1.onRequest)({ cors: true, reg
         v2_1.logger.error("createCosmeticCheckoutSession error:", err);
         res.status(500).json({ error: err.message });
     }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Stripe Checkout — Fanbase subscription CA$3.99/month (site web)
+// POST body: { uid, email, creatorId, creatorUsername, successUrl, cancelUrl }
+// ─────────────────────────────────────────────────────────────────────────────
+exports.createFanbaseCheckoutSession = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_SECRET_KEY) {
+        res.status(500).json({ error: "Stripe key not configured" });
+        return;
+    }
+    const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+    if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+    }
+    const { uid, email, creatorId, creatorUsername, successUrl, cancelUrl } = req.body;
+    if (!uid || !email || !creatorId) {
+        res.status(400).json({ error: "uid, email, and creatorId are required" });
+        return;
+    }
+    try {
+        // Cherche ou crée le customer Stripe
+        const userRef = db.collection("users").doc(uid);
+        const userDoc = await userRef.get();
+        const userData = userDoc.data() || {};
+        let customerId = userData.stripeCustomerId;
+        // Verify customer exists in current Stripe mode (test vs live)
+        if (customerId) {
+            try {
+                await stripe.customers.retrieve(customerId);
+            }
+            catch (e) {
+                customerId = null;
+            }
+        }
+        if (!customerId) {
+            const customer = await stripe.customers.create({ email, metadata: { firebaseUid: uid } });
+            customerId = customer.id;
+            await userRef.update({ stripeCustomerId: customerId });
+        }
+        const session = await stripe.checkout.sessions.create({
+            customer: customerId,
+            payment_method_types: ["card"],
+            line_items: [{
+                    price_data: {
+                        currency: "cad",
+                        product_data: {
+                            name: `Fanbase de ${creatorUsername || creatorId}`,
+                            description: `Accès à la fanbase exclusive de ${creatorUsername || creatorId} sur Gaming Actions`,
+                        },
+                        unit_amount: 399, // CA$3.99
+                        recurring: { interval: "month" },
+                    },
+                    quantity: 1,
+                }],
+            mode: "subscription",
+            success_url: successUrl || `https://gamingactions.app/fanbase/${creatorId}?success=true`,
+            cancel_url: cancelUrl || `https://gamingactions.app/fanbase/${creatorId}`,
+            metadata: { firebaseUid: uid, creatorId, type: "fanbase" },
+            subscription_data: {
+                metadata: { firebaseUid: uid, creatorId, type: "fanbase" },
+            },
+        });
+        res.status(200).json({ sessionId: session.id, url: session.url });
+    }
+    catch (err) {
+        v2_1.logger.error("createFanbaseCheckoutSession error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// SCHEDULED — cleanupOrphanCosmetics (daily at 5h UTC)
+// 1. Migrates avatar_frame:* entries from ownedCosmetics → ownedFrames
+// 2. Deduplicates all owned arrays
+// 3. Marks stale cosmetic_purchases (>24h pending) as "abandoned"
+// ─────────────────────────────────────────────────────────────────────────────
+exports.cleanupOrphanCosmetics = (0, scheduler_1.onSchedule)({ schedule: "0 5 * * *", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => {
+    v2_1.logger.info("cleanupOrphanCosmetics: start");
+    let usersFixed = 0;
+    let purchasesAbandoned = 0;
+    // 1. Migrate avatar_frame:* from ownedCosmetics to ownedFrames + deduplicate arrays
+    const usersSnap = await db.collection("users").get();
+    for (const uDoc of usersSnap.docs) {
+        const data = uDoc.data();
+        const ownedCosmetics = data.ownedCosmetics || [];
+        const ownedFrames = data.ownedFrames || [];
+        const ownedVideoFrames = data.ownedVideoFrames || [];
+        const ownedCommentFrames = data.ownedCommentFrames || [];
+        // Find avatar_frame:* entries in ownedCosmetics
+        const frameEntries = ownedCosmetics.filter((c) => c.startsWith("avatar_frame:"));
+        const frameIds = frameEntries.map((c) => c.replace("avatar_frame:", ""));
+        const remainingCosmetics = ownedCosmetics.filter((c) => !c.startsWith("avatar_frame:"));
+        const newOwnedFrames = [...new Set([...ownedFrames, ...frameIds])];
+        const newOwnedCosmetics = [...new Set(remainingCosmetics)];
+        const newOwnedVideoFrames = [...new Set(ownedVideoFrames)];
+        const newOwnedCommentFrames = [...new Set(ownedCommentFrames)];
+        const changed = newOwnedCosmetics.length !== ownedCosmetics.length ||
+            newOwnedFrames.length !== ownedFrames.length ||
+            newOwnedVideoFrames.length !== ownedVideoFrames.length ||
+            newOwnedCommentFrames.length !== ownedCommentFrames.length;
+        if (changed) {
+            await uDoc.ref.update({
+                ownedCosmetics: newOwnedCosmetics,
+                ownedFrames: newOwnedFrames,
+                ownedVideoFrames: newOwnedVideoFrames,
+                ownedCommentFrames: newOwnedCommentFrames,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            usersFixed++;
+            v2_1.logger.info(`cleanupOrphanCosmetics: user ${uDoc.id} fixed — moved ${frameIds.length} frames`);
+        }
+    }
+    // 2. Mark stale pending cosmetic_purchases (>24h) as abandoned
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const stalePurchasesSnap = await db.collection("cosmetic_purchases")
+        .where("status", "==", "pending")
+        .where("createdAt", "<=", oneDayAgo)
+        .get();
+    const batch = db.batch();
+    for (const doc of stalePurchasesSnap.docs) {
+        batch.update(doc.ref, { status: "abandoned", updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        purchasesAbandoned++;
+    }
+    if (purchasesAbandoned > 0)
+        await batch.commit();
+    v2_1.logger.info(`cleanupOrphanCosmetics: done — ${usersFixed} users fixed, ${purchasesAbandoned} purchases abandoned`);
 });
 //# sourceMappingURL=index.js.map
