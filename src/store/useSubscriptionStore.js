@@ -69,13 +69,13 @@ export const PLANS = [
   {
     id: 'legendary_yearly',
     label: 'Yearly',
-    price: 24.99,
-    priceStr: '$24.99',
+    price: 19.99,
+    priceStr: 'CA$19.99',
     period: '/year',
     periodDays: 365,
-    desc: 'Only $2.08/month · Best deal',
-    badge: 'SAVE 30%',
-    saving: 30,
+    desc: 'Only CA$1.67/month · Best deal',
+    badge: 'SAVE 44%',
+    saving: 44,
   },
 ];
 

@@ -1,0 +1,131 @@
+product_id,reference_name,type,price_cad,category,item_id
+com.gamingactions.app.legendary_monthly,Legendary Monthly,Auto-Renewable Subscription,2.99,subscription,legendary_monthly
+com.gamingactions.app.legendary_yearly,Legendary Yearly,Auto-Renewable Subscription,24.99,subscription,legendary_yearly
+com.gamingactions.app.frame_neon_pulse_blue,Avatar Frame - Neon Pulse Blue,Non-Consumable,1.39,avatar_frame,neon_pulse_blue
+com.gamingactions.app.frame_neon_pulse_pink,Avatar Frame - Neon Pulse Pink,Non-Consumable,1.39,avatar_frame,neon_pulse_pink
+com.gamingactions.app.frame_fire_animated,Avatar Frame - Fire 🔥,Non-Consumable,1.39,avatar_frame,fire_animated
+com.gamingactions.app.frame_ice_animated,Avatar Frame - Ice ❄️,Non-Consumable,1.39,avatar_frame,ice_animated
+com.gamingactions.app.frame_galaxy_animated,Avatar Frame - Galaxy 🌌,Non-Consumable,1.99,avatar_frame,galaxy_animated
+com.gamingactions.app.frame_rainbow_animated,Avatar Frame - Rainbow Spin 🌈,Non-Consumable,1.99,avatar_frame,rainbow_animated
+com.gamingactions.app.frame_lightning_animated,Avatar Frame - Lightning ⚡,Non-Consumable,1.99,avatar_frame,lightning_animated
+com.gamingactions.app.frame_void_animated,Avatar Frame - Void King 👁️,Non-Consumable,1.99,avatar_frame,void_animated
+com.gamingactions.app.frame_cosmic_animated,Avatar Frame - Cosmic Power 💫,Non-Consumable,1.99,avatar_frame,cosmic_animated
+com.gamingactions.app.frame_holographic_frame,Avatar Frame - Holographic ✨,Non-Consumable,1.99,avatar_frame,holographic_frame
+com.gamingactions.app.frame_sakura_frame,Avatar Frame - Sakura 🌸,Non-Consumable,1.99,avatar_frame,sakura_frame
+com.gamingactions.app.frame_toxic_pulse_frame,Avatar Frame - Toxic Pulse ☢️,Non-Consumable,1.99,avatar_frame,toxic_pulse_frame
+com.gamingactions.app.frame_blizzard_animated,Avatar Frame - Blizzard ❄️⚡,Non-Consumable,1.99,avatar_frame,blizzard_animated
+com.gamingactions.app.frame_dna_frame,Avatar Frame - DNA Helix 🧬,Non-Consumable,1.99,avatar_frame,dna_frame
+com.gamingactions.app.frame_inferno_animated,Avatar Frame - Inferno 🔥,Non-Consumable,1.99,avatar_frame,inferno_animated
+com.gamingactions.app.frame_blood_moon_frame,Avatar Frame - Blood Moon 🌕,Non-Consumable,1.99,avatar_frame,blood_moon_frame
+com.gamingactions.app.frame_dragon_frame,Avatar Frame - Dragon 🐉,Non-Consumable,2.49,avatar_frame,dragon_frame
+com.gamingactions.app.frame_neon_pulse_orange,Avatar Frame - Neon Orange ⚡,Non-Consumable,1.39,avatar_frame,neon_pulse_orange
+com.gamingactions.app.frame_shimmer_silver,Avatar Frame - Shimmer Silver 🪞,Non-Consumable,1.99,avatar_frame,shimmer_silver
+com.gamingactions.app.frame_shimmer_gold,Avatar Frame - Shimmer Gold ✨,Non-Consumable,1.99,avatar_frame,shimmer_gold
+com.gamingactions.app.frame_shimmer_holo,Avatar Frame - Shimmer Holo 🌈,Non-Consumable,2.49,avatar_frame,shimmer_holo
+com.gamingactions.app.frame_shimmer_aurora,Avatar Frame - Shimmer Aurora 🌌,Non-Consumable,1.99,avatar_frame,shimmer_aurora
+com.gamingactions.app.frame_shimmer_prism,Avatar Frame - Shimmer Prism 🔮,Non-Consumable,2.49,avatar_frame,shimmer_prism
+com.gamingactions.app.frame_shimmer_ice,Avatar Frame - Shimmer Ice ❄️,Non-Consumable,1.99,avatar_frame,shimmer_ice
+com.gamingactions.app.frame_shimmer_void,Avatar Frame - Shimmer Void 🌑,Non-Consumable,1.99,avatar_frame,shimmer_void
+com.gamingactions.app.frame_shimmer_fire,Avatar Frame - Shimmer Fire 🔥,Non-Consumable,1.99,avatar_frame,shimmer_fire
+com.gamingactions.app.frame_shimmer_toxic,Avatar Frame - Shimmer Toxic ☢️,Non-Consumable,1.99,avatar_frame,shimmer_toxic
+com.gamingactions.app.frame_shimmer_cosmic,Avatar Frame - Shimmer Cosmic 💫,Non-Consumable,2.49,avatar_frame,shimmer_cosmic
+com.gamingactions.app.videoframe_vf_fire_animated,Video Frame - Fire Animated 🔥,Non-Consumable,1.39,video_frame,vf_fire_animated
+com.gamingactions.app.videoframe_vf_lightning_animated,Video Frame - Lightning ⚡,Non-Consumable,1.99,video_frame,vf_lightning_animated
+com.gamingactions.app.videoframe_vf_galaxy_animated,Video Frame - Galaxy Animated 🌌,Non-Consumable,1.99,video_frame,vf_galaxy_animated
+com.gamingactions.app.videoframe_vf_rainbow_animated,Video Frame - Rainbow Spin 🌈,Non-Consumable,1.99,video_frame,vf_rainbow_animated
+com.gamingactions.app.videoframe_vf_royal_animated,Video Frame - Royal Gold ✨,Non-Consumable,1.99,video_frame,vf_royal_animated
+com.gamingactions.app.videoframe_vf_cosmic_animated,Video Frame - Cosmic Power 💫,Non-Consumable,1.99,video_frame,vf_cosmic_animated
+com.gamingactions.app.videoframe_vf_holographic_anim,Video Frame - Holographic ✨,Non-Consumable,1.99,video_frame,vf_holographic_anim
+com.gamingactions.app.videoframe_vf_sakura_anim,Video Frame - Sakura 🌸,Non-Consumable,1.99,video_frame,vf_sakura_anim
+com.gamingactions.app.videoframe_vf_toxic_anim,Video Frame - Toxic Pulse ☢️,Non-Consumable,1.99,video_frame,vf_toxic_anim
+com.gamingactions.app.videoframe_vf_shimmer_silver,Video Frame - Shimmer Silver 🪞,Non-Consumable,1.99,video_frame,vf_shimmer_silver
+com.gamingactions.app.videoframe_vf_shimmer_gold,Video Frame - Shimmer Gold ✨,Non-Consumable,1.99,video_frame,vf_shimmer_gold
+com.gamingactions.app.videoframe_vf_shimmer_holo,Video Frame - Shimmer Holo 🌈,Non-Consumable,2.49,video_frame,vf_shimmer_holo
+com.gamingactions.app.videoframe_vf_shimmer_aurora,Video Frame - Shimmer Aurora 🌌,Non-Consumable,1.99,video_frame,vf_shimmer_aurora
+com.gamingactions.app.videoframe_vf_shimmer_prism,Video Frame - Shimmer Prism 🔮,Non-Consumable,2.49,video_frame,vf_shimmer_prism
+com.gamingactions.app.videoframe_vf_shimmer_ice,Video Frame - Shimmer Ice ❄️,Non-Consumable,1.99,video_frame,vf_shimmer_ice
+com.gamingactions.app.videoframe_vf_shimmer_void,Video Frame - Shimmer Void 🌑,Non-Consumable,1.99,video_frame,vf_shimmer_void
+com.gamingactions.app.videoframe_vf_shimmer_fire,Video Frame - Shimmer Fire 🔥,Non-Consumable,1.99,video_frame,vf_shimmer_fire
+com.gamingactions.app.videoframe_vf_shimmer_toxic,Video Frame - Shimmer Toxic ☢️,Non-Consumable,1.99,video_frame,vf_shimmer_toxic
+com.gamingactions.app.videoframe_vf_shimmer_rose,Video Frame - Shimmer Rose 🌸,Non-Consumable,1.99,video_frame,vf_shimmer_rose
+com.gamingactions.app.commentframe_cf_pulse_blue,Comment Frame - Pulse Blue,Non-Consumable,0.99,comment_frame,cf_pulse_blue
+com.gamingactions.app.commentframe_cf_fire_animated,Comment Frame - Fire Animated 🔥,Non-Consumable,0.99,comment_frame,cf_fire_animated
+com.gamingactions.app.commentframe_cf_lightning,Comment Frame - Lightning ⚡,Non-Consumable,1.99,comment_frame,cf_lightning
+com.gamingactions.app.commentframe_cf_rainbow_anim,Comment Frame - Rainbow Spin 🌈,Non-Consumable,1.99,comment_frame,cf_rainbow_anim
+com.gamingactions.app.commentframe_cf_royal_anim,Comment Frame - Royal Gold ✨,Non-Consumable,1.99,comment_frame,cf_royal_anim
+com.gamingactions.app.commentframe_cf_cosmic_anim,Comment Frame - Cosmic 💫,Non-Consumable,1.99,comment_frame,cf_cosmic_anim
+com.gamingactions.app.commentframe_cf_holographic_anim,Comment Frame - Holographic ✨,Non-Consumable,1.99,comment_frame,cf_holographic_anim
+com.gamingactions.app.commentframe_cf_glitch_anim,Comment Frame - Glitch 💻,Non-Consumable,1.49,comment_frame,cf_glitch_anim
+com.gamingactions.app.commentframe_cf_sakura_anim,Comment Frame - Sakura 🌸,Non-Consumable,1.99,comment_frame,cf_sakura_anim
+com.gamingactions.app.commentframe_cf_void_pulse,Comment Frame - Void Pulse 🌑,Non-Consumable,1.99,comment_frame,cf_void_pulse
+com.gamingactions.app.commentframe_cf_toxic_cf,Comment Frame - Toxic ☢️,Non-Consumable,0.99,comment_frame,cf_toxic_cf
+com.gamingactions.app.bg_bg_holographic,Background - Holographic ✨,Non-Consumable,2.99,background,bg_holographic
+com.gamingactions.app.bg_bg_fire_animated,Background - Inferno 🔥,Non-Consumable,1.99,background,bg_fire_animated
+com.gamingactions.app.bg_bg_cosmic,Background - Cosmic Pulse 💫,Non-Consumable,3.99,background,bg_cosmic
+com.gamingactions.app.bg_bg_cherry_bloom,Background - Cherry Bloom 🌸,Non-Consumable,2.99,background,bg_cherry_bloom
+com.gamingactions.app.bg_bg_void_pulse,Background - Void Pulse 🌑,Non-Consumable,3.99,background,bg_void_pulse
+com.gamingactions.app.bg_bg_matrix,Background - Matrix Rain 🔢,Non-Consumable,1.99,background,bg_matrix
+com.gamingactions.app.bg_bg_glacier,Background - Glacier Light 🧊,Non-Consumable,2.99,background,bg_glacier
+com.gamingactions.app.bg_bg_konoha,Background - Clair de Konoha 🌙,Non-Consumable,2.99,background,bg_konoha
+com.gamingactions.app.bg_bg_sunset_ember,Background - Sunset Ember 🌅,Non-Consumable,2.99,background,bg_sunset_ember
+com.gamingactions.app.bg_bg_white_clean,Background - White Clean ⬜,Non-Consumable,1.99,background,bg_white_clean
+com.gamingactions.app.banner_banner_fire_b,Banner - Blazing Banner 🔥,Non-Consumable,1.99,banner,banner_fire_b
+com.gamingactions.app.banner_banner_lightning_b,Banner - Storm Banner ⚡,Non-Consumable,1.99,banner,banner_lightning_b
+com.gamingactions.app.banner_banner_matrix_b,Banner - Matrix Banner 🔢,Non-Consumable,2.99,banner,banner_matrix_b
+com.gamingactions.app.banner_banner_aurora_b,Banner - Aurora Banner 🌌,Non-Consumable,2.99,banner,banner_aurora_b
+com.gamingactions.app.banner_banner_holo_b,Banner - Holo Banner ✨,Non-Consumable,3.99,banner,banner_holo_b
+com.gamingactions.app.banner_banner_glacier_b,Banner - Glacier Banner 🧊,Non-Consumable,2.99,banner,banner_glacier_b
+com.gamingactions.app.banner_banner_konoha_b,Banner - Konoha Banner 🌙,Non-Consumable,2.99,banner,banner_konoha_b
+com.gamingactions.app.banner_banner_sunset_b,Banner - Sunset Banner 🌅,Non-Consumable,2.99,banner,banner_sunset_b
+com.gamingactions.app.banner_banner_white_b,Banner - White Banner ⬜,Non-Consumable,1.99,banner,banner_white_b
+com.gamingactions.app.username_ue_fire_text,Username Effect - Fire Name 🔥,Non-Consumable,0.99,username_effect,ue_fire_text
+com.gamingactions.app.username_ue_lightning_text,Username Effect - Storm Name ⚡,Non-Consumable,1.49,username_effect,ue_lightning_text
+com.gamingactions.app.username_ue_ice_text,Username Effect - Ice Crystal ❄️,Non-Consumable,1.49,username_effect,ue_ice_text
+com.gamingactions.app.username_ue_toxic_anim,Username Effect - Toxic ☢️,Non-Consumable,1.49,username_effect,ue_toxic_anim
+com.gamingactions.app.username_ue_chrome,Username Effect - Chrome ✨,Non-Consumable,1.99,username_effect,ue_chrome
+com.gamingactions.app.username_ue_glitch,Username Effect - Glitch 💻,Non-Consumable,1.99,username_effect,ue_glitch
+com.gamingactions.app.username_ue_mirror,Username Effect - Mirror 🪞,Non-Consumable,1.99,username_effect,ue_mirror
+com.gamingactions.app.username_ue_aurora_text,Username Effect - Aurora ✨,Non-Consumable,1.99,username_effect,ue_aurora_text
+com.gamingactions.app.username_ue_galaxy_text,Username Effect - Galaxy Name 💫,Non-Consumable,1.99,username_effect,ue_galaxy_text
+com.gamingactions.app.username_ue_prism,Username Effect - Prism 🔮,Non-Consumable,2.49,username_effect,ue_prism
+com.gamingactions.app.username_ue_stardust,Username Effect - Stardust 🌟,Non-Consumable,2.49,username_effect,ue_stardust
+com.gamingactions.app.username_ue_sakura_text,Username Effect - Sakura 🌸,Non-Consumable,1.99,username_effect,ue_sakura_text
+com.gamingactions.app.username_ue_holo_text,Username Effect - Holographic 🌈,Non-Consumable,2.49,username_effect,ue_holo_text
+com.gamingactions.app.username_ue_fire_reflet,Username Effect - Fire Reflet 🔥,Non-Consumable,1.99,username_effect,ue_fire_reflet
+com.gamingactions.app.username_ue_void_reflet,Username Effect - Void Reflet 🌑,Non-Consumable,1.99,username_effect,ue_void_reflet
+com.gamingactions.app.username_ue_gold_reflet,Username Effect - Gold Reflet ✨,Non-Consumable,1.99,username_effect,ue_gold_reflet
+com.gamingactions.app.username_ue_ice_reflet,Username Effect - Ice Reflet ❄️,Non-Consumable,1.99,username_effect,ue_ice_reflet
+com.gamingactions.app.username_ue_toxic_reflet,Username Effect - Toxic Reflet ☢️,Non-Consumable,1.99,username_effect,ue_toxic_reflet
+com.gamingactions.app.username_ue_rose_reflet,Username Effect - Rose Gold 🌹,Non-Consumable,1.99,username_effect,ue_rose_reflet
+com.gamingactions.app.username_ue_cosmic_reflet,Username Effect - Cosmic Reflet 💫,Non-Consumable,2.49,username_effect,ue_cosmic_reflet
+com.gamingactions.app.username_ue_lightning_reflet,Username Effect - Thunder Reflet ⚡,Non-Consumable,2.49,username_effect,ue_lightning_reflet
+com.gamingactions.app.username_ue_glacier,Username Effect - Glacier ❄️,Non-Consumable,1.99,username_effect,ue_glacier
+com.gamingactions.app.username_ue_forest_moon,Username Effect - Forest Moon 🌙,Non-Consumable,1.99,username_effect,ue_forest_moon
+com.gamingactions.app.username_ue_ember,Username Effect - Ember 🌅,Non-Consumable,1.99,username_effect,ue_ember
+com.gamingactions.app.card_cb_fire_border,Card Border - Fire Border 🔥,Non-Consumable,0.99,card_border,cb_fire_border
+com.gamingactions.app.card_cb_glitch_b,Card Border - Glitch 💻,Non-Consumable,1.49,card_border,cb_glitch_b
+com.gamingactions.app.card_cb_cherry_b,Card Border - Cherry Blossom 🌸,Non-Consumable,1.99,card_border,cb_cherry_b
+com.gamingactions.app.card_cb_lightning_border,Card Border - Storm Border ⚡,Non-Consumable,0.99,card_border,cb_lightning_border
+com.gamingactions.app.card_cb_void_b,Card Border - Void Energy 🌑,Non-Consumable,1.49,card_border,cb_void_b
+com.gamingactions.app.card_cb_holo_border,Card Border - Holo Border ✨,Non-Consumable,1.99,card_border,cb_holo_border
+com.gamingactions.app.card_cb_holographic_b,Card Border - Holographic 🌈,Non-Consumable,1.99,card_border,cb_holographic_b
+com.gamingactions.app.card_cb_cosmic_b,Card Border - Cosmic 💫,Non-Consumable,1.99,card_border,cb_cosmic_b
+com.gamingactions.app.card_cb_rainbow_spin,Card Border - Rainbow Spin 🌈,Non-Consumable,1.99,card_border,cb_rainbow_spin
+com.gamingactions.app.card_cb_glacier_b,Card Border - Glacier ❄️,Non-Consumable,1.49,card_border,cb_glacier_b
+com.gamingactions.app.card_cb_konoha_b,Card Border - Forest Moon 🌙,Non-Consumable,1.49,card_border,cb_konoha_b
+com.gamingactions.app.card_cb_ember_b,Card Border - Ember 🌅,Non-Consumable,1.49,card_border,cb_ember_b
+com.gamingactions.app.theme_theme_champion,Theme - Champion\,Non-Consumable,4.99,theme,theme_champion
+com.gamingactions.app.theme_theme_phantom,Theme - Phantom Protocol 👻,Non-Consumable,4.99,theme,theme_phantom
+com.gamingactions.app.theme_theme_inferno,Theme - Inferno Mode 🔥,Non-Consumable,5.99,theme,theme_inferno
+com.gamingactions.app.theme_theme_storm,Theme - Storm Chaser ⚡,Non-Consumable,5.99,theme,theme_storm
+com.gamingactions.app.theme_theme_cosmic,Theme - Cosmic Entity 💫,Non-Consumable,7.99,theme,theme_cosmic
+com.gamingactions.app.theme_theme_matrix,Theme - The One 🔢,Non-Consumable,6.99,theme,theme_matrix
+com.gamingactions.app.theme_theme_sakura,Theme - Sakura Dreams 🌸,Non-Consumable,5.99,theme,theme_sakura
+com.gamingactions.app.theme_theme_cyber,Theme - Cyber Punk 💻,Non-Consumable,6.99,theme,theme_cyber
+com.gamingactions.app.theme_theme_arctic,Theme - Arctic Storm ❄️,Non-Consumable,5.99,theme,theme_arctic
+com.gamingactions.app.theme_theme_void_walker,Theme - Void Walker 🌑,Non-Consumable,6.99,theme,theme_void_walker
+com.gamingactions.app.theme_theme_neon_city,Theme - Neon City 🌆,Non-Consumable,6.99,theme,theme_neon_city
+com.gamingactions.app.theme_theme_white,Theme - White Clean ⬜,Non-Consumable,4.99,theme,theme_white
+com.gamingactions.app.theme_theme_glacier,Theme - Glacier Light 🧊,Non-Consumable,5.99,theme,theme_glacier
+com.gamingactions.app.theme_theme_konoha,Theme - Clair de Konoha 🌙,Non-Consumable,5.99,theme,theme_konoha
+com.gamingactions.app.theme_theme_sunset_ember,Theme - Sunset Ember 🌅,Non-Consumable,5.99,theme,theme_sunset_ember

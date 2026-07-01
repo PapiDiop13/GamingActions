@@ -1,0 +1,768 @@
+LOC com.gamingactions.app.frame_neon_pulse_blue: {
+  "errors" : [ {
+    "id" : "a7c783d6-a17c-46f1-a3c2-12100f972b8d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_neon_pulse_pink: {
+  "errors" : [ {
+    "id" : "18459431-c444-4888-a5ca-bb76b1f14b08",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_fire_animated: {
+  "errors" : [ {
+    "id" : "968db7a5-2864-45b2-b01f-367b050b6edf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_ice_animated: {
+  "errors" : [ {
+    "id" : "99a548cf-dda0-438e-8824-f816828f8b8c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_galaxy_animated: {
+  "errors" : [ {
+    "id" : "cff0678d-7c12-49c7-90d0-b02d2a24aa2a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_rainbow_animated: {
+  "errors" : [ {
+    "id" : "c513fe48-a65c-402f-82f2-f2f444aad24d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_lightning_animated: {
+  "errors" : [ {
+    "id" : "fda290d9-67ec-4a4a-a942-46b0afe49957",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_void_animated: {
+  "errors" : [ {
+    "id" : "3468ca2c-950b-43c5-b941-5c2f400f9767",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_cosmic_animated: {
+  "errors" : [ {
+    "id" : "8b1ee2f5-d8b7-4826-a691-25e3623690a2",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_holographic_frame: {
+  "errors" : [ {
+    "id" : "8cc5801e-ca2d-4fb5-b9f6-d7ea7ee8a65c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_sakura_frame: {
+  "errors" : [ {
+    "id" : "ed898472-9a7b-4921-9133-037ddd81c03d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_toxic_pulse_frame: {
+  "errors" : [ {
+    "id" : "84a9e05a-6350-47c1-8312-1a1882ad0f5d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_blizzard_animated: {
+  "errors" : [ {
+    "id" : "ff74a95d-7d47-4a3d-ac3b-aa6a60b3ce19",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_dna_frame: {
+  "errors" : [ {
+    "id" : "69d2698a-c4a7-412b-9452-11dba7fd3bb8",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_inferno_animated: {
+  "errors" : [ {
+    "id" : "6125751f-3de6-4b88-9603-41238d948f4a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_blood_moon_frame: {
+  "errors" : [ {
+    "id" : "317ea662-0294-4d9a-a278-551ffecfdeab",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_dragon_frame: {
+  "errors" : [ {
+    "id" : "5a262f54-2882-4d09-b1cc-5872c348aa02",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_neon_pulse_orange: {
+  "errors" : [ {
+    "id" : "34f88aef-9c14-4c50-8838-48421630233d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_silver: {
+  "errors" : [ {
+    "id" : "455df3b7-dd0a-4253-9ba5-09e73f80c614",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_gold: {
+  "errors" : [ {
+    "id" : "aec12ed7-de1e-4297-844f-4b321fca636e",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_holo: {
+  "errors" : [ {
+    "id" : "dd583a79-6a68-4c25-a68e-11e646aa5457",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_aurora: {
+  "errors" : [ {
+    "id" : "690d5361-3333-4c15-a36c-6eab46385790",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_prism: {
+  "errors" : [ {
+    "id" : "694fdd34-5b62-411d-ab15-ed2060cdb63f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_ice: {
+  "errors" : [ {
+    "id" : "ff5ad47d-1df2-484d-bf61-ed061b4c4615",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_void: {
+  "errors" : [ {
+    "id" : "470dfa08-8c36-47b7-800d-c39db4b008be",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_fire: {
+  "errors" : [ {
+    "id" : "abbacb3a-e99a-4731-b421-b234c4bf9a81",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_toxic: {
+  "errors" : [ {
+    "id" : "507cc94c-31ff-4208-b777-55db82743d5d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.frame_shimmer_cosmic: {
+  "errors" : [ {
+    "id" : "d4dfd01f-1a21-455e-a666-f446065af24b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_fire_animated: {
+  "errors" : [ {
+    "id" : "1ad76b88-eb48-441b-8350-be8c3d267437",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_lightning_animated: {
+  "errors" : [ {
+    "id" : "d4c75729-5fb2-439b-a33b-7dab103c93fe",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_galaxy_animated: {
+  "errors" : [ {
+    "id" : "5c1ea8e5-5fa6-4e6d-b821-a352c9338773",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_rainbow_animated: {
+  "errors" : [ {
+    "id" : "8717c9aa-a3dd-4a67-bdd3-dc303379bd42",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_royal_animated: {
+  "errors" : [ {
+    "id" : "41e33afd-c6ac-45f1-b73a-62dd2dd0b615",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_cosmic_animated: {
+  "errors" : [ {
+    "id" : "4748ec26-7d99-471a-aefd-d00f4c792825",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_holographic_anim: {
+  "errors" : [ {
+    "id" : "91be8983-3e87-4b23-adca-f677f58a4cff",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_sakura_anim: {
+  "errors" : [ {
+    "id" : "fd49b56e-679e-4508-b152-087ac750dc7a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_toxic_anim: {
+  "errors" : [ {
+    "id" : "b91ba5a8-20a8-42bc-ac9b-6a2ba4a8bc42",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_silver: {
+  "errors" : [ {
+    "id" : "3bc73e6a-a2e9-4699-8fb8-13eb48bedcac",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_gold: {
+  "errors" : [ {
+    "id" : "e0effdf8-ec43-4ccc-bb8b-8ca85ac6ca95",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_holo: {
+  "errors" : [ {
+    "id" : "b2d719b3-1c8d-4a65-b716-92f45b58040c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_aurora: {
+  "errors" : [ {
+    "id" : "36a8c6e5-f1cc-4c8b-bcfc-b1d64a3a5894",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_prism: {
+  "errors" : [ {
+    "id" : "fc0c4165-cae7-480e-bf95-91be874747cf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_ice: {
+  "errors" : [ {
+    "id" : "d917e3e9-864e-4226-900d-3095844787b5",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_void: {
+  "errors" : [ {
+    "id" : "5dd422ba-2f8f-41a2-8379-ed9f2e942f5b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_fire: {
+  "errors" : [ {
+    "id" : "e2910fbc-5923-45ee-b013-c4dfa72013fa",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_toxic: {
+  "errors" : [ {
+    "id" : "973b43f7-48a7-4022-af29-7a03ca734337",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.videoframe_vf_shimmer_rose: {
+  "errors" : [ {
+    "id" : "be290806-f978-43d7-9b88-650110c00051",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_pulse_blue: {
+  "errors" : [ {
+    "id" : "d49bd0e8-4e07-4853-b7f9-1d6e515e637f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_fire_animated: {
+  "errors" : [ {
+    "id" : "61fe3b08-f257-4e0e-8e09-f5a452379c4b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_lightning: {
+  "errors" : [ {
+    "id" : "29771a88-6134-43ff-88f7-8bda9bfcabc6",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_rainbow_anim: {
+  "errors" : [ {
+    "id" : "d7f4de75-aeb5-40ed-a63c-ad20d473d0dc",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_royal_anim: {
+  "errors" : [ {
+    "id" : "0b856f32-cb8c-4ef3-85dc-6ce353337d36",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_cosmic_anim: {
+  "errors" : [ {
+    "id" : "a1365fe9-1e5f-49dd-9541-44fbf04b4118",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_holographic_anim: {
+  "errors" : [ {
+    "id" : "2f7f5ec9-92ce-474a-9ebe-6d7e7006ed1c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_glitch_anim: {
+  "errors" : [ {
+    "id" : "3e613a7e-91f3-4446-92a0-fa6179a2795e",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_sakura_anim: {
+  "errors" : [ {
+    "id" : "77ad4e47-816a-46b3-ae76-3be4acdc1d1a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_void_pulse: {
+  "errors" : [ {
+    "id" : "d84647a9-9f9c-42b8-ac32-5a6a6daba3aa",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.commentframe_cf_toxic_cf: {
+  "errors" : [ {
+    "id" : "05b88843-520d-433b-977c-8d2ee3537f50",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_holographic: {
+  "errors" : [ {
+    "id" : "6cc1570e-73d8-44fa-85f8-04b32773b8dc",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_fire_animated: {
+  "errors" : [ {
+    "id" : "da25c689-8ead-4b30-8f49-d057ac8f64e1",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_cosmic: {
+  "errors" : [ {
+    "id" : "f095f132-a6db-4086-937f-8f1bac58e6a9",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_cherry_bloom: {
+  "errors" : [ {
+    "id" : "1c8f3c7f-0ad9-421a-8fd9-9cfef1525ab8",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_void_pulse: {
+  "errors" : [ {
+    "id" : "aab67e96-e6f8-444b-827e-745e27beeb5b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_matrix: {
+  "errors" : [ {
+    "id" : "4f0a786a-236e-4f0e-9605-1409b2649203",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_glacier: {
+  "errors" : [ {
+    "id" : "8cf968a3-94d8-45b0-85bb-2531dbabc675",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_konoha: {
+  "errors" : [ {
+    "id" : "218fd3cc-14b8-4e6f-9b35-28322cb87328",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_sunset_ember: {
+  "errors" : [ {
+    "id" : "bc005d4a-5f1b-4b3b-b404-53e6d11ba6cf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.bg_bg_white_clean: {
+  "errors" : [ {
+    "id" : "a6e63225-4b26-4cd0-aa4b-1ad8f86cd204",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_fire_b: {
+  "errors" : [ {
+    "id" : "5b0e73f2-8f12-49c3-89ba-80412a4a3608",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_lightning_b: {
+  "errors" : [ {
+    "id" : "ea649197-b68c-43df-82c4-66c1733018de",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_matrix_b: {
+  "errors" : [ {
+    "id" : "8b886465-5fdb-430d-80e1-33d93fb2d691",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_aurora_b: {
+  "errors" : [ {
+    "id" : "47828333-0baa-48cb-8145-05781f453c61",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_holo_b: {
+  "errors" : [ {
+    "id" : "69aa4794-f0a9-4b88-84a8-8a4ac2e6b1f1",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_glacier_b: {
+  "errors" : [ {
+    "id" : "dce6ebed-7c25-4282-9aff-c2629fc638bf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_konoha_b: {
+  "errors" : [ {
+    "id" : "dab05c56-8718-49b7-ad55-db7851bd8080",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_sunset_b: {
+  "errors" : [ {
+    "id" : "e6278746-85d4-4e2b-aa93-5a5a1f912e97",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.banner_banner_white_b: {
+  "errors" : [ {
+    "id" : "4bd3034a-388c-4984-9a25-f4a935825122",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_fire_text: {
+  "errors" : [ {
+    "id" : "d4b0c8c3-5f60-4da3-bcd6-2b767f896b65",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_lightning_text: {
+  "errors" : [ {
+    "id" : "a65f97db-4607-4a2e-84e2-cb3d0ed03df7",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_ice_text: {
+  "errors" : [ {
+    "id" : "60747bc7-1ac8-49f1-94d8-2b3f71126e9a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_toxic_anim: {
+  "errors" : [ {
+    "id" : "52a6bd5b-9954-44bd-a0ed-a12d8105f8a2",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_chrome: {
+  "errors" : [ {
+    "id" : "397cd635-6573-4450-8ef0-d0cebe35fb67",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_glitch: {
+  "errors" : [ {
+    "id" : "24a78caa-b62d-414f-a5b1-1854751e3705",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_mirror: {
+  "errors" : [ {
+    "id" : "106e4a4f-d377-4e8a-a0de-1fabfbeb0142",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_aurora_text: {
+  "errors" : [ {
+    "id" : "b6d6acd2-7b5b-4196-9586-8a0ec2830eaf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_galaxy_text: {
+  "errors" : [ {
+    "id" : "0e83a116-1025-43cd-866d-e05f120d770d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_prism: {
+  "errors" : [ {
+    "id" : "96f0b1ae-9925-412a-8fcf-ee7d95b1b7c4",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_stardust: {
+  "errors" : [ {
+    "id" : "b9810c7d-99a7-4e6b-b7f9-6f6061010f1b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_sakura_text: {
+  "errors" : [ {
+    "id" : "498c3b86-9990-4900-9317-7e41c1d891d3",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_holo_text: {
+  "errors" : [ {
+    "id" : "e1691a4e-cd04-4c12-a783-c6e350c82c81",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_fire_reflet: {
+  "errors" : [ {
+    "id" : "4bb1053b-bacf-4948-87a7-ce28c8c1ffba",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_void_reflet: {
+  "errors" : [ {
+    "id" : "0a5d0940-a68f-4171-9fe1-fe3a23916e66",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_gold_reflet: {
+  "errors" : [ {
+    "id" : "d0cba3e4-900b-4e82-9587-be15f3d1cf1b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_ice_reflet: {
+  "errors" : [ {
+    "id" : "551c542c-072f-4c3c-9fd4-9b70d8a7282f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_toxic_reflet: {
+  "errors" : [ {
+    "id" : "d633e106-65c7-4627-8843-41a7fa072959",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_rose_reflet: {
+  "errors" : [ {
+    "id" : "cdb82106-89a5-4cb5-ad47-ac93c050b5c0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_cosmic_reflet: {
+  "errors" : [ {
+    "id" : "6474b941-b762-49f6-89d7-3eda72ae4390",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_lightning_reflet: {
+  "errors" : [ {
+    "id" : "e76ffe3f-4d19-4110-af0a-e82bed061e0c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_glacier: {
+  "errors" : [ {
+    "id" : "7aaa5a6d-0351-4b17-91e5-0f22a8e6d716",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_forest_moon: {
+  "errors" : [ {
+    "id" : "03f4e453-1055-4788-9788-dd5a42f68596",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.username_ue_ember: {
+  "errors" : [ {
+    "id" : "da7a5a83-bdd8-4e31-ad33-653f3579cdad",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_fire_border: {
+  "errors" : [ {
+    "id" : "6c922939-d8d3-4324-8ff9-27351c814777",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_glitch_b: {
+  "errors" : [ {
+    "id" : "07463291-05f8-450e-8656-7d2f9b830a59",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_cherry_b: {
+  "errors" : [ {
+    "id" : "3734075a-b654-406b-b2fe-0188a1de486e",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_lightning_border: {
+  "errors" : [ {
+    "id" : "cee47c0b-2ee4-4f4f-abdf-cf0755c51f57",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_void_b: {
+  "errors" : [ {
+    "id" : "82d8a06f-2ce8-4d0a-a01c-257f5cda5320",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_holo_border: {
+  "errors" : [ {
+    "id" : "e8361f88-55e3-42ce-bd85-3f5801514fe0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_holographic_b: {
+  "errors" : [ {
+    "id" : "6914afae-df82-4351-a6c5-4096bad7b5e0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_cosmic_b: {
+  "errors" : [ {
+    "id" : "562e4650-e415-41c6-bb9b-e5e5c7d6cd42",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_rainbow_spin: {
+  "errors" : [ {
+    "id" : "de948dae-a729-4327-8567-bdfa18cd9e82",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_glacier_b: {
+  "errors" : [ {
+    "id" : "9de99be8-51fe-4e33-9fe0-d692458f50b1",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_konoha_b: {
+  "errors" : [ {
+    "id" : "9c9968ab-72da-46df-9ec0-c3f23c8136ae",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.card_cb_ember_b: {
+  "errors" : [ {
+    "id" : "b832d076-14c9-4544-ae18-9aa181be9450",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_champion: {
+  "errors" : [ {
+    "id" : "b728fc47-a1e5-4385-bd38-d31acfdcb48a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_phantom: {
+  "errors" : [ {
+    "id" : "92d26b7d-ad08-4389-986f-167d9fbe0b25",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_inferno: {
+  "errors" : [ {
+    "id" : "34a680ce-2994-467f-842f-a0736655f711",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_storm: {
+  "errors" : [ {
+    "id" : "312680bc-fd53-4636-997a-c020d70616cf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_cosmic: {
+  "errors" : [ {
+    "id" : "f4eaa4be-17a1-48b9-a37f-de3d0e35649b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_matrix: {
+  "errors" : [ {
+    "id" : "0ba50dc7-c55c-465d-92b2-83898a76d5a9",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_sakura: {
+  "errors" : [ {
+    "id" : "934c05b6-6989-4ad2-8561-f21d47428394",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_cyber: {
+  "errors" : [ {
+    "id" : "977e351a-c921-4065-846e-348ca6c883ba",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_arctic: {
+  "errors" : [ {
+    "id" : "e86ddff4-e469-4559-bf6e-b67cd56810bd",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_void_walker: {
+  "errors" : [ {
+    "id" : "9b69232c-e696-4f80-a647-a13676cc8c80",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_neon_city: {
+  "errors" : [ {
+    "id" : "ed768889-8fa8-4c3f-b6c5-78ecb9b0281d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_white: {
+  "errors" : [ {
+    "id" : "403115d1-a0ea-4ae1-a40d-b639775e4e47",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_glacier: {
+  "errors" : [ {
+    "id" : "5f755d02-3986-4a3b-9441-4e4666da9563",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_konoha: {
+  "errors" : [ {
+    "id" : "2ecfc9b3-d9b5-4902-b28c-fbbea49f34fd",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr
+LOC com.gamingactions.app.theme_theme_sunset_ember: {
+  "errors" : [ {
+    "id" : "83e17c5a-a2f3-49cd-b2ed-6264dfc25ad7",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE",
+    "title" : "The provided entity includes an attr

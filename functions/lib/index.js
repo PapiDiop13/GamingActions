@@ -35,8 +35,9 @@ var __importStar = (this && this.__importStar) || (function () {
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
+var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupOrphanCosmetics = exports.createFanbaseCheckoutSession = exports.createCosmeticCheckoutSession = exports.createPortalSession = exports.createCheckoutSession = exports.stripeWebhook = exports.notifRankingChanges = exports.broadcastPush = exports.onMentionNotif = exports.onVideoCreated = exports.notifYourRank = exports.migrateCloudinaryToMux = exports.muxWebhook = exports.muxGetUploadUrl = exports.exportDuplicates = exports.importVideoUpdates = exports.exportVideos = exports.exportGamesGenres = exports.adminCleanup = exports.reshuffleFeedOrder = exports.checkExpiredSubscriptions = exports.dailyLeaderBonus = exports.decayStreakPoints = exports.updateCurrentLeader = exports.assignMonthlyChampion = exports.notifWeekend = exports.notifRankingHeat = exports.notifUploadNudge = exports.notifInactiveUsers = exports.cleanOrphanData = exports.reconcileUserStats = exports.reconcileGGCounts = exports.onCommentCreated = exports.onVideoDeleted = exports.onFollowWritten = exports.onGGWritten = void 0;
+exports.generateBrandedVideo = exports.cleanupOrphanCosmetics = exports.createFanbaseCheckoutSession = exports.createCosmeticCheckoutSession = exports.createPortalSession = exports.createSupportCheckout = exports.createCheckoutSession = exports.stripeWebhook = exports.notifRankingChanges = exports.triggerRankNotifAll = exports.migrateGGMonthly = exports.fixJuneChampion = exports.fixCounts = exports.testMyRankNotif = exports.broadcastPush = exports.onMentionNotif = exports.onVideoCreated = exports.notifYourRank = exports.migrateCloudinaryToMux = exports.muxWebhook = exports.muxGetUploadUrl = exports.exportDuplicates = exports.importVideoUpdates = exports.exportVideos = exports.exportGamesGenres = exports.adminCleanup = exports.reshuffleFeedOrder = exports.notifLegendaryExpiringSoon = exports.checkExpiredSubscriptions = exports.dailyLeaderBonus = exports.decayStreakPoints = exports.updateCurrentLeader = exports.assignMonthlyChampion = exports.notifWeekend = exports.notifRankingHeat = exports.notifUploadNudge = exports.notifInactiveUsers = exports.onFanbaseSubAdmin = exports.onSubscriptionAdmin = exports.onSupportPurchaseAdmin = exports.onShopPurchaseAdmin = exports.cleanOrphanData = exports.reconcileUserStats = exports.reconcileGGCounts = exports.onCommentCreated = exports.onVideoDeleted = exports.onFollowWritten = exports.onGGWritten = void 0;
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-functions/v2/firestore");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -46,6 +47,14 @@ const expo_server_sdk_1 = require("expo-server-sdk");
 admin.initializeApp();
 const db = admin.firestore();
 const expo = new expo_server_sdk_1.Expo();
+// Utilisateurs EXCLUS du classement / champion / leader : créateurs + comptes
+// officiels (gameconic). Les admins et les Board RESTENT dans le classement.
+function rankExcluded(data) {
+    return !!data && ["creator", "gameconic"].includes(data.accountType);
+}
+// FFmpeg is loaded lazily inside generateBrandedVideo to avoid crashing
+// Firebase's local module analysis on macOS (no darwin-arm64 binary in the package).
+// At Cloud Functions runtime (Linux x64), require() will resolve correctly.
 // ─── Seuils de niveau (identiques à points.js côté client) ───────────────────
 const STREAK_LEVELS = [
     { id: "noob", minPoints: 0 },
@@ -72,96 +81,112 @@ const RECEIVE_GG_POINTS = 2;
 // ─────────────────────────────────────────────────────────────────────────────
 exports.onGGWritten = (0, firestore_1.onDocumentWritten)("ggs/{ggId}", async (event) => {
     var _a, _b, _c, _d, _e;
-    const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
-    const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
-    // Détermine la vidéo concernée
-    const videoId = (_e = after === null || after === void 0 ? void 0 : after.videoId) !== null && _e !== void 0 ? _e : before === null || before === void 0 ? void 0 : before.videoId;
-    if (!videoId)
-        return;
-    const videoRef = db.collection("videos").doc(videoId);
-    const videoSnap = await videoRef.get();
-    if (!videoSnap.exists)
-        return;
-    const videoData = videoSnap.data();
-    const creatorId = videoData.userId;
-    // Recompte les GG réels pour cette vidéo
-    const ggsSnap = await db.collection("ggs")
-        .where("videoId", "==", videoId)
-        .get();
-    const realGGCount = ggsSnap.size;
-    // Met à jour la vidéo
-    await videoRef.update({ ggCount: realGGCount });
-    // Recompte le total ggReceived du créateur (somme sur toutes ses vidéos)
-    const creatorVideosSnap = await db.collection("videos")
-        .where("userId", "==", creatorId)
-        .get();
-    let totalGGReceived = 0;
-    for (const vDoc of creatorVideosSnap.docs) {
-        const vData = vDoc.data();
-        // La vidéo qu'on vient de corriger → utilise la valeur recomptée
-        totalGGReceived += vDoc.id === videoId ? realGGCount : (vData.ggCount || 0);
-    }
-    // Détermine si c'est un AJOUT ou un RETRAIT de GG (pour créditer/débiter les points)
-    // before absent + after présent  → GG ajouté  (+points)
-    // before présent + after absent  → GG retiré  (-points)
-    const isAdd = !before && !!after;
-    const isRemove = !!before && !after;
-    const ptsDelta = isAdd ? RECEIVE_GG_POINTS : (isRemove ? -RECEIVE_GG_POINTS : 0);
-    // Met à jour le profil du créateur dans UNE transaction atomique.
-    // C'est la SOURCE UNIQUE de vérité : ggReceived, gaPoints, streakPoints,
-    // streakLevel sont tous recalculés ici. Le client ne fait QUE de
-    // l'optimistic UI local (aucune écriture concurrente sur ce doc → plus de
-    // failed-precondition).
-    const creatorRef = db.collection("users").doc(creatorId);
-    let creatorData = null;
-    await db.runTransaction(async (tx) => {
-        const creatorSnap = await tx.get(creatorRef);
-        if (!creatorSnap.exists)
+    try {
+        const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
+        const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
+        // Détermine la vidéo concernée
+        const videoId = (_e = after === null || after === void 0 ? void 0 : after.videoId) !== null && _e !== void 0 ? _e : before === null || before === void 0 ? void 0 : before.videoId;
+        if (!videoId)
             return;
-        creatorData = creatorSnap.data();
-        // gaPoints (solde dépensable) : jamais sous 0
-        const newGaPoints = Math.max(0, (creatorData.gaPoints || 0) + ptsDelta);
-        // streakPoints (niveau cumulatif) : jamais sous 0
-        const newStreakPoints = Math.max(0, (creatorData.streakPoints || 0) + ptsDelta);
-        tx.update(creatorRef, {
-            ggReceived: totalGGReceived,
-            gaPoints: newGaPoints,
-            streakPoints: newStreakPoints,
-            streakLevel: calcStreakLevel(newStreakPoints),
-        });
-    });
-    // Trace dans points_history (audit trail visible dans PointsHistoryScreen)
-    if (ptsDelta !== 0) {
-        await db.collection("points_history").add({
-            userId: creatorId,
-            delta: ptsDelta,
-            reason: isAdd ? "Received a GG" : "GG removed",
-            videoId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-    }
-    // Notifications UNIQUEMENT sur ajout de GG (pas sur retrait), et jamais à soi-même
-    if (isAdd && after && creatorId !== after.userId && creatorData) {
-        const senderSnap = await db.collection("users").doc(after.userId).get();
-        const senderName = senderSnap.exists ? (senderSnap.data().username || "Someone") : "Someone";
-        // 1. Notif in-app Firestore (source unique — plus de création côté client)
-        await db.collection("notifications").add({
-            userId: creatorId,
-            type: "gg",
-            fromUserId: after.userId,
-            fromUsername: senderName,
-            text: "gave you a GG on your clip ⭐",
-            videoId,
-            read: false,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        // 2. Push notification
-        const creatorDataTyped = creatorData;
-        if (creatorDataTyped.fcmToken) {
-            await sendPushNotif(creatorDataTyped.fcmToken, "⭐ GG received!", `${senderName} gave you a GG on your clip!`, { screen: "Feed", videoId });
+        const videoRef = db.collection("videos").doc(videoId);
+        const videoSnap = await videoRef.get();
+        if (!videoSnap.exists)
+            return;
+        const videoData = videoSnap.data();
+        const creatorId = videoData.userId;
+        // Recompte les GG réels pour cette vidéo
+        const ggsSnap = await db.collection("ggs")
+            .where("videoId", "==", videoId)
+            .get();
+        const realGGCount = ggsSnap.size;
+        // AJOUT / RETRAIT de GG (before absent+after présent → ajout ; l'inverse → retrait)
+        const isAdd = !before && !!after;
+        const isRemove = !!before && !after;
+        const monthDelta = isAdd ? 1 : (isRemove ? -1 : 0);
+        const ptsDelta = isAdd ? RECEIVE_GG_POINTS : (isRemove ? -RECEIVE_GG_POINTS : 0);
+        // Compteur MENSUEL de la vidéo (remis à 0 le 1er du mois par assignMonthlyChampion).
+        // Delta-based : +1 par GG reçu ce mois, -1 par retrait, plancher 0.
+        const newVideoGgMonth = Math.max(0, (videoData.ggMonth || 0) + monthDelta);
+        // Met à jour la vidéo : total all-time (ggCount) + total du mois (ggMonth)
+        await videoRef.update({ ggCount: realGGCount, ggMonth: newVideoGgMonth });
+        // Recompte les totaux du créateur : all-time (ggReceived) + mensuel (ggMonth)
+        const creatorVideosSnap = await db.collection("videos")
+            .where("userId", "==", creatorId)
+            .get();
+        let totalGGReceived = 0;
+        let totalGGMonth = 0;
+        for (const vDoc of creatorVideosSnap.docs) {
+            const vData = vDoc.data();
+            if (vDoc.id === videoId) {
+                totalGGReceived += realGGCount;
+                totalGGMonth += newVideoGgMonth;
+            }
+            else {
+                totalGGReceived += vData.ggCount || 0;
+                totalGGMonth += vData.ggMonth || 0;
+            }
         }
+        // Met à jour le profil du créateur dans UNE transaction atomique.
+        // C'est la SOURCE UNIQUE de vérité : ggReceived, gaPoints, streakPoints,
+        // streakLevel sont tous recalculés ici. Le client ne fait QUE de
+        // l'optimistic UI local (aucune écriture concurrente sur ce doc → plus de
+        // failed-precondition).
+        const creatorRef = db.collection("users").doc(creatorId);
+        let creatorData = null;
+        await db.runTransaction(async (tx) => {
+            const creatorSnap = await tx.get(creatorRef);
+            if (!creatorSnap.exists)
+                return;
+            creatorData = creatorSnap.data();
+            // gaPoints (solde dépensable) : jamais sous 0
+            const newGaPoints = Math.max(0, (creatorData.gaPoints || 0) + ptsDelta);
+            // streakPoints (niveau cumulatif) : jamais sous 0
+            const newStreakPoints = Math.max(0, (creatorData.streakPoints || 0) + ptsDelta);
+            tx.update(creatorRef, {
+                ggReceived: totalGGReceived,
+                ggMonth: totalGGMonth,
+                gaPoints: newGaPoints,
+                streakPoints: newStreakPoints,
+                streakLevel: calcStreakLevel(newStreakPoints),
+            });
+        });
+        // Trace dans points_history (audit trail visible dans PointsHistoryScreen)
+        if (ptsDelta !== 0) {
+            await db.collection("points_history").add({
+                userId: creatorId,
+                delta: ptsDelta,
+                reason: isAdd ? "Received a GG" : "GG removed",
+                videoId,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+        }
+        // Notifications UNIQUEMENT sur ajout de GG (pas sur retrait), et jamais à soi-même
+        if (isAdd && after && creatorId !== after.userId && creatorData) {
+            const senderSnap = await db.collection("users").doc(after.userId).get();
+            const senderName = senderSnap.exists ? (senderSnap.data().username || "Someone") : "Someone";
+            // 1. Notif in-app Firestore (source unique — plus de création côté client)
+            await db.collection("notifications").add({
+                userId: creatorId,
+                type: "gg",
+                fromUserId: after.userId,
+                fromUsername: senderName,
+                text: "gave you a GG on your clip ⭐",
+                videoId,
+                read: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            // 2. Push notification
+            const creatorDataTyped = creatorData;
+            if (creatorDataTyped.fcmToken) {
+                await sendPushNotif(creatorDataTyped.fcmToken, "⭐ GG received!", `${senderName} gave you a GG on your clip!`, { screen: "Feed", videoId });
+            }
+        }
+        v2_1.logger.info(`onGGWritten: vidéo ${videoId} → ggCount=${realGGCount}, créateur ${creatorId} → ggReceived=${totalGGReceived}, ptsDelta=${ptsDelta}`);
     }
-    v2_1.logger.info(`onGGWritten: vidéo ${videoId} → ggCount=${realGGCount}, créateur ${creatorId} → ggReceived=${totalGGReceived}, ptsDelta=${ptsDelta}`);
+    catch (e) {
+        v2_1.logger.error('trigger error', e);
+        return null;
+    }
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // TRIGGER 2 — onFollowWritten
@@ -170,43 +195,49 @@ exports.onGGWritten = (0, firestore_1.onDocumentWritten)("ggs/{ggId}", async (ev
 // ─────────────────────────────────────────────────────────────────────────────
 exports.onFollowWritten = (0, firestore_1.onDocumentWritten)("follows/{followId}", async (event) => {
     var _a, _b, _c, _d, _e, _f, _g, _h;
-    const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
-    const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
-    const followerId = (_e = after === null || after === void 0 ? void 0 : after.followerId) !== null && _e !== void 0 ? _e : before === null || before === void 0 ? void 0 : before.followerId;
-    const followingId = (_f = after === null || after === void 0 ? void 0 : after.followingId) !== null && _f !== void 0 ? _f : before === null || before === void 0 ? void 0 : before.followingId;
-    if (!followerId || !followingId)
-        return;
-    // Recompte les vrais followers de la cible
-    const followersSnap = await db.collection("follows")
-        .where("followingId", "==", followingId)
-        .get();
-    const realFollowers = followersSnap.size;
-    // Recompte les vrais following du follower
-    const followingSnap = await db.collection("follows")
-        .where("followerId", "==", followerId)
-        .get();
-    const realFollowing = followingSnap.size;
-    // Corrige les deux profils
-    await db.collection("users").doc(followingId).update({ followers: realFollowers });
-    await db.collection("users").doc(followerId).update({ following: realFollowing });
-    // Push notification au user suivi (seulement sur follow, pas unfollow)
-    if (after) {
-        try {
-            const [targetSnap, senderSnap] = await Promise.all([
-                db.collection("users").doc(followingId).get(),
-                db.collection("users").doc(followerId).get(),
-            ]);
-            const targetToken = (_g = targetSnap.data()) === null || _g === void 0 ? void 0 : _g.fcmToken;
-            const senderName = ((_h = senderSnap.data()) === null || _h === void 0 ? void 0 : _h.username) || "Someone";
-            if (targetToken && followerId !== followingId) {
-                await sendPushNotif(targetToken, "👥 New follower!", `${senderName} started following you!`, { screen: "UserProfile", userId: followerId });
+    try {
+        const before = (_b = (_a = event.data) === null || _a === void 0 ? void 0 : _a.before) === null || _b === void 0 ? void 0 : _b.data();
+        const after = (_d = (_c = event.data) === null || _c === void 0 ? void 0 : _c.after) === null || _d === void 0 ? void 0 : _d.data();
+        const followerId = (_e = after === null || after === void 0 ? void 0 : after.followerId) !== null && _e !== void 0 ? _e : before === null || before === void 0 ? void 0 : before.followerId;
+        const followingId = (_f = after === null || after === void 0 ? void 0 : after.followingId) !== null && _f !== void 0 ? _f : before === null || before === void 0 ? void 0 : before.followingId;
+        if (!followerId || !followingId)
+            return;
+        // Recompte les vrais followers de la cible
+        const followersSnap = await db.collection("follows")
+            .where("followingId", "==", followingId)
+            .get();
+        const realFollowers = followersSnap.size;
+        // Recompte les vrais following du follower
+        const followingSnap = await db.collection("follows")
+            .where("followerId", "==", followerId)
+            .get();
+        const realFollowing = followingSnap.size;
+        // Corrige les deux profils
+        await db.collection("users").doc(followingId).update({ followers: realFollowers });
+        await db.collection("users").doc(followerId).update({ following: realFollowing });
+        // Push notification au user suivi (seulement sur follow, pas unfollow)
+        if (after) {
+            try {
+                const [targetSnap, senderSnap] = await Promise.all([
+                    db.collection("users").doc(followingId).get(),
+                    db.collection("users").doc(followerId).get(),
+                ]);
+                const targetToken = (_g = targetSnap.data()) === null || _g === void 0 ? void 0 : _g.fcmToken;
+                const senderName = ((_h = senderSnap.data()) === null || _h === void 0 ? void 0 : _h.username) || "Someone";
+                if (targetToken && followerId !== followingId) {
+                    await sendPushNotif(targetToken, "👥 New follower!", `${senderName} started following you!`, { screen: "UserProfile", userId: followerId });
+                }
+            }
+            catch (e) {
+                v2_1.logger.warn("follow push failed:", e);
             }
         }
-        catch (e) {
-            v2_1.logger.warn("follow push failed:", e);
-        }
+        v2_1.logger.info(`onFollowWritten: ${followerId} following=${realFollowing} | ${followingId} followers=${realFollowers}`);
     }
-    v2_1.logger.info(`onFollowWritten: ${followerId} following=${realFollowing} | ${followingId} followers=${realFollowers}`);
+    catch (e) {
+        v2_1.logger.error('trigger error', e);
+        return null;
+    }
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // TRIGGER 3 — onVideoDeleted
@@ -215,74 +246,83 @@ exports.onFollowWritten = (0, firestore_1.onDocumentWritten)("follows/{followId}
 // ─────────────────────────────────────────────────────────────────────────────
 exports.onVideoDeleted = (0, firestore_1.onDocumentDeleted)("videos/{videoId}", async (event) => {
     var _a;
-    const videoId = event.params.videoId;
-    const videoData = (_a = event.data) === null || _a === void 0 ? void 0 : _a.data();
-    if (!videoData)
-        return;
-    const creatorId = videoData.userId;
-    const deletedGGCount = videoData.ggCount || 0;
-    // 1. Batch : supprime GGs orphelins + notifications + comments liés à la vidéo
-    const [ggsSnap, notifsSnap, commentsSnap] = await Promise.all([
-        db.collection("ggs").where("videoId", "==", videoId).get(),
-        db.collection("notifications").where("videoId", "==", videoId).get(),
-        db.collection("comments").where("videoId", "==", videoId).get(),
-    ]);
-    const batch = db.batch();
-    ggsSnap.docs.forEach((d) => batch.delete(d.ref));
-    notifsSnap.docs.forEach((d) => batch.delete(d.ref));
-    commentsSnap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-    // 2. Recompte ggReceived du créateur depuis ses vidéos restantes
-    const creatorVideosSnap = await db.collection("videos")
-        .where("userId", "==", creatorId)
-        .get();
-    let totalGGReceived = 0;
-    creatorVideosSnap.docs.forEach((d) => {
-        totalGGReceived += d.data().ggCount || 0;
-    });
-    // 3. Transaction atomique sur le profil créateur :
-    //    - videoCount -1
-    //    - ggReceived recalculé
-    //    - gaPoints/streakPoints : retire les GG points + le clip bonus (POST_CLIP)
-    //    - streakLevel recalculé
-    const POST_CLIP_POINTS = 25; // Doit correspondre à POINTS.POST_CLIP côté client
-    const creatorRef = db.collection("users").doc(creatorId);
-    let finalGaPoints = 0;
-    await db.runTransaction(async (tx) => {
-        const creatorSnap = await tx.get(creatorRef);
-        if (!creatorSnap.exists)
+    try {
+        const videoId = event.params.videoId;
+        const videoData = (_a = event.data) === null || _a === void 0 ? void 0 : _a.data();
+        if (!videoData)
             return;
-        const d = creatorSnap.data();
+        const creatorId = videoData.userId;
+        const deletedGGCount = videoData.ggCount || 0;
+        // 1. Batch : supprime GGs orphelins + notifications + comments liés à la vidéo
+        const [ggsSnap, notifsSnap, commentsSnap] = await Promise.all([
+            db.collection("ggs").where("videoId", "==", videoId).get(),
+            db.collection("notifications").where("videoId", "==", videoId).get(),
+            db.collection("comments").where("videoId", "==", videoId).get(),
+        ]);
+        const batch = db.batch();
+        ggsSnap.docs.forEach((d) => batch.delete(d.ref));
+        notifsSnap.docs.forEach((d) => batch.delete(d.ref));
+        commentsSnap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        // 2. Recompte ggReceived du créateur depuis ses vidéos restantes
+        const creatorVideosSnap = await db.collection("videos")
+            .where("userId", "==", creatorId)
+            .get();
+        let totalGGReceived = 0;
+        let totalGGMonth = 0;
+        creatorVideosSnap.docs.forEach((d) => {
+            totalGGReceived += d.data().ggCount || 0;
+            totalGGMonth += d.data().ggMonth || 0;
+        });
+        // 3. Transaction atomique sur le profil créateur :
+        //    - videoCount -1
+        //    - ggReceived recalculé
+        //    - gaPoints/streakPoints : retire les GG points + le clip bonus (POST_CLIP)
+        //    - streakLevel recalculé
+        const POST_CLIP_POINTS = 25; // Doit correspondre à POINTS.POST_CLIP côté client
+        const creatorRef = db.collection("users").doc(creatorId);
+        let finalGaPoints = 0;
+        await db.runTransaction(async (tx) => {
+            const creatorSnap = await tx.get(creatorRef);
+            if (!creatorSnap.exists)
+                return;
+            const d = creatorSnap.data();
+            const ggPointsToRemove = deletedGGCount * RECEIVE_GG_POINTS;
+            const totalPointsToRemove = ggPointsToRemove + POST_CLIP_POINTS;
+            const newGaPoints = Math.max(0, (d.gaPoints || 0) - totalPointsToRemove);
+            const newStreakPoints = Math.max(0, (d.streakPoints || 0) - totalPointsToRemove);
+            const newVideoCount = Math.max(0, (d.videoCount || 0) - 1);
+            finalGaPoints = newGaPoints;
+            tx.update(creatorRef, {
+                videoCount: newVideoCount,
+                ggReceived: totalGGReceived,
+                ggMonth: totalGGMonth,
+                gaPoints: newGaPoints,
+                streakPoints: newStreakPoints,
+                streakLevel: calcStreakLevel(newStreakPoints),
+            });
+        });
+        // 4. points_history — trace audit (hors transaction, non bloquant)
         const ggPointsToRemove = deletedGGCount * RECEIVE_GG_POINTS;
         const totalPointsToRemove = ggPointsToRemove + POST_CLIP_POINTS;
-        const newGaPoints = Math.max(0, (d.gaPoints || 0) - totalPointsToRemove);
-        const newStreakPoints = Math.max(0, (d.streakPoints || 0) - totalPointsToRemove);
-        const newVideoCount = Math.max(0, (d.videoCount || 0) - 1);
-        finalGaPoints = newGaPoints;
-        tx.update(creatorRef, {
-            videoCount: newVideoCount,
-            ggReceived: totalGGReceived,
-            gaPoints: newGaPoints,
-            streakPoints: newStreakPoints,
-            streakLevel: calcStreakLevel(newStreakPoints),
-        });
-    });
-    // 4. points_history — trace audit (hors transaction, non bloquant)
-    const ggPointsToRemove = deletedGGCount * RECEIVE_GG_POINTS;
-    const totalPointsToRemove = ggPointsToRemove + POST_CLIP_POINTS;
-    if (totalPointsToRemove > 0) {
-        await db.collection("points_history").add({
-            userId: creatorId,
-            delta: -totalPointsToRemove,
-            reason: `Clip deleted (-${POST_CLIP_POINTS} clip bonus, -${ggPointsToRemove} GG pts)`,
-            total: finalGaPoints,
-            videoId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        if (totalPointsToRemove > 0) {
+            await db.collection("points_history").add({
+                userId: creatorId,
+                delta: -totalPointsToRemove,
+                reason: `Clip deleted (-${POST_CLIP_POINTS} clip bonus, -${ggPointsToRemove} GG pts)`,
+                total: finalGaPoints,
+                videoId,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+        }
+        v2_1.logger.info(`onVideoDeleted: vidéo ${videoId} — ${ggsSnap.size} GGs nettoyés, ` +
+            `créateur ${creatorId} ggReceived=${totalGGReceived}, ` +
+            `-${totalPointsToRemove} pts (clip + GGs)`);
     }
-    v2_1.logger.info(`onVideoDeleted: vidéo ${videoId} — ${ggsSnap.size} GGs nettoyés, ` +
-        `créateur ${creatorId} ggReceived=${totalGGReceived}, ` +
-        `-${totalPointsToRemove} pts (clip + GGs)`);
+    catch (e) {
+        v2_1.logger.error('trigger error', e);
+        return null;
+    }
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // TRIGGER 4 — onCommentCreated
@@ -528,7 +568,6 @@ async function sendPushNotif(token, title, body, data) {
                 title,
                 body,
                 data: data || {},
-                badge: 1,
                 channelId: "gaming_actions",
                 priority: "high",
             },
@@ -545,6 +584,59 @@ async function sendPushNotif(token, title, body, data) {
         return false;
     }
 }
+// Envoie une push + notif in-app à TOUS les admins (achats, abonnements…).
+async function notifyAdmins(title, body, data) {
+    var _a;
+    try {
+        const adminsSnap = await db.collection("users").where("isAdmin", "==", true).get();
+        for (const d of adminsSnap.docs) {
+            const token = (_a = d.data()) === null || _a === void 0 ? void 0 : _a.fcmToken;
+            if (token)
+                await sendPushNotif(token, title, body, data || {});
+            await db.collection("notifications").add({
+                userId: d.id,
+                type: "admin_sale",
+                text: `${title} — ${body}`,
+                read: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+        }
+    }
+    catch (e) {
+        v2_1.logger.warn("notifyAdmins failed: " + e);
+    }
+}
+// ── Notifs ADMIN en temps réel sur achats / abonnements ──────────────────────
+exports.onShopPurchaseAdmin = (0, firestore_1.onDocumentCreated)("shop_purchases/{id}", async (event) => {
+    var _a;
+    const x = (_a = event.data) === null || _a === void 0 ? void 0 : _a.data();
+    if (!x || x.isTest)
+        return;
+    const amt = Number(x.amount || 0).toFixed(2);
+    await notifyAdmins("💰 New purchase", `${x.itemName || x.category || "Item"} — CA$${amt}`, { screen: "Admin" });
+});
+exports.onSupportPurchaseAdmin = (0, firestore_1.onDocumentCreated)("support_purchases/{id}", async (event) => {
+    var _a;
+    const x = (_a = event.data) === null || _a === void 0 ? void 0 : _a.data();
+    if (!x)
+        return;
+    const amt = Number(x.amount || 0).toFixed(2);
+    await notifyAdmins("💛 New support", `Someone supported the app — CA$${amt}`, { screen: "Admin" });
+});
+exports.onSubscriptionAdmin = (0, firestore_1.onDocumentCreated)("subscriptions/{uid}", async (event) => {
+    var _a;
+    const x = (_a = event.data) === null || _a === void 0 ? void 0 : _a.data();
+    if (!x || x.isTest)
+        return;
+    await notifyAdmins("👑 New Legendary subscriber", `${x.productId || "legendary"} · ${x.platform || ""}`, { screen: "Admin" });
+});
+exports.onFanbaseSubAdmin = (0, firestore_1.onDocumentCreated)("fanbase_subscriptions/{id}", async (event) => {
+    var _a;
+    const x = (_a = event.data) === null || _a === void 0 ? void 0 : _a.data();
+    if (!x || x.isTest)
+        return;
+    await notifyAdmins("🔓 New Fanbase subscriber", `Creator: ${x.creatorId || ""}`, { screen: "Admin" });
+});
 // Vérifie si une notif de ce type a déjà été envoyée à cet user cette semaine
 async function isThrottled(userId, type) {
     var _a, _b, _c;
@@ -576,12 +668,12 @@ function shuffle(arr) {
 // Cible : gamers qui ne se sont pas connectés depuis ≥ 3 jours
 // Limite : 50 users aléatoires par run (évite le flood)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifInactiveUsers = (0, scheduler_1.onSchedule)({ schedule: "0 18 * * 1,4", region: "us-central1", timeoutSeconds: 300 }, async () => {
+exports.notifInactiveUsers = (0, scheduler_1.onSchedule)({ schedule: "0 18 * * 1,4", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 300 }, async () => {
     v2_1.logger.info("notifInactiveUsers: start");
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    // Note: avoid multi-field inequality (lastSeen + fcmToken) — filter token in loop
     const usersSnap = await db.collection("users")
         .where("lastSeen", "<=", threeDaysAgo)
-        .where("fcmToken", "!=", "")
         .limit(200)
         .get();
     const messages = [
@@ -595,6 +687,8 @@ exports.notifInactiveUsers = (0, scheduler_1.onSchedule)({ schedule: "0 18 * * 1
     let sent = 0;
     for (const uDoc of candidates) {
         const u = uDoc.data();
+        if (!u.fcmToken)
+            continue;
         if (await isThrottled(uDoc.id, "inactive"))
             continue;
         const msg = messages[Math.floor(Math.random() * messages.length)];
@@ -610,7 +704,7 @@ exports.notifInactiveUsers = (0, scheduler_1.onSchedule)({ schedule: "0 18 * * 1
 // NOTIF 2 — Pas d'upload cette semaine (mercredi à 19h UTC)
 // Cible : users avec au moins 1 clip déjà publié, mais aucun cette semaine
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifUploadNudge = (0, scheduler_1.onSchedule)({ schedule: "0 19 * * 3,5", region: "us-central1", timeoutSeconds: 300 }, // mercredi + vendredi
+exports.notifUploadNudge = (0, scheduler_1.onSchedule)({ schedule: "0 19 * * 3,5", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 300 }, // mercredi + vendredi
 async () => {
     v2_1.logger.info("notifUploadNudge: start");
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -656,11 +750,11 @@ async () => {
 // Cible : users dans le top 20 du ranking mensuel
 // Message personnalisé : "Tu es à X pts de dépasser {username}"
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifRankingHeat = (0, scheduler_1.onSchedule)({ schedule: "0 20 * * 5", region: "us-central1", timeoutSeconds: 300 }, async () => {
+exports.notifRankingHeat = (0, scheduler_1.onSchedule)({ schedule: "0 20 * * 5", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 300 }, async () => {
     v2_1.logger.info("notifRankingHeat: start");
-    // Récupère le top 25 par ggReceived du mois en cours
+    // Récupère le top 25 par ggMonth (GG du mois en cours)
     const usersSnap = await db.collection("users")
-        .orderBy("ggReceived", "desc")
+        .orderBy("ggMonth", "desc")
         .limit(25)
         .get();
     const ranked = usersSnap.docs.map((d, i) => {
@@ -669,7 +763,7 @@ exports.notifRankingHeat = (0, scheduler_1.onSchedule)({ schedule: "0 20 * * 5",
             id: d.id,
             rank: i + 1,
             fcmToken: (data.fcmToken || ''),
-            ggReceived: (data.ggReceived || 0),
+            ggReceived: (data.ggMonth || 0),
             username: (data.username || ''),
         };
     });
@@ -699,12 +793,12 @@ exports.notifRankingHeat = (0, scheduler_1.onSchedule)({ schedule: "0 20 * * 5",
 // Cible : tous les users actifs (lastSeen < 7 jours), message motivant aléatoire
 // Groupe aléatoire de 30% des users (pas tout le monde, évite le spam)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifWeekend = (0, scheduler_1.onSchedule)({ schedule: "0 14 * * 6", region: "us-central1", timeoutSeconds: 300 }, async () => {
+exports.notifWeekend = (0, scheduler_1.onSchedule)({ schedule: "0 14 * * 6", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 300 }, async () => {
     v2_1.logger.info("notifWeekend: start");
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // Note: avoid multi-field inequality (lastSeen + fcmToken) — filter token in loop
     const usersSnap = await db.collection("users")
         .where("lastSeen", ">=", sevenDaysAgo)
-        .where("fcmToken", "!=", "")
         .limit(500)
         .get();
     const messages = [
@@ -720,6 +814,8 @@ exports.notifWeekend = (0, scheduler_1.onSchedule)({ schedule: "0 14 * * 6", reg
     let sent = 0;
     for (const uDoc of sample) {
         const u = uDoc.data();
+        if (!u.fcmToken)
+            continue;
         if (await isThrottled(uDoc.id, "weekend"))
             continue;
         const msg = messages[Math.floor(Math.random() * messages.length)];
@@ -748,18 +844,25 @@ exports.notifWeekend = (0, scheduler_1.onSchedule)({ schedule: "0 14 * * 6", reg
 //   users.ownedFrames      : string[] — frames avatar possédées
 //   users.ownedVideoFrames : string[] — frames vidéo possédées
 // ─────────────────────────────────────────────────────────────────────────────
-exports.assignMonthlyChampion = (0, scheduler_1.onSchedule)({ schedule: "1 0 1 * *", region: "us-central1", timeoutSeconds: 120 }, async () => {
+exports.assignMonthlyChampion = (0, scheduler_1.onSchedule)({ schedule: "1 0 1 * *", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 120 }, async () => {
     v2_1.logger.info("assignMonthlyChampion: start");
-    // 1. Trouve le top 1 par ggReceived
+    // 1. Trouve le 1er ÉLIGIBLE par ggMonth (GG DU MOIS, hors creator/gameconic, avec ≥1 GG)
     const topSnap = await db.collection("users")
-        .orderBy("ggReceived", "desc")
-        .limit(1)
+        .orderBy("ggMonth", "desc")
+        .limit(30)
         .get();
     if (topSnap.empty) {
         v2_1.logger.warn("assignMonthlyChampion: no users found");
         return;
     }
-    const newChampDoc = topSnap.docs[0];
+    // Top 3 éligibles du mois → Wall of Legends
+    const eligibleTop = topSnap.docs
+        .filter((d) => !rankExcluded(d.data()) && (d.data().ggMonth || 0) > 0);
+    const newChampDoc = eligibleTop[0];
+    if (!newChampDoc) {
+        v2_1.logger.warn("assignMonthlyChampion: no eligible champion");
+        return;
+    }
     const newChampData = newChampDoc.data();
     const now = new Date();
     const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -797,9 +900,18 @@ exports.assignMonthlyChampion = (0, scheduler_1.onSchedule)({ schedule: "1 0 1 *
             batch.update(u.ref, { isCurrentLeader: false });
     }
     await batch.commit();
-    // 5. Bonus 500 GA Points au champion
+    // 5. Bonus champion : +500 GA Points ET +500 Streak points (monte le niveau)
     const champCurrentPoints = newChampData.gaPoints || 0;
-    await newChampDoc.ref.update({ gaPoints: champCurrentPoints + 500 });
+    const champStreakPoints = (newChampData.streakPoints || 0) + 500;
+    await newChampDoc.ref.update({
+        gaPoints: champCurrentPoints + 500,
+        streakPoints: champStreakPoints,
+        streakLevel: calcStreakLevel(champStreakPoints),
+    });
+    await db.collection("points_history").add({
+        userId: newChampDoc.id, delta: 500, reason: `🏆 Champion bonus (${monthKey})`,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
     // 6. Notif de félicitations au champion (in-app + push)
     await admin.firestore().collection("notifications").add({
         userId: newChampDoc.id,
@@ -828,7 +940,7 @@ exports.assignMonthlyChampion = (0, scheduler_1.onSchedule)({ schedule: "1 0 1 *
             type: "system",
             fromUserId: "SYSTEM",
             fromUsername: "Gaming Actions",
-            text: `👑 ${champUsername} is the Champion of ${monthKey}! Can you dethrone them next month? 🔥`,
+            text: `👑 ${champUsername} is the Champion of ${monthKey}! Can you take the crown next month? 🔥`,
             read: false,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -838,7 +950,87 @@ exports.assignMonthlyChampion = (0, scheduler_1.onSchedule)({ schedule: "1 0 1 *
     const pushTargets = allUsersForNotif.docs
         .filter(u => u.id !== newChampDoc.id && u.data().fcmToken)
         .slice(0, 100);
-    await Promise.all(pushTargets.map(u => sendPushNotif(u.data().fcmToken, "👑 New Champion!", `${champUsername} won the GG Rankings for ${monthKey}! Can you dethrone them? 🔥`, { screen: "Rankings" }).catch(() => { })));
+    await Promise.all(pushTargets.map(u => sendPushNotif(u.data().fcmToken, "👑 New Champion!", `${champUsername} won the GG Rankings for ${monthKey}! Can you take the crown? 🔥`, { screen: "Rankings" }).catch(() => { })));
+    // ── 8. WALL OF LEGENDS — enregistre le podium du mois écoulé ───────────────
+    // Top 3 global (déjà trié par ggMonth desc, hors exclus)
+    const podium = eligibleTop.slice(0, 3).map((d, i) => {
+        const u = d.data();
+        return {
+            rank: i + 1,
+            uid: d.id,
+            username: u.username || "Player",
+            avatar: u.avatar || "",
+            ggMonth: u.ggMonth || 0,
+            plan: u.plan || "free",
+            streakLevel: u.streakLevel || 0,
+            accountType: u.accountType || "gamer",
+        };
+    });
+    // Gagnant par genre (agrège les vidéos du mois par genre → meilleur joueur)
+    const genreWinners = {};
+    try {
+        const vidSnap = await db.collection("videos")
+            .orderBy("ggMonth", "desc")
+            .limit(500)
+            .get();
+        const perGenre = {};
+        for (const vDoc of vidSnap.docs) {
+            const v = vDoc.data();
+            const g = v.genre;
+            const uid = v.userId;
+            const gg = v.ggMonth || 0;
+            if (!g || !uid || gg <= 0 || v.banned || v.restricted)
+                continue;
+            perGenre[g] = perGenre[g] || {};
+            if (!perGenre[g][uid])
+                perGenre[g][uid] = { username: v.username || "Player", avatar: v.avatar || "", gg: 0 };
+            perGenre[g][uid].gg += gg;
+        }
+        for (const g of Object.keys(perGenre)) {
+            const top = Object.entries(perGenre[g]).sort((a, b) => b[1].gg - a[1].gg)[0];
+            if (top)
+                genreWinners[g] = { uid: top[0], username: top[1].username, avatar: top[1].avatar, ggMonth: top[1].gg };
+        }
+    }
+    catch (e) {
+        v2_1.logger.warn("wall genre aggregation failed", e);
+    }
+    await db.collection("hall_of_fame").doc(monthKey).set({
+        month: monthKey,
+        champion: podium[0] || null,
+        podium,
+        genres: genreWinners,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    v2_1.logger.info(`assignMonthlyChampion: Wall of Legends saved for ${monthKey}`);
+    // ── 9. RESET MENSUEL — remet ggMonth=0 partout SANS toucher aux GG (ggCount/ggReceived) ──
+    const commitInChunks = async (snap, field) => {
+        let b = db.batch();
+        let n = 0;
+        for (const d of snap.docs) {
+            if ((d.data()[field] || 0) === 0)
+                continue;
+            b.update(d.ref, { [field]: 0 });
+            n++;
+            if (n % 400 === 0) {
+                await b.commit();
+                b = db.batch();
+            }
+        }
+        if (n % 400 !== 0)
+            await b.commit();
+        return n;
+    };
+    try {
+        const usersToReset = await db.collection("users").where("ggMonth", ">", 0).get();
+        const rU = await commitInChunks(usersToReset, "ggMonth");
+        const vidsToReset = await db.collection("videos").where("ggMonth", ">", 0).get();
+        const rV = await commitInChunks(vidsToReset, "ggMonth");
+        v2_1.logger.info(`assignMonthlyChampion: monthly reset done — ${rU} users, ${rV} videos → ggMonth=0`);
+    }
+    catch (e) {
+        v2_1.logger.error("monthly ggMonth reset failed", e);
+    }
     v2_1.logger.info(`assignMonthlyChampion: ${champUsername} is Champion of ${monthKey} — community notified`);
 });
 // ─────────────────────────────────────────────────────────────────────────────
@@ -846,27 +1038,37 @@ exports.assignMonthlyChampion = (0, scheduler_1.onSchedule)({ schedule: "1 0 1 *
 // Trouve le 1er du ranking en cours et met isCurrentLeader=true
 // ─────────────────────────────────────────────────────────────────────────────
 exports.updateCurrentLeader = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * * *", region: "us-central1", timeoutSeconds: 60 }, async () => {
+    // ⚠️ MÊMES exclusions que l'écran Rankings (sinon flip-flop du leader).
+    // Les comptes creator/gameconic ne peuvent PAS être leader du classement.
+    // On prend le top 20 par ggMonth (GG DU MOIS) car le #1 global peut être un compte exclu.
     const topSnap = await db.collection("users")
-        .orderBy("ggReceived", "desc")
-        .limit(1)
+        .orderBy("ggMonth", "desc")
+        .limit(20)
         .get();
     if (topSnap.empty)
         return;
-    const leaderId = topSnap.docs[0].id;
-    const leaderGG = topSnap.docs[0].data().ggReceived || 0;
+    // Premier user ÉLIGIBLE (hors creator/gameconic) avec au moins 1 GG ce mois.
+    const leaderDoc = topSnap.docs.find((d) => {
+        const x = d.data();
+        return !rankExcluded(x) && (x.ggMonth || 0) > 0;
+    });
     const batch = db.batch();
-    // Retire le badge à tous les anciens leaders qui ne sont plus #1
-    const oldLeaderSnap = await db.collection("users").where("isCurrentLeader", "==", true).get();
-    for (const d of oldLeaderSnap.docs) {
-        if (d.id !== leaderId)
+    // Retire le badge à tous ceux qui l'ont mais ne sont pas le vrai leader éligible.
+    const flaggedSnap = await db.collection("users").where("isCurrentLeader", "==", true).get();
+    for (const d of flaggedSnap.docs) {
+        if (!leaderDoc || d.id !== leaderDoc.id)
             batch.update(d.ref, { isCurrentLeader: false });
     }
-    // Attribue au nouveau (seulement s'il a au moins 1 GG)
-    if (leaderGG > 0) {
-        batch.update(topSnap.docs[0].ref, { isCurrentLeader: true });
+    // Attribue au vrai leader s'il ne l'a pas déjà.
+    if (leaderDoc && !flaggedSnap.docs.some((d) => d.id === leaderDoc.id)) {
+        batch.update(leaderDoc.ref, { isCurrentLeader: true });
     }
     await batch.commit();
-    v2_1.logger.info(`updateCurrentLeader: leader is ${topSnap.docs[0].data().username} (${leaderGG} GG)`);
+    // Synchronise system/leaderStatus (lu par l'app) pour éviter tout conflit d'écriture.
+    if (leaderDoc) {
+        await db.collection("system").doc("leaderStatus").set({ currentLeaderId: leaderDoc.id, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    }
+    v2_1.logger.info(`updateCurrentLeader: leader = ${(leaderDoc === null || leaderDoc === void 0 ? void 0 : leaderDoc.data().username) || "aucun"}`);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 // SCHEDULED — decayStreakPoints (daily at 4h UTC)
@@ -878,7 +1080,7 @@ exports.updateCurrentLeader = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
 // Un GOAT (15,000 pts) inactif 30 jours → NOOB.
 // Force les gamers à rester actifs pour garder leur statut.
 // ─────────────────────────────────────────────────────────────────────────────
-exports.decayStreakPoints = (0, scheduler_1.onSchedule)({ schedule: "0 4 * * *", region: "us-central1", timeoutSeconds: 120 }, async () => {
+exports.decayStreakPoints = (0, scheduler_1.onSchedule)({ schedule: "0 4 * * *", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 120 }, async () => {
     var _a;
     v2_1.logger.info("decayStreakPoints: start");
     const now = new Date();
@@ -958,8 +1160,7 @@ exports.dailyLeaderBonus = (0, scheduler_1.onSchedule)({
         const leaderDoc = leaderSnap.docs[0];
         const leader = leaderDoc.data();
         // Don't give bonus to excluded account types
-        const EXCLUDED = ["creator", "gameconic"];
-        if (EXCLUDED.includes(leader.accountType)) {
+        if (rankExcluded(leader)) {
             v2_1.logger.info(`dailyLeaderBonus: ${leader.username} is ${leader.accountType} — skipped`);
             return;
         }
@@ -1034,6 +1235,69 @@ exports.checkExpiredSubscriptions = (0, scheduler_1.onSchedule)({ schedule: "eve
         v2_1.logger.error("checkExpiredSubscriptions error:", e);
     }
 });
+// SCHEDULED — notifLegendaryExpiringSoon (daily at 10h UTC)
+// Sends push + in-app notification to Legendary users whose subscription expires in ≤ 3 days.
+exports.notifLegendaryExpiringSoon = (0, scheduler_1.onSchedule)({ schedule: "every day 10:00", timeZone: "America/Toronto", memory: "256MiB" }, async () => {
+    v2_1.logger.info("notifLegendaryExpiringSoon: start");
+    try {
+        const now = admin.firestore.Timestamp.now();
+        const in3Days = admin.firestore.Timestamp.fromMillis(now.toMillis() + 3 * 24 * 60 * 60 * 1000);
+        // Subscriptions still active but ending within the next 3 days
+        const soonSnap = await db.collection("subscriptions")
+            .where("status", "==", "active")
+            .where("currentPeriodEnd", ">", now)
+            .where("currentPeriodEnd", "<=", in3Days)
+            .where("isTest", "==", false)
+            .get();
+        if (soonSnap.empty) {
+            v2_1.logger.info("notifLegendaryExpiringSoon: none expiring soon");
+            return;
+        }
+        v2_1.logger.info(`notifLegendaryExpiringSoon: ${soonSnap.size} expiring soon`);
+        let sent = 0;
+        for (const subDoc of soonSnap.docs) {
+            const sub = subDoc.data();
+            if (!sub.userId)
+                continue;
+            if (await isThrottled(sub.userId, "leg_expiring_soon"))
+                continue;
+            const userSnap = await db.collection("users").doc(sub.userId).get();
+            if (!userSnap.exists)
+                continue;
+            const u = userSnap.data();
+            const endTs = sub.currentPeriodEnd;
+            const diffMs = endTs.toMillis() - now.toMillis();
+            const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+            const messages = [
+                { t: "⚠️ Legendary expiring soon!", b: `Your Legendary subscription expires in ${diffDays} day${diffDays > 1 ? 's' : ''}. Renew to keep your exclusive perks!` },
+                { t: "👑 Your Legendary is ending soon", b: `Only ${diffDays} day${diffDays > 1 ? 's' : ''} left on your Legendary plan. Your frames and perks will be locked.` },
+                { t: "🔥 Renew your Legendary!", b: `${diffDays} day${diffDays > 1 ? 's' : ''} left — renew now so you don't lose anything!` },
+            ];
+            const msg = messages[Math.floor(Math.random() * messages.length)];
+            // Push notification
+            if (u.fcmToken) {
+                const ok = await sendPushNotif(u.fcmToken, msg.t, msg.b, { screen: "Settings" });
+                if (ok)
+                    sent++;
+            }
+            // In-app notification
+            await db.collection("notifications").add({
+                userId: sub.userId,
+                type: "system",
+                fromUserId: "SYSTEM",
+                fromUsername: "Gaming Actions",
+                text: `${msg.t} — ${msg.b}`,
+                read: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            await setThrottle(sub.userId, "leg_expiring_soon");
+        }
+        v2_1.logger.info(`notifLegendaryExpiringSoon: ${sent} push sent`);
+    }
+    catch (e) {
+        v2_1.logger.error("notifLegendaryExpiringSoon error:", e);
+    }
+});
 exports.reshuffleFeedOrder = (0, scheduler_1.onSchedule)({
     schedule: "every 6 hours",
     timeZone: "America/Toronto",
@@ -1077,8 +1341,9 @@ exports.reshuffleFeedOrder = (0, scheduler_1.onSchedule)({
 // Appel : https://us-central1-gamingactions-app.cloudfunctions.net/adminCleanup?key=SECRET
 // ─────────────────────────────────────────────────────────────────────────────
 exports.adminCleanup = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 540 }, async (req, res) => {
+    var _a;
     // Protection simple par clé (change SECRET pour ta propre valeur)
-    const SECRET = "ga_cleanup_2026";
+    const SECRET = (_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026";
     if (req.query.key !== SECRET) {
         res.status(403).send("Forbidden");
         return;
@@ -1097,11 +1362,13 @@ exports.adminCleanup = (0, https_1.onRequest)({ region: "us-central1", timeoutSe
             updates.ggCount = realGG;
             ggFixed++;
         }
-        // Commentaires réels
+        // Commentaires réels — synchronise les DEUX champs (commentsCount + commentCount)
+        // car l'UI lit commentCount (sans s) alors que la reco écrivait commentsCount (avec s).
         const cSnap = await db.collection("comments").where("videoId", "==", vDoc.id).get();
         const realComments = cSnap.size;
-        if (realComments !== (vData.commentsCount || 0)) {
+        if (realComments !== (vData.commentsCount || 0) || realComments !== (vData.commentCount || 0)) {
             updates.commentsCount = realComments;
+            updates.commentCount = realComments;
             commentsFixed++;
         }
         if (Object.keys(updates).length > 0) {
@@ -1121,21 +1388,21 @@ exports.adminCleanup = (0, https_1.onRequest)({ region: "us-central1", timeoutSe
             ggReceivedFixed++;
         }
     }
-    // 3. Met à jour le leader (le vrai #1)
-    const topSnap = await db.collection("users").orderBy("ggReceived", "desc").limit(1).get();
+    // 3. Met à jour le leader (le 1er ÉLIGIBLE, hors creator/gameconic/admin)
+    const topSnap = await db.collection("users").orderBy("ggMonth", "desc").limit(30).get();
     let leaderName = "none";
-    if (!topSnap.empty) {
-        const leaderId = topSnap.docs[0].id;
-        const leaderGG = topSnap.docs[0].data().ggReceived || 0;
+    const leaderDoc = topSnap.docs.find((d) => !rankExcluded(d.data()) && (d.data().ggMonth || 0) > 0);
+    {
+        const leaderId = (leaderDoc === null || leaderDoc === void 0 ? void 0 : leaderDoc.id) || null;
         const batch = db.batch();
         const oldLeaders = await db.collection("users").where("isCurrentLeader", "==", true).get();
         for (const d of oldLeaders.docs) {
             if (d.id !== leaderId)
                 batch.update(d.ref, { isCurrentLeader: false });
         }
-        if (leaderGG > 0) {
-            batch.update(topSnap.docs[0].ref, { isCurrentLeader: true });
-            leaderName = topSnap.docs[0].data().username || leaderId;
+        if (leaderDoc) {
+            batch.update(leaderDoc.ref, { isCurrentLeader: true });
+            leaderName = leaderDoc.data().username || leaderId;
         }
         await batch.commit();
     }
@@ -1152,7 +1419,7 @@ exports.adminCleanup = (0, https_1.onRequest)({ region: "us-central1", timeoutSe
 // ═════════════════════════════════════════════════════════════════════════════
 // DATA MANAGEMENT — export/import jeux, genres et vidéos pour révision manuelle
 // ═════════════════════════════════════════════════════════════════════════════
-const CLEANUP_KEY = "ga_cleanup_2026";
+const CLEANUP_KEY = (_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026";
 // Échappe une valeur pour CSV (guillemets, virgules, retours ligne)
 function csvCell(val) {
     if (val === null || val === undefined)
@@ -1392,8 +1659,8 @@ exports.exportDuplicates = (0, https_1.onRequest)({ region: "us-central1", timeo
 // puis uploade directement depuis l'app vers Mux. Ensuite elle appelle
 // muxWebhook quand Mux a fini le transcodage pour mettre à jour Firestore.
 // ═════════════════════════════════════════════════════════════════════════════
-const MUX_TOKEN_ID = "de3558c1-e46f-4cc7-81da-5683fecf09cf"; // ← colle ici
-const MUX_TOKEN_SECRET = "oDSQSeS/iShNpWXskkSdx7pMokiJFB2I0r/+ImtwY015DVqbs5Jo/r+UFX8zpWdgsgKDXxljjuZ"; // ← colle ici
+const MUX_TOKEN_ID = process.env.MUX_TOKEN_ID;
+const MUX_TOKEN_SECRET = process.env.MUX_TOKEN_SECRET;
 const MUX_BASE_URL = "https://api.mux.com";
 const muxAuth = Buffer.from(`${MUX_TOKEN_ID}:${MUX_TOKEN_SECRET}`).toString("base64");
 // ── 1. L'app appelle cette fonction pour obtenir une URL d'upload Mux ─────
@@ -1403,6 +1670,18 @@ exports.muxGetUploadUrl = (0, https_1.onRequest)({ region: "us-central1", timeou
     var _a;
     if (req.method !== "POST") {
         res.status(405).send("POST only");
+        return;
+    }
+    const authHeader = req.headers.authorization;
+    if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer '))) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    try {
+        await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+    }
+    catch (_b) {
+        res.status(401).json({ error: 'Invalid token' });
         return;
     }
     try {
@@ -1477,15 +1756,26 @@ exports.muxWebhook = (0, https_1.onRequest)({ region: "us-central1", timeoutSeco
             return;
         }
         const videoRef = videoSnap.docs[0].ref;
-        await videoRef.update({
+        const videoData = videoSnap.docs[0].data();
+        // Respecte le choix de l'utilisateur :
+        //  1) cover custom uploadée (thumbnail non-Mux) → on n'y touche pas
+        //  2) frame choisie (thumbnailTime) → thumbnail Mux à ce temps
+        //  3) sinon → thumbnail Mux par défaut à 3 s
+        const hasCustomCover = typeof videoData.thumbnail === "string"
+            && videoData.thumbnail.length > 0
+            && !videoData.thumbnail.includes("image.mux.com");
+        const t = typeof videoData.thumbnailTime === "number" ? videoData.thumbnailTime : 3;
+        const update = {
             muxAssetId: assetId,
             muxPlaybackId: playbackId,
             duration: Math.round(duration || 0),
             muxStatus: "ready",
-            // thumbnail générée automatiquement par Mux — pas de quota de transformation
-            thumbnail: `https://image.mux.com/${playbackId}/thumbnail.jpg?time=3&width=400&height=225&fit_mode=crop`,
             videoUrl: `https://stream.mux.com/${playbackId}.m3u8`, // HLS adaptatif
-        });
+        };
+        if (!hasCustomCover) {
+            update.thumbnail = `https://image.mux.com/${playbackId}/thumbnail.jpg?time=${t}&width=400&height=225&fit_mode=crop`;
+        }
+        await videoRef.update(update);
         v2_1.logger.info(`muxWebhook: video ${videoSnap.docs[0].id} ready — playbackId ${playbackId}`);
         res.status(200).send("ok");
     }
@@ -1500,8 +1790,8 @@ exports.muxWebhook = (0, https_1.onRequest)({ region: "us-central1", timeoutSeco
 // pour chacune : télécharge depuis Cloudinary → uploade vers Mux → met à jour Firestore.
 // Sécurisé par clé. Peut être relancé (skip les vidéos déjà migrées).
 exports.migrateCloudinaryToMux = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 540, memory: "1GiB" }, async (req, res) => {
-    var _a;
-    if (req.query.key !== "ga_cleanup_2026") {
+    var _a, _b;
+    if (req.query.key !== ((_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026")) {
         res.status(403).send("Forbidden");
         return;
     }
@@ -1541,7 +1831,7 @@ exports.migrateCloudinaryToMux = (0, https_1.onRequest)({ region: "us-central1",
             });
             const uploadData = await uploadResp.json();
             if (!uploadResp.ok)
-                throw new Error(((_a = uploadData.error) === null || _a === void 0 ? void 0 : _a.message) || "Mux upload create failed");
+                throw new Error(((_b = uploadData.error) === null || _b === void 0 ? void 0 : _b.message) || "Mux upload create failed");
             const muxUploadUrl = uploadData.data.url;
             const muxUploadId = uploadData.data.id;
             // Étape 2 : télécharger la vidéo depuis Cloudinary
@@ -1587,15 +1877,16 @@ exports.migrateCloudinaryToMux = (0, https_1.onRequest)({ region: "us-central1",
 // NOTIF 5 — Ton rang dans le classement (lundi et jeudi à 17h UTC)
 // Cible : tous les users avec un token, message personnalisé avec leur rang
 // ─────────────────────────────────────────────────────────────────────────────
-exports.notifYourRank = (0, scheduler_1.onSchedule)({ schedule: "0 17 * * 1,4", region: "us-central1", timeoutSeconds: 300 }, async () => {
+exports.notifYourRank = (0, scheduler_1.onSchedule)({ schedule: "0 17 * * 1,4", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 300 }, async () => {
     v2_1.logger.info("notifYourRank: start");
-    // Récupère tous les users triés par ggReceived
+    // Récupère tous les users triés par ggMonth
     const usersSnap = await db.collection("users")
-        .orderBy("ggReceived", "desc")
-        .where("fcmToken", "!=", "")
+        .orderBy("ggMonth", "desc")
         .limit(500)
         .get();
-    const ranked = usersSnap.docs.map((d, i) => (Object.assign({ id: d.id, rank: i + 1 }, d.data())));
+    const ranked = usersSnap.docs
+        .filter((d) => !rankExcluded(d.data()))
+        .map((d, i) => (Object.assign({ id: d.id, rank: i + 1 }, d.data())));
     let sent = 0;
     for (let i = 0; i < ranked.length; i++) {
         const user = ranked[i];
@@ -1604,7 +1895,7 @@ exports.notifYourRank = (0, scheduler_1.onSchedule)({ schedule: "0 17 * * 1,4", 
         if (await isThrottled(user.id, "your_rank"))
             continue;
         const rank = user.rank;
-        const gg = user.ggReceived || 0;
+        const gg = user.ggMonth || 0;
         let title = "🏆 Your ranking";
         let body = "";
         if (rank === 1) {
@@ -1617,7 +1908,7 @@ exports.notifYourRank = (0, scheduler_1.onSchedule)({ schedule: "0 17 * * 1,4", 
         }
         else {
             const above = ranked[i - 1];
-            const gap = (above.ggReceived || 0) - gg;
+            const gap = (above.ggMonth || 0) - gg;
             if (gap <= 3) {
                 const closemsgs = [
                     `🔥 You're #${rank} — only ${gap} GG${gap > 1 ? "s" : ""} from #${rank - 1}! Push now!`,
@@ -1735,13 +2026,31 @@ exports.onMentionNotif = (0, firestore_1.onDocumentWritten)("notifications/{noti
 // Protégé par la même clé que adminCleanup.
 // ─────────────────────────────────────────────────────────────────────────────
 exports.broadcastPush = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 300, cors: true }, async (req, res) => {
-    if (req.query.key !== "ga_cleanup_2026") {
-        res.status(403).send("Forbidden");
+    var _a, _b;
+    if (req.method !== "POST") {
+        res.status(405).json({ error: "POST only" });
         return;
     }
-    if (req.method !== "POST") {
-        res.status(405).send("POST only");
-        return;
+    // Auth : soit clé admin (?key=), soit token Firebase d'un utilisateur isAdmin
+    const keyOk = req.query.key === ((_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026");
+    if (!keyOk) {
+        const authHeader = req.headers.authorization;
+        if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith("Bearer "))) {
+            res.status(401).json({ error: "Unauthorized" });
+            return;
+        }
+        try {
+            const decoded = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+            const uDoc = await db.collection("users").doc(decoded.uid).get();
+            if (!uDoc.exists || ((_b = uDoc.data()) === null || _b === void 0 ? void 0 : _b.isAdmin) !== true) {
+                res.status(403).json({ error: "Not admin" });
+                return;
+            }
+        }
+        catch (_c) {
+            res.status(401).json({ error: "Invalid token" });
+            return;
+        }
     }
     const { title, body, screen } = req.body || {};
     if (!title || !body) {
@@ -1771,6 +2080,417 @@ exports.broadcastPush = (0, https_1.onRequest)({ region: "us-central1", timeoutS
     res.status(200).json({ ok: true, sent, failed, total: docs.length });
 });
 // ─────────────────────────────────────────────────────────────────────────────
+// TEST — envoie immédiatement une notif de classement à un user donné.
+// Sert à valider toute la chaîne (token + push + calcul de rang) sans attendre
+// les crons ni le throttle. Protégé par ADMIN_SECRET.
+//   GET/POST  ?key=ga_cleanup_2026&uid=<UID>
+// ─────────────────────────────────────────────────────────────────────────────
+exports.testMyRankNotif = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 60, cors: true }, async (req, res) => {
+    var _a;
+    if (req.query.key !== ((_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026")) {
+        res.status(403).send("Forbidden");
+        return;
+    }
+    const uid = req.query.uid || (req.body && req.body.uid);
+    if (!uid) {
+        res.status(400).json({ error: "uid required" });
+        return;
+    }
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!userSnap.exists) {
+        res.status(404).json({ error: "user not found" });
+        return;
+    }
+    const u = userSnap.data();
+    const token = u.fcmToken;
+    const excluded = rankExcluded(u);
+    // Calcule le rang parmi les comptes NON exclus
+    const topSnap = await db.collection("users").orderBy("ggMonth", "desc").limit(200).get();
+    let rank = 0, pos = 0;
+    for (const d of topSnap.docs) {
+        if (rankExcluded(d.data()))
+            continue;
+        pos++;
+        if (d.id === uid) {
+            rank = pos;
+            break;
+        }
+    }
+    // Envoi direct + lecture du REÇU (le ticket "ok" ne garantit PAS la livraison)
+    let ticketStatus = "no_token", ticketId = "", ticketError = "";
+    let receiptStatus = "", receiptError = "", receiptDetails = "";
+    if (token && expo_server_sdk_1.Expo.isExpoPushToken(token)) {
+        try {
+            const tickets = await expo.sendPushNotificationsAsync([{
+                    to: token, sound: "default", title: "🏆 Test ranking notification",
+                    body: rank ? `You're currently #${rank} with ${u.ggMonth || 0} GGs!` : "Test push from Gaming Actions.",
+                    data: { screen: "Rankings" }, priority: "high", channelId: "gaming_actions",
+                }]);
+            const t = tickets[0];
+            ticketStatus = t.status;
+            if (t.status === "ok") {
+                ticketId = t.id;
+            }
+            else {
+                ticketError = t.message || JSON.stringify(t.details || {});
+            }
+        }
+        catch (e) {
+            ticketStatus = "exception";
+            ticketError = String((e === null || e === void 0 ? void 0 : e.message) || e);
+        }
+        // Lecture du reçu (donne la vraie erreur APNs : DeviceNotRegistered, etc.)
+        if (ticketId) {
+            await new Promise(r => setTimeout(r, 4000));
+            try {
+                const receipts = await expo.getPushNotificationReceiptsAsync([ticketId]);
+                const rec = receipts[ticketId];
+                if (rec) {
+                    receiptStatus = rec.status;
+                    if (rec.status === "error") {
+                        receiptError = rec.message || "";
+                        receiptDetails = JSON.stringify(rec.details || {});
+                    }
+                }
+                else {
+                    receiptStatus = "not_ready";
+                }
+            }
+            catch (e) {
+                receiptStatus = "exception";
+                receiptError = String((e === null || e === void 0 ? void 0 : e.message) || e);
+            }
+        }
+    }
+    else if (token) {
+        ticketStatus = "invalid_token_format";
+    }
+    let diagnostic;
+    if (!token)
+        diagnostic = "Aucun fcmToken → impossible de recevoir un push. Rouvre l'app sur appareil physique + accepte les notifs.";
+    else if (ticketStatus !== "ok")
+        diagnostic = `Expo a rejeté l'envoi (ticket=${ticketStatus}): ${ticketError}`;
+    else if (receiptStatus === "error") {
+        if (receiptError.includes("DeviceNotRegistered"))
+            diagnostic = "Token périmé/désinscrit → rouvre l'app pour en régénérer un.";
+        else if (receiptDetails.includes("MismatchSenderId") || receiptError.toLowerCase().includes("credential") || receiptError.toLowerCase().includes("apns"))
+            diagnostic = "Problème de credentials push (APNs iOS / FCM). À corriger côté EAS/Expo — voir receiptDetails.";
+        else
+            diagnostic = `Apple/Google a rejeté la livraison: ${receiptError} ${receiptDetails}`;
+    }
+    else if (receiptStatus === "ok")
+        diagnostic = "Livraison confirmée par Expo+Apple. Si tu ne vois rien : notifs désactivées pour l'app dans Réglages iOS, ou app au premier plan.";
+    else
+        diagnostic = `Ticket OK mais reçu pas encore prêt (${receiptStatus}). Relance dans 10 s.`;
+    res.status(200).json({
+        uid,
+        hasToken: !!token,
+        tokenPreview: token ? String(token).slice(0, 24) + "…" : null,
+        isAdmin: !!u.isAdmin,
+        accountType: u.accountType || "(none)",
+        excludedFromRanking: excluded,
+        rank: rank || null,
+        ggMonth: u.ggMonth || 0,
+        ticketStatus, ticketError: ticketError || null,
+        receiptStatus: receiptStatus || null, receiptError: receiptError || null, receiptDetails: receiptDetails || null,
+        diagnostic,
+    });
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX COUNTS — recompte gg + commentaires de toutes les vidéos et corrige les
+// DEUX champs (commentCount + commentsCount). À la demande, protégé par clé.
+//   GET  ?key=ga_cleanup_2026
+// ─────────────────────────────────────────────────────────────────────────────
+exports.fixCounts = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 540, memory: "512MiB" }, async (req, res) => {
+    var _a;
+    if (req.query.key !== ((_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026")) {
+        res.status(403).send("Forbidden");
+        return;
+    }
+    const videosSnap = await db.collection("videos").get();
+    let ggFixed = 0, commentsFixed = 0, scanned = 0;
+    for (const vDoc of videosSnap.docs) {
+        const vData = vDoc.data();
+        scanned++;
+        const updates = {};
+        const ggSnap = await db.collection("ggs").where("videoId", "==", vDoc.id).get();
+        const realGG = ggSnap.size;
+        if (realGG !== (vData.ggCount || 0)) {
+            updates.ggCount = realGG;
+            ggFixed++;
+        }
+        const cSnap = await db.collection("comments").where("videoId", "==", vDoc.id).get();
+        const realC = cSnap.size;
+        if (realC !== (vData.commentsCount || 0) || realC !== (vData.commentCount || 0)) {
+            updates.commentsCount = realC;
+            updates.commentCount = realC;
+            commentsFixed++;
+        }
+        if (Object.keys(updates).length > 0)
+            await vDoc.ref.update(updates);
+    }
+    v2_1.logger.info(`fixCounts: scanned=${scanned} ggFixed=${ggFixed} commentsFixed=${commentsFixed}`);
+    res.status(200).json({ scanned, ggFixed, commentsFixed });
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// MIGRATION MENSUELLE — à lancer UNE fois au démarrage du système mensuel.
+// Tous les GG existants = JUIN. On CLÔTURE juin proprement puis on ouvre juillet :
+//   1. Date tous les GG existants comme JUIN 2026 (backfill createdAt manquant)
+//   2. Reconstruit le classement de JUIN depuis les totaux all-time (ggReceived/ggCount)
+//   3. Grave le WALL de juin (hall_of_fame/2026-06) : champion + top 3 + gagnants par genre
+//   4. Couronne le champion de juin (frame champion, badge, +500 GA, +500 Streak)
+//   5. Remet ggMonth=0 partout (juillet démarre à zéro) + efface le faux #1
+//   GET  ?key=ga_cleanup_2026
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX JUNE CHAMPION — retire N GG à un user (proprement) puis re-couronne juin
+// SANS toucher au mois en cours. Défaut : retire 2 GG à AM_YO_NIGHTMARE.
+//   GET  ?key=ga_cleanup_2026[&uid=...&count=2]
+// ─────────────────────────────────────────────────────────────────────────────
+exports.fixJuneChampion = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 300, memory: "512MiB" }, async (req, res) => {
+    var _a;
+    if (req.query.key !== ((_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026")) {
+        res.status(403).send("Forbidden");
+        return;
+    }
+    const MONTH_KEY = "2026-06";
+    const uid = req.query.uid || "UWMiwXnrIES0Uj1KJxCynYwmkI12";
+    const count = parseInt(req.query.count || "2", 10);
+    // 1. Supprime `count` GG reçus par ce user (sur ses vidéos)
+    const myVids = await db.collection("videos").where("userId", "==", uid).get();
+    let removed = 0;
+    for (const vDoc of myVids.docs) {
+        if (removed >= count)
+            break;
+        const ggSnap = await db.collection("ggs").where("videoId", "==", vDoc.id).limit(count - removed).get();
+        for (const g of ggSnap.docs) {
+            if (removed >= count)
+                break;
+            await g.ref.delete();
+            removed++;
+        }
+    }
+    // 2. Recompte proprement ses vidéos (ggCount) + son total (ggReceived)
+    let totalRec = 0;
+    const rb = db.batch();
+    for (const vDoc of myVids.docs) {
+        const ggc = (await db.collection("ggs").where("videoId", "==", vDoc.id).get()).size;
+        if ((vDoc.data().ggCount || 0) !== ggc)
+            rb.update(vDoc.ref, { ggCount: ggc });
+        totalRec += ggc;
+    }
+    await rb.commit();
+    await db.collection("users").doc(uid).update({ ggReceived: totalRec });
+    // 3. Recalcule le podium de juin depuis ggReceived (données de juin, à jour)
+    const topSnap = await db.collection("users").orderBy("ggReceived", "desc").limit(30).get();
+    const eligibleTop = topSnap.docs.filter((d) => !rankExcluded(d.data()) && (d.data().ggReceived || 0) > 0);
+    const podium = eligibleTop.slice(0, 3).map((d, i) => {
+        const u = d.data();
+        return {
+            rank: i + 1, uid: d.id, username: u.username || "Player", avatar: u.avatar || "",
+            ggMonth: u.ggReceived || 0, plan: u.plan || "free", streakLevel: u.streakLevel || 0,
+            accountType: u.accountType || "gamer",
+        };
+    });
+    // 4. Réécrit champion/podium du Wall de juin (garde les genres existants)
+    const existing = (await db.collection("hall_of_fame").doc(MONTH_KEY).get()).data() || {};
+    await db.collection("hall_of_fame").doc(MONTH_KEY).set(Object.assign(Object.assign({}, existing), { month: MONTH_KEY, champion: podium[0] || null, podium, updatedAt: admin.firestore.FieldValue.serverTimestamp() }), { merge: true });
+    // 5. Bascule la couronne : retire "champion" aux autres, donne au vrai #1 de juin
+    let championName = "none";
+    if (eligibleTop[0]) {
+        const champDoc = eligibleTop[0];
+        const champData = champDoc.data();
+        championName = champData.username || "Player";
+        const oldChampSnap = await db.collection("users").where("isChampion", "==", true).get();
+        const cb = db.batch();
+        for (const oldDoc of oldChampSnap.docs) {
+            if (oldDoc.id === champDoc.id)
+                continue;
+            const od = oldDoc.data();
+            cb.update(oldDoc.ref, Object.assign({ isChampion: false, ownedFrames: (od.ownedFrames || []).filter((f) => f !== "champion"), ownedVideoFrames: (od.ownedVideoFrames || []).filter((f) => f !== "vf_champion") }, (od.equippedFrame === "champion" ? { equippedFrame: "none" } : {})));
+        }
+        await cb.commit();
+        await champDoc.ref.update({
+            isChampion: true, championMonth: MONTH_KEY,
+            ownedFrames: [...new Set([...(champData.ownedFrames || []), "champion"])],
+            ownedVideoFrames: [...new Set([...(champData.ownedVideoFrames || []), "vf_champion"])],
+            equippedFrame: "champion",
+        });
+    }
+    v2_1.logger.info(`fixJuneChampion: removed=${removed} uid=${uid} newGGReceived=${totalRec} champion=${championName}`);
+    res.status(200).json({ removed, uid, newGGReceived: totalRec, champion: championName, podium });
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// (migration mensuelle initiale)
+// ─────────────────────────────────────────────────────────────────────────────
+exports.migrateGGMonthly = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 540, memory: "512MiB" }, async (req, res) => {
+    var _a;
+    if (req.query.key !== ((_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026")) {
+        res.status(403).send("Forbidden");
+        return;
+    }
+    const MONTH_KEY = "2026-06";
+    const juneDate = admin.firestore.Timestamp.fromDate(new Date("2026-06-15T12:00:00-04:00"));
+    const flush = async (docs, fn) => {
+        let b = db.batch();
+        let n = 0;
+        let total = 0;
+        for (const d of docs) {
+            if (!fn(b, d))
+                continue;
+            n++;
+            total++;
+            if (n >= 400) {
+                await b.commit();
+                b = db.batch();
+                n = 0;
+            }
+        }
+        if (n > 0)
+            await b.commit();
+        return total;
+    };
+    // 1. GG → createdAt juin si manquant
+    const ggsSnap = await db.collection("ggs").get();
+    const ggDated = await flush(ggsSnap.docs, (b, d) => {
+        if (d.data().createdAt)
+            return false;
+        b.update(d.ref, { createdAt: juneDate });
+        return true;
+    });
+    // 2+3. WALL DE JUIN — top 3 global (par ggReceived all-time = données de juin)
+    const topSnap = await db.collection("users").orderBy("ggReceived", "desc").limit(30).get();
+    const eligibleTop = topSnap.docs.filter((d) => !rankExcluded(d.data()) && (d.data().ggReceived || 0) > 0);
+    const podium = eligibleTop.slice(0, 3).map((d, i) => {
+        const u = d.data();
+        return {
+            rank: i + 1, uid: d.id, username: u.username || "Player", avatar: u.avatar || "",
+            ggMonth: u.ggReceived || 0, plan: u.plan || "free", streakLevel: u.streakLevel || 0,
+            accountType: u.accountType || "gamer",
+        };
+    });
+    // Gagnants par genre (agrège videos.ggCount all-time par genre)
+    const genreWinners = {};
+    const vidsSnap = await db.collection("videos").get();
+    const perGenre = {};
+    for (const vDoc of vidsSnap.docs) {
+        const v = vDoc.data();
+        const g = v.genre;
+        const uid = v.userId;
+        const gg = v.ggCount || 0;
+        if (!g || !uid || gg <= 0 || v.banned || v.restricted)
+            continue;
+        perGenre[g] = perGenre[g] || {};
+        if (!perGenre[g][uid])
+            perGenre[g][uid] = { username: v.username || "Player", avatar: v.avatar || "", gg: 0 };
+        perGenre[g][uid].gg += gg;
+    }
+    for (const g of Object.keys(perGenre)) {
+        const top = Object.entries(perGenre[g]).sort((a, b) => b[1].gg - a[1].gg)[0];
+        if (top)
+            genreWinners[g] = { uid: top[0], username: top[1].username, avatar: top[1].avatar, ggMonth: top[1].gg };
+    }
+    await db.collection("hall_of_fame").doc(MONTH_KEY).set({
+        month: MONTH_KEY,
+        champion: podium[0] || null,
+        podium,
+        genres: genreWinners,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    // 4. Couronne le champion de juin
+    let championName = "none";
+    if (eligibleTop[0]) {
+        const champRef = eligibleTop[0].ref;
+        const champData = eligibleTop[0].data();
+        championName = champData.username || "Player";
+        // retire la frame champion aux anciens champions différents
+        const oldChampSnap = await db.collection("users").where("isChampion", "==", true).get();
+        const cb = db.batch();
+        for (const oldDoc of oldChampSnap.docs) {
+            if (oldDoc.id === champRef.id)
+                continue;
+            const od = oldDoc.data();
+            cb.update(oldDoc.ref, Object.assign({ isChampion: false, ownedFrames: (od.ownedFrames || []).filter((f) => f !== "champion"), ownedVideoFrames: (od.ownedVideoFrames || []).filter((f) => f !== "vf_champion") }, (od.equippedFrame === "champion" ? { equippedFrame: "none" } : {})));
+        }
+        await cb.commit();
+        const champStreakPoints = (champData.streakPoints || 0) + 500;
+        await champRef.update({
+            isChampion: true,
+            championMonth: MONTH_KEY,
+            ownedFrames: [...new Set([...(champData.ownedFrames || []), "champion"])],
+            ownedVideoFrames: [...new Set([...(champData.ownedVideoFrames || []), "vf_champion"])],
+            equippedFrame: "champion",
+            gaPoints: (champData.gaPoints || 0) + 500,
+            streakPoints: champStreakPoints,
+            streakLevel: calcStreakLevel(champStreakPoints),
+        });
+        await db.collection("notifications").add({
+            userId: champRef.id, type: "system", fromUserId: "SYSTEM", fromUsername: "Gaming Actions",
+            text: `🏆 Congratulations ${championName}! You are the Champion of June ${MONTH_KEY}! 👑⚡ +500 GA Points!`,
+            read: false, createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+    // 5. RESET JUILLET — ggMonth=0 partout + efface le faux #1
+    const usersSnap = await db.collection("users").get();
+    const usersReset = await flush(usersSnap.docs, (b, d) => {
+        const u = d.data();
+        const patch = {};
+        if ((u.ggMonth || 0) !== 0 || u.ggMonth === undefined)
+            patch.ggMonth = 0;
+        if (u.isCurrentLeader)
+            patch.isCurrentLeader = false;
+        if (Object.keys(patch).length === 0)
+            return false;
+        b.update(d.ref, patch);
+        return true;
+    });
+    const vidsReset = await flush(vidsSnap.docs, (b, d) => {
+        if (d.data().ggMonth === 0)
+            return false;
+        b.update(d.ref, { ggMonth: 0 });
+        return true;
+    });
+    await db.collection("system").doc("leaderStatus").set({ currentLeaderId: null, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    v2_1.logger.info(`migrateGGMonthly: ggDated=${ggDated} champion=${championName} podium=${podium.length} genres=${Object.keys(genreWinners).length} usersReset=${usersReset} vidsReset=${vidsReset}`);
+    res.status(200).json({ ggDated, champion: championName, podium, genres: genreWinners, usersReset, vidsReset });
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// TEST GROUPE — envoie la notif de classement personnalisée à TOUS les users
+// (pour tester avec plusieurs testeurs en même temps). Ignore le throttle.
+//   GET  ?key=ga_cleanup_2026
+// ─────────────────────────────────────────────────────────────────────────────
+exports.triggerRankNotifAll = (0, https_1.onRequest)({ region: "us-central1", timeoutSeconds: 300, cors: true }, async (req, res) => {
+    var _a;
+    if (req.query.key !== ((_a = process.env.ADMIN_SECRET) !== null && _a !== void 0 ? _a : "ga_cleanup_2026")) {
+        res.status(403).send("Forbidden");
+        return;
+    }
+    const snap = await db.collection("users").orderBy("ggMonth", "desc").limit(500).get();
+    const ranked = [];
+    let pos = 0;
+    for (const d of snap.docs) {
+        const data = d.data();
+        if (rankExcluded(data))
+            continue;
+        pos++;
+        ranked.push({ id: d.id, rank: pos, fcmToken: data.fcmToken || "", gg: data.ggMonth || 0 });
+    }
+    let sent = 0, noToken = 0, failed = 0;
+    for (const u of ranked) {
+        if (!u.fcmToken) {
+            noToken++;
+            continue;
+        }
+        const ok = await sendPushNotif(u.fcmToken, "🏆 Your ranking", u.rank === 1 ? `👑 You're #1 with ${u.gg} GGs! Defend your throne!` : `You're #${u.rank} with ${u.gg} GGs. Keep climbing! 🔥`, { screen: "Rankings" });
+        if (ok)
+            sent++;
+        else
+            failed++;
+    }
+    v2_1.logger.info(`triggerRankNotifAll: sent=${sent} noToken=${noToken} failed=${failed}`);
+    res.status(200).json({ totalRanked: ranked.length, sent, noToken, failed });
+});
+// ─────────────────────────────────────────────────────────────────────────────
 // RANKING CHANGE NOTIFICATIONS — Toutes les 15 minutes
 //
 // Détecte les mouvements dans le top 10 et envoie des notifs personnalisées :
@@ -1790,15 +2510,34 @@ exports.broadcastPush = (0, https_1.onRequest)({ region: "us-central1", timeoutS
 // Throttle court : 30-120 min selon le type (évite le flood sur positions stables)
 // ─────────────────────────────────────────────────────────────────────────────
 const RANKING_EXCLUDED = ["creator", "gameconic"];
-/** true si on est dans les N derniers jours du mois */
-function isLastNDaysOfMonth(date, n) {
-    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-    return date.getDate() >= lastDay - n + 1;
+// Composants date/heure ACTUELS en heure du Canada (America/Toronto — gère l'heure d'été).
+function torontoParts() {
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Toronto",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    const p = {};
+    for (const part of fmt.formatToParts(new Date()))
+        p[part.type] = part.value;
+    const hour = +p.hour === 24 ? 0 : +p.hour;
+    return { year: +p.year, month: +p.month, day: +p.day, hour, minute: +p.minute };
 }
-/** true si on est dans les N dernières heures du mois */
-function isLastNHoursOfMonth(date, n) {
-    const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 1);
-    return endOfMonth.getTime() - date.getTime() <= n * 60 * 60 * 1000;
+// Minutes restantes avant la fin du mois, en heure du Canada.
+function minutesLeftInMonthTZ() {
+    const { year, month, day, hour, minute } = torontoParts();
+    const lastDay = new Date(year, month, 0).getDate(); // mois 1-12 → dernier jour du mois courant
+    return ((lastDay - day) * 24 * 60) + ((24 * 60) - (hour * 60 + minute));
+}
+/** true si on est dans les N derniers jours du mois (heure Canada) */
+function isLastNDaysOfMonth(n) {
+    const { year, month, day } = torontoParts();
+    const lastDay = new Date(year, month, 0).getDate();
+    return day >= lastDay - n + 1;
+}
+/** true si on est dans les N dernières heures du mois (heure Canada) */
+function isLastNHoursOfMonth(n) {
+    return minutesLeftInMonthTZ() <= n * 60;
 }
 /** Throttle court (minutes) — indépendant du throttle hebdo */
 async function isThrottledMin(userId, type, minutes) {
@@ -1812,23 +2551,22 @@ async function isThrottledMin(userId, type, minutes) {
 }
 exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * * *", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => {
     var _a, _b;
-    const now = new Date();
-    const isLastDays = isLastNDaysOfMonth(now, 3);
-    const isLastHours = isLastNHoursOfMonth(now, 3);
+    const isLastDays = isLastNDaysOfMonth(3);
+    const isLastHours = isLastNHoursOfMonth(3);
     // ── Charge le top 50 et filtre les comptes exclus ──────────────────────
     const topSnap = await db.collection("users")
-        .orderBy("ggReceived", "desc")
+        .orderBy("ggMonth", "desc")
         .limit(60)
         .get();
     const ranked = [];
     let rankPos = 1;
     for (const d of topSnap.docs) {
         const data = d.data();
-        if (RANKING_EXCLUDED.includes(data.accountType))
+        if (rankExcluded(data))
             continue;
         ranked.push({
             id: d.id, rank: rankPos++,
-            ggReceived: data.ggReceived || 0,
+            ggMonth: data.ggMonth || 0,
             username: data.username || "",
             fcmToken: data.fcmToken || "",
             accountType: data.accountType || "",
@@ -1851,7 +2589,7 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
             if (await isThrottledMin(user.id, "rank_enter10", 60))
                 continue;
             const above = ranked[user.rank - 2];
-            const gapAbove = above ? above.ggReceived - user.ggReceived : 0;
+            const gapAbove = above ? above.ggMonth - user.ggMonth : 0;
             await sendPushNotif(user.fcmToken, "🔥 You entered the Top 10!", `You're #${user.rank}!${gapAbove > 0 ? ` ${gapAbove} GGs from #${user.rank - 1}.` : ""} Keep climbing! 🎯`, { screen: "Rankings" });
             await setThrottle(user.id, "rank_enter10");
         }
@@ -1873,7 +2611,7 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
             if (await isThrottledMin(user.id, "rank_down", 45))
                 continue;
             const below = ranked[user.rank]; // juste en dessous
-            const gapBelow = below ? user.ggReceived - below.ggReceived : 0;
+            const gapBelow = below ? user.ggMonth - below.ggMonth : 0;
             await sendPushNotif(user.fcmToken, `⚠️ You dropped to #${user.rank}`, `${gapBelow <= 3 ? `Only ${gapBelow} GG${gapBelow !== 1 ? "s" : ""} keeping you here! ` : ""}Post a clip to hold your spot! 🎯`, { screen: "Rankings" });
             await setThrottle(user.id, "rank_down");
         }
@@ -1901,7 +2639,7 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
         if (await isThrottledMin(user.id, "near_top10", 60 * 20))
             continue;
         const top10Last = currentTop10[currentTop10.length - 1];
-        const gap = top10Last ? top10Last.ggReceived - user.ggReceived : 0;
+        const gap = top10Last ? top10Last.ggMonth - user.ggMonth : 0;
         if (gap > 30)
             continue; // trop loin, pas de notif
         await sendPushNotif(user.fcmToken, `🎯 Top 10 is within reach! (#${user.rank})`, `Only ${gap} GG${gap !== 1 ? "s" : ""} from the Top 10! One clip can change everything. 🔥`, { screen: "Rankings" });
@@ -1909,8 +2647,7 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
     }
     // ── 3 derniers jours du mois : countdown quotidien pour le top 20 ────────
     if (isLastDays && !isLastHours) {
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        const daysLeft = Math.ceil((endOfMonth.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+        const daysLeft = Math.ceil(minutesLeftInMonthTZ() / (24 * 60));
         for (const user of ranked.slice(0, 20)) {
             if (!user.fcmToken)
                 continue;
@@ -1918,8 +2655,8 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
                 continue; // 1 fois/jour
             const above = ranked[user.rank - 2];
             const below = ranked[user.rank];
-            const gapAbove = above ? above.ggReceived - user.ggReceived : 0;
-            const gapBelow = below ? user.ggReceived - below.ggReceived : 0;
+            const gapAbove = above ? above.ggMonth - user.ggMonth : 0;
+            const gapBelow = below ? user.ggMonth - below.ggMonth : 0;
             let extra = "";
             if (user.rank === 1)
                 extra = " Hold your crown! 👑";
@@ -1927,14 +2664,13 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
                 extra = ` Only ${gapAbove} GGs from #${user.rank - 1}! 🔥`;
             else if (gapBelow <= 3)
                 extra = ` #${user.rank + 1} is only ${gapBelow} GGs behind!`;
-            await sendPushNotif(user.fcmToken, `⏳ ${daysLeft} day${daysLeft > 1 ? "s" : ""} left — You're #${user.rank}`, `${user.ggReceived} GGs this month.${extra} Rankings close ${daysLeft === 1 ? "tomorrow" : `in ${daysLeft} days`}!`, { screen: "Rankings" });
+            await sendPushNotif(user.fcmToken, `⏳ ${daysLeft} day${daysLeft > 1 ? "s" : ""} left — You're #${user.rank}`, `${user.ggMonth} GGs this month.${extra} Rankings close ${daysLeft === 1 ? "tomorrow" : `in ${daysLeft} days`}!`, { screen: "Rankings" });
             await setThrottle(user.id, "endmonth_day");
         }
     }
     // ── 3 dernières heures : urgence toutes les 15 min pour le top 15 ────────
     if (isLastHours) {
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        const minLeft = Math.ceil((endOfMonth.getTime() - now.getTime()) / 60000);
+        const minLeft = Math.max(1, minutesLeftInMonthTZ());
         const hLeft = Math.floor(minLeft / 60);
         const mLeft = minLeft % 60;
         const timeStr = hLeft > 0 ? `${hLeft}h${mLeft > 0 ? ` ${mLeft}m` : ""}` : `${minLeft}m`;
@@ -1944,11 +2680,11 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
             if (await isThrottledMin(user.id, "endmonth_hour", 14))
                 continue; // toutes les 14 min max
             const above = ranked[user.rank - 2];
-            const gapAbove = above ? above.ggReceived - user.ggReceived : 0;
+            const gapAbove = above ? above.ggMonth - user.ggMonth : 0;
             let title = `🚨 ${timeStr} LEFT THIS MONTH!`;
             let body;
             if (user.rank === 1) {
-                body = `You're the LEADER with ${user.ggReceived} GGs! Last push to defend the crown! 👑`;
+                body = `You're the LEADER with ${user.ggMonth} GGs! Last push to defend the crown! 👑`;
             }
             else if (gapAbove <= 5) {
                 body = `#${user.rank} — only ${gapAbove} GG${gapAbove !== 1 ? "s" : ""} from #${user.rank - 1}! GO NOW!`;
@@ -1962,7 +2698,7 @@ exports.notifRankingChanges = (0, scheduler_1.onSchedule)({ schedule: "*/15 * * 
     }
     // ── Sauvegarde du nouvel état ─────────────────────────────────────────────
     await stateRef.set({
-        top10: currentTop10.map(u => ({ id: u.id, rank: u.rank, ggReceived: u.ggReceived })),
+        top10: currentTop10.map(u => ({ id: u.id, rank: u.rank, ggMonth: u.ggMonth })),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
     v2_1.logger.info(`notifRankingChanges: top10 updated | lastDays=${isLastDays} | lastHours=${isLastHours}`);
@@ -1975,7 +2711,7 @@ const STRIPE_PRICE_ID_MONTHLY = process.env.STRIPE_PRICE_ID_MONTHLY || "price_1T
 const STRIPE_PRICE_ID_YEARLY = process.env.STRIPE_PRICE_ID_YEARLY || "price_1TmfVo097oI4jieSliHF5NNi";
 // Webhook Stripe — reçoit les événements de paiement
 exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
     const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
     const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
     const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
@@ -1988,7 +2724,8 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
             event = stripe.webhooks.constructEvent(rawBody, sig, STRIPE_WEBHOOK_SECRET);
         }
         else {
-            event = req.body;
+            res.status(500).send('Webhook secret not configured');
+            return;
         }
     }
     catch (err) {
@@ -2038,11 +2775,57 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
                 const session = event.data.object;
                 const itemId = (_c = session.metadata) === null || _c === void 0 ? void 0 : _c.itemId;
                 const firebaseUid = (_d = session.metadata) === null || _d === void 0 ? void 0 : _d.firebaseUid;
+                // ── Support the App (don one-time, paliers ou montant libre) ──────
+                if (((_e = session.metadata) === null || _e === void 0 ? void 0 : _e.type) === "support" && firebaseUid) {
+                    const amount = (session.amount_total || 0) / 100;
+                    await db.collection("support_purchases").add({
+                        userId: firebaseUid,
+                        amount,
+                        netAmount: +(amount * 0.971 - 0.30).toFixed(2), // ~ après frais Stripe
+                        currency: (session.currency || "cad").toUpperCase(),
+                        source: "stripe_web",
+                        sessionId: session.id,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    });
+                    v2_1.logger.info(`Support ${amount} ${session.currency} from ${firebaseUid}`);
+                    break;
+                }
+                // ── Fanbase subscription activated (creator subscription) ──────────
+                if (((_f = session.metadata) === null || _f === void 0 ? void 0 : _f.type) === "fanbase" && firebaseUid && ((_g = session.metadata) === null || _g === void 0 ? void 0 : _g.creatorId)) {
+                    const creatorId = session.metadata.creatorId;
+                    const subId = `${firebaseUid}_${creatorId}`;
+                    const subRef = db.collection("fanbase_subscriptions").doc(subId);
+                    const existed = (await subRef.get()).exists;
+                    await subRef.set({
+                        subscriberId: firebaseUid,
+                        creatorId,
+                        status: "active",
+                        source: "stripe_web",
+                        stripeSubscriptionId: session.subscription || null,
+                        isTest: false,
+                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                    if (!existed) {
+                        await db.collection("users").doc(creatorId)
+                            .update({ fanbaseSubscribers: admin.firestore.FieldValue.increment(1) })
+                            .catch(() => { });
+                        const earnRef = db.collection("creator_earnings").doc(creatorId);
+                        const earnSnap = await earnRef.get();
+                        if (earnSnap.exists)
+                            await earnRef.update({ subscriberCount: admin.firestore.FieldValue.increment(1) });
+                        else
+                            await earnRef.set({ subscriberCount: 1, totalEarned: 0, totalPaid: 0, balance: 0, pendingWithdrawal: 0 });
+                    }
+                    // NOTE: le crédit des gains par renouvellement se fait dans invoice.payment_succeeded (à compléter).
+                    v2_1.logger.info(`Fanbase sub active: ${firebaseUid} -> ${creatorId}`);
+                    break;
+                }
                 // Only process cosmetic purchases (not subscriptions)
                 if (!itemId || !firebaseUid || session.mode === "subscription")
                     break;
                 // Unlock cosmetic for the user — save to the right field based on itemType
-                const itemType = ((_e = session.metadata) === null || _e === void 0 ? void 0 : _e.itemType) || "cosmetic";
+                const itemType = ((_h = session.metadata) === null || _h === void 0 ? void 0 : _h.itemType) || "cosmetic";
                 const fieldMap = {
                     avatar_frame: "ownedFrames",
                     video_frame: "ownedVideoFrames",
@@ -2055,7 +2838,7 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
                 const userSnap = await userRef.get();
                 if (!userSnap.exists)
                     break;
-                const owned = ((_f = userSnap.data()) === null || _f === void 0 ? void 0 : _f[field]) || [];
+                const owned = ((_j = userSnap.data()) === null || _j === void 0 ? void 0 : _j[field]) || [];
                 if (!owned.includes(itemId)) {
                     await userRef.update({
                         [field]: [...owned, itemId],
@@ -2075,6 +2858,16 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
             case "customer.subscription.deleted": {
                 const sub = event.data.object;
                 const customerId = sub.customer;
+                // Fanbase annulée → désactive l'abo fanbase, NE touche PAS au plan Legendary.
+                if (((_k = sub.metadata) === null || _k === void 0 ? void 0 : _k.type) === "fanbase" && ((_l = sub.metadata) === null || _l === void 0 ? void 0 : _l.firebaseUid) && ((_m = sub.metadata) === null || _m === void 0 ? void 0 : _m.creatorId)) {
+                    const subId = `${sub.metadata.firebaseUid}_${sub.metadata.creatorId}`;
+                    await db.collection("fanbase_subscriptions").doc(subId).delete().catch(() => { });
+                    await db.collection("users").doc(sub.metadata.creatorId)
+                        .update({ fanbaseSubscribers: admin.firestore.FieldValue.increment(-1) })
+                        .catch(() => { });
+                    v2_1.logger.info(`Fanbase sub canceled: ${sub.metadata.firebaseUid} -> ${sub.metadata.creatorId}`);
+                    break;
+                }
                 const userSnap = await db.collection("users")
                     .where("stripeCustomerId", "==", customerId)
                     .limit(1).get();
@@ -2099,7 +2892,43 @@ exports.stripeWebhook = (0, https_1.onRequest)({ cors: true, region: "us-central
                 if (!subId)
                     break;
                 const sub = await stripe.subscriptions.retrieve(subId);
-                const priceId = (_h = (_g = sub.items.data[0]) === null || _g === void 0 ? void 0 : _g.price) === null || _h === void 0 ? void 0 : _h.id;
+                // ── Renouvellement Fanbase → crédite les gains du créateur (modèle Twitch) ──
+                // Se déclenche à CHAQUE cycle (1er paiement inclus). checkout.session.completed
+                // ne crédite PAS les gains → aucun double comptage.
+                if (((_o = sub.metadata) === null || _o === void 0 ? void 0 : _o.type) === "fanbase" && ((_p = sub.metadata) === null || _p === void 0 ? void 0 : _p.creatorId)) {
+                    const creatorId = sub.metadata.creatorId;
+                    const gross = (invoice.amount_paid || 0) / 100; // CA$3.99
+                    const creatorAmount = +(gross * 0.70).toFixed(2); // 70% part créateur
+                    const earnRef = db.collection("creator_earnings").doc(creatorId);
+                    await db.runTransaction(async (tx) => {
+                        const snap = await tx.get(earnRef);
+                        if (snap.exists) {
+                            tx.update(earnRef, {
+                                totalEarned: admin.firestore.FieldValue.increment(creatorAmount),
+                                balance: admin.firestore.FieldValue.increment(creatorAmount),
+                                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                            });
+                        }
+                        else {
+                            tx.set(earnRef, {
+                                subscriberCount: 0, totalEarned: creatorAmount, totalPaid: 0,
+                                balance: creatorAmount, pendingWithdrawal: 0,
+                            });
+                        }
+                    });
+                    await db.collection("fanbase_payments").add({
+                        creatorId,
+                        subscriberId: sub.metadata.firebaseUid || null,
+                        gross,
+                        creatorAmount,
+                        invoiceId: invoice.id,
+                        source: "stripe_web",
+                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    });
+                    v2_1.logger.info(`Fanbase renewal: +${creatorAmount} CAD to ${creatorId}`);
+                    break;
+                }
+                const priceId = (_r = (_q = sub.items.data[0]) === null || _q === void 0 ? void 0 : _q.price) === null || _r === void 0 ? void 0 : _r.id;
                 if (priceId !== STRIPE_PRICE_ID_MONTHLY && priceId !== STRIPE_PRICE_ID_YEARLY)
                     break;
                 const userSnap = await db.collection("users")
@@ -2161,6 +2990,22 @@ exports.createCheckoutSession = (0, https_1.onRequest)({ cors: true, region: "us
         res.status(400).json({ error: "uid and email required" });
         return;
     }
+    const authHeader = req.headers.authorization;
+    if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer '))) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+        if (decoded.uid !== uid) {
+            res.status(403).json({ error: 'Forbidden' });
+            return;
+        }
+    }
+    catch (_a) {
+        res.status(401).json({ error: 'Invalid token' });
+        return;
+    }
     try {
         // Cherche ou crée le customer Stripe
         const userRef = db.collection("users").doc(uid);
@@ -2204,6 +3049,85 @@ exports.createCheckoutSession = (0, https_1.onRequest)({ cors: true, region: "us
         res.status(500).json({ error: err.message });
     }
 });
+// Crée une Checkout Session "Support the App" — paiement unique (palier OU montant libre)
+exports.createSupportCheckout = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
+    var _a;
+    const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_SECRET_KEY) {
+        res.status(500).json({ error: "Stripe key not configured" });
+        return;
+    }
+    const stripe = new stripe_1.default(STRIPE_SECRET_KEY, { apiVersion: "2023-10-16" });
+    if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+    }
+    const { uid, email, amount, successUrl, cancelUrl } = req.body;
+    if (!uid || !email) {
+        res.status(400).json({ error: "uid and email required" });
+        return;
+    }
+    // Montant en CAD : borné pour éviter les abus (1$ → 999$)
+    const cad = Math.round(Number(amount) * 100);
+    if (!cad || cad < 100 || cad > 99900) {
+        res.status(400).json({ error: "Invalid amount" });
+        return;
+    }
+    const authHeader = req.headers.authorization;
+    if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith("Bearer "))) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
+        if (decoded.uid !== uid) {
+            res.status(403).json({ error: "Forbidden" });
+            return;
+        }
+    }
+    catch (_b) {
+        res.status(401).json({ error: "Invalid token" });
+        return;
+    }
+    try {
+        const userRef = db.collection("users").doc(uid);
+        let customerId = (_a = (await userRef.get()).data()) === null || _a === void 0 ? void 0 : _a.stripeCustomerId;
+        if (customerId) {
+            try {
+                await stripe.customers.retrieve(customerId);
+            }
+            catch (_c) {
+                customerId = null;
+            }
+        }
+        if (!customerId) {
+            const customer = await stripe.customers.create({ email, metadata: { firebaseUid: uid } });
+            customerId = customer.id;
+            await userRef.update({ stripeCustomerId: customerId });
+        }
+        const session = await stripe.checkout.sessions.create({
+            customer: customerId,
+            payment_method_types: ["card"],
+            mode: "payment",
+            line_items: [{
+                    quantity: 1,
+                    price_data: {
+                        currency: "cad",
+                        unit_amount: cad,
+                        product_data: { name: "Support Gaming Actions 💛" },
+                    },
+                }],
+            success_url: successUrl || "https://gamingactions.app/support?success=true",
+            cancel_url: cancelUrl || "https://gamingactions.app/support?canceled=true",
+            metadata: { firebaseUid: uid, type: "support" },
+        });
+        res.status(200).json({ sessionId: session.id, url: session.url });
+    }
+    catch (err) {
+        v2_1.logger.error("createSupportCheckout error:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // Crée un Stripe Customer Portal — pour gérer/annuler l'abonnement depuis le web
 exports.createPortalSession = (0, https_1.onRequest)({ cors: true, region: "us-central1" }, async (req, res) => {
     var _a;
@@ -2218,6 +3142,22 @@ exports.createPortalSession = (0, https_1.onRequest)({ cors: true, region: "us-c
         res.status(400).json({ error: "uid required" });
         return;
     }
+    const authHeader = req.headers.authorization;
+    if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer '))) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+        if (decoded.uid !== uid) {
+            res.status(403).json({ error: 'Forbidden' });
+            return;
+        }
+    }
+    catch (_b) {
+        res.status(401).json({ error: 'Invalid token' });
+        return;
+    }
     try {
         const userDoc = await db.collection("users").doc(uid).get();
         let customerId = (_a = userDoc.data()) === null || _a === void 0 ? void 0 : _a.stripeCustomerId;
@@ -2229,7 +3169,7 @@ exports.createPortalSession = (0, https_1.onRequest)({ cors: true, region: "us-c
         try {
             await stripe.customers.retrieve(customerId);
         }
-        catch (_b) {
+        catch (_c) {
             res.status(404).json({ error: "No active Stripe customer in current mode" });
             return;
         }
@@ -2262,6 +3202,22 @@ exports.createCosmeticCheckoutSession = (0, https_1.onRequest)({ cors: true, reg
     const { uid, email, itemId, itemType, itemName, amountCents, successUrl, cancelUrl } = req.body;
     if (!uid || !email || !itemId || !amountCents) {
         res.status(400).json({ error: "uid, email, itemId, amountCents required" });
+        return;
+    }
+    const authHeader = req.headers.authorization;
+    if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer '))) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+        if (decoded.uid !== uid) {
+            res.status(403).json({ error: 'Forbidden' });
+            return;
+        }
+    }
+    catch (_a) {
+        res.status(401).json({ error: 'Invalid token' });
         return;
     }
     try {
@@ -2334,6 +3290,22 @@ exports.createFanbaseCheckoutSession = (0, https_1.onRequest)({ cors: true, regi
         res.status(400).json({ error: "uid, email, and creatorId are required" });
         return;
     }
+    const authHeader = req.headers.authorization;
+    if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer '))) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+        if (decoded.uid !== uid) {
+            res.status(403).json({ error: 'Forbidden' });
+            return;
+        }
+    }
+    catch (_a) {
+        res.status(401).json({ error: 'Invalid token' });
+        return;
+    }
     try {
         // Cherche ou crée le customer Stripe
         const userRef = db.collection("users").doc(uid);
@@ -2361,8 +3333,8 @@ exports.createFanbaseCheckoutSession = (0, https_1.onRequest)({ cors: true, regi
                     price_data: {
                         currency: "cad",
                         product_data: {
-                            name: `Fanbase de ${creatorUsername || creatorId}`,
-                            description: `Accès à la fanbase exclusive de ${creatorUsername || creatorId} sur Gaming Actions`,
+                            name: `${creatorUsername || creatorId} — Fanbase`,
+                            description: `Monthly access to ${creatorUsername || creatorId}'s exclusive Fanbase on Gaming Actions`,
                         },
                         unit_amount: 399, // CA$3.99
                         recurring: { interval: "month" },
@@ -2390,7 +3362,7 @@ exports.createFanbaseCheckoutSession = (0, https_1.onRequest)({ cors: true, regi
 // 2. Deduplicates all owned arrays
 // 3. Marks stale cosmetic_purchases (>24h pending) as "abandoned"
 // ─────────────────────────────────────────────────────────────────────────────
-exports.cleanupOrphanCosmetics = (0, scheduler_1.onSchedule)({ schedule: "0 5 * * *", region: "us-central1", timeoutSeconds: 300, memory: "256MiB" }, async () => {
+exports.cleanupOrphanCosmetics = (0, scheduler_1.onSchedule)({ schedule: "0 5 * * *", region: "us-central1", timeZone: "America/Toronto", timeoutSeconds: 300, memory: "256MiB" }, async () => {
     v2_1.logger.info("cleanupOrphanCosmetics: start");
     let usersFixed = 0;
     let purchasesAbandoned = 0;
@@ -2440,5 +3412,31 @@ exports.cleanupOrphanCosmetics = (0, scheduler_1.onSchedule)({ schedule: "0 5 * 
     if (purchasesAbandoned > 0)
         await batch.commit();
     v2_1.logger.info(`cleanupOrphanCosmetics: done — ${usersFixed} users fixed, ${purchasesAbandoned} purchases abandoned`);
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// generateBrandedVideo — Retourne l'URL de téléchargement Mux directe
+// NOTE: FFmpeg processing (intro/outro/watermark) à implémenter via Cloudinary
+// ou Cloud Run dédié (Gen 2 gVisor bloque FFmpeg, Gen 1 CLI bug v15.22.1)
+// ─────────────────────────────────────────────────────────────────────────────
+exports.generateBrandedVideo = (0, https_1.onCall)({ timeoutSeconds: 60, region: 'us-central1' }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Login required');
+    const { videoId } = request.data;
+    if (!videoId)
+        throw new https_1.HttpsError('invalid-argument', 'videoId required');
+    // Get video info from Firestore
+    const videoDoc = await db.collection('videos').doc(videoId).get();
+    if (!videoDoc.exists)
+        throw new https_1.HttpsError('not-found', 'Video not found');
+    const video = videoDoc.data();
+    const playbackId = video.playbackId || video.muxPlaybackId;
+    const username = video.username || 'GamingActions';
+    if (!playbackId)
+        throw new https_1.HttpsError('failed-precondition', 'No playback ID');
+    // Return the Mux direct download URL (1080p rendition)
+    // Full branding (intro/outro/watermark) will be added via Cloudinary integration
+    const url = `https://stream.mux.com/${playbackId}/capped-1080p.mp4`;
+    v2_1.logger.info('[GBV] returning Mux direct URL', { videoId, playbackId });
+    return { url, username };
 });
 //# sourceMappingURL=index.js.map

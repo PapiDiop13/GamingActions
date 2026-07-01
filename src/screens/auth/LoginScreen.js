@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { OAuthProvider, signInWithCredential, signInWithEmailAndPassword, sendEmailVerification, signOut as firebaseSignOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
@@ -37,7 +38,9 @@ export default function LoginScreen({ navigation }) {
                 await sendEmailVerification(user);
                 await firebaseSignOut(auth);
                 Alert.alert('✅ Email sent', 'Check your inbox!');
-              } catch (err) {}
+              } catch (err) {
+                Alert.alert('Erreur', "Impossible de renvoyer l'email de vérification.");
+              }
             }},
             { text: 'OK' },
           ]
@@ -91,17 +94,36 @@ export default function LoginScreen({ navigation }) {
 
   const handleApple = async () => {
     try {
-      setLoading(true);
+      // Vérifier disponibilité avant tout
+      const available = await AppleAuthentication.isAvailableAsync();
+      if (!available) {
+        Alert.alert('Apple Sign-In', 'Apple sign-in is not available on this device.');
+        return;
+      }
+
+      // NE PAS appeler setLoading avant signInAsync — le re-render
+      // conflicte avec la présentation du native sheet sur iOS 26
+      const rawNonce = Math.random().toString(36).substring(2, 18);
+      const hashedNonce = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        rawNonce
+      );
+
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
+
+      // Apple sheet fermé → maintenant on peut montrer le loading
+      setLoading(true);
+
       const provider = new OAuthProvider('apple.com');
       const oAuthCredential = provider.credential({
         idToken: credential.identityToken,
-        rawNonce: credential.authorizationCode,
+        rawNonce,
       });
       const { user } = await signInWithCredential(auth, oAuthCredential);
       const docRef = doc(db, 'users', user.uid);

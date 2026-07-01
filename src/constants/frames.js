@@ -202,7 +202,7 @@ export const FRAMES = [
     desc: 'Pulsing electric blue ring',
     color: '#00D4FF',
     glow: true, animated: true,
-    pointsPrice: 1000, dollarsPrice: 1.39, currency: 'CAD',
+    pointsPrice: 1000, dollarsPrice: 0.99, currency: 'CAD',
   },
   {
     id: 'neon_pulse_pink',
@@ -210,7 +210,7 @@ export const FRAMES = [
     desc: 'Pulsing hot pink ring',
     color: '#FF2D9D',
     glow: true, animated: true,
-    pointsPrice: 1000, dollarsPrice: 1.39, currency: 'CAD',
+    pointsPrice: 1000, dollarsPrice: 0.99, currency: 'CAD',
   },
   {
     id: 'fire_animated',
@@ -218,7 +218,7 @@ export const FRAMES = [
     desc: 'Animated flame border',
     color: '#FF4500',
     glow: true, animated: true,
-    pointsPrice: 1000, dollarsPrice: 1.39, currency: 'CAD',
+    pointsPrice: 1000, dollarsPrice: 0.99, currency: 'CAD',
   },
   {
     id: 'ice_animated',
@@ -226,7 +226,7 @@ export const FRAMES = [
     desc: 'Animated frozen ring',
     color: '#A0E8FF',
     glow: true, animated: true,
-    pointsPrice: 1000, dollarsPrice: 1.39, currency: 'CAD',
+    pointsPrice: 1000, dollarsPrice: 0.99, currency: 'CAD',
   },
   {
     id: 'galaxy_animated',
@@ -234,7 +234,7 @@ export const FRAMES = [
     desc: 'Spinning galaxy ring',
     color: '#7C4DFF',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'rainbow_animated',
@@ -242,7 +242,7 @@ export const FRAMES = [
     desc: 'Spinning rainbow neon',
     color: '#FF0080',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'lightning_animated',
@@ -250,7 +250,7 @@ export const FRAMES = [
     desc: 'Electric lightning storm',
     color: '#FFD700',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'void_animated',
@@ -258,7 +258,7 @@ export const FRAMES = [
     desc: 'Dark void pulsing energy',
     color: '#BC13FE',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'cosmic_animated',
@@ -266,7 +266,7 @@ export const FRAMES = [
     desc: 'Ultimate cosmic energy ring',
     color: '#E040FB',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'holographic_frame',
@@ -274,7 +274,7 @@ export const FRAMES = [
     desc: 'Prismatic rainbow shimmer',
     color: '#FF0080',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
   {
     id: 'sakura_frame',
@@ -282,7 +282,7 @@ export const FRAMES = [
     desc: 'Cherry blossom petals',
     color: '#FF69B4',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
   {
     id: 'toxic_pulse_frame',
@@ -290,7 +290,7 @@ export const FRAMES = [
     desc: 'Radioactive energy burst',
     color: '#39FF14',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
   {
     id: 'blizzard_animated',
@@ -298,7 +298,7 @@ export const FRAMES = [
     desc: 'Arctic blizzard storm ring',
     color: '#FFFFFF',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'dna_frame',
@@ -306,7 +306,7 @@ export const FRAMES = [
     desc: 'Spinning DNA double helix',
     color: '#00FF88',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
   {
     id: 'inferno_animated',
@@ -314,7 +314,7 @@ export const FRAMES = [
     desc: 'Full inferno animated ring',
     color: '#FF2D00',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'blood_moon_frame',
@@ -322,7 +322,7 @@ export const FRAMES = [
     desc: 'Crimson lunar energy ring',
     color: '#8B0000',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
   {
     id: 'dragon_frame',
@@ -330,7 +330,7 @@ export const FRAMES = [
     desc: 'Dragon fire energy ring',
     color: '#FF4500',
     glow: true, animated: true,
-    pointsPrice: 2000, dollarsPrice: 2.49, currency: 'CAD', isNew: true,
+    pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
   },
   {
     id: 'neon_pulse_orange',
@@ -338,20 +338,35 @@ export const FRAMES = [
     desc: 'Pulsing electric orange ring',
     color: '#FF6D00',
     glow: true, animated: true,
-    pointsPrice: 1000, dollarsPrice: 1.39, currency: 'CAD', isNew: true,
+    pointsPrice: 1000, dollarsPrice: 0.99, currency: 'CAD', isNew: true,
   },
 
   // ── Shimmer / Reflet (10 — arc lumineux rotatif) ────────────────────────
-  { id: 'shimmer_silver',  name: 'Shimmer Silver 🪞',  desc: 'Rotating silver reflet arc',  color: '#E0E0E0', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'shimmer_gold',    name: 'Shimmer Gold ✨',    desc: 'Luxury gold shimmer arc',      color: '#FFD700', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'shimmer_holo',    name: 'Shimmer Holo 🌈',   desc: 'Holographic reflet ring',      color: '#FF0080', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 2.49, currency: 'CAD', isNew: true },
-  { id: 'shimmer_aurora',  name: 'Shimmer Aurora 🌌', desc: 'Aurora shimmer ring',          color: '#00FF88', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'shimmer_prism',   name: 'Shimmer Prism 🔮',  desc: 'Prismatic light arc',          color: '#7C4DFF', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 2.49, currency: 'CAD', isNew: true },
-  { id: 'shimmer_ice',     name: 'Shimmer Ice ❄️',    desc: 'Crystal sweep ring',           color: '#A0E8FF', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'shimmer_void',    name: 'Shimmer Void 🌑',   desc: 'Dark void reflet',             color: '#BC13FE', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'shimmer_fire',    name: 'Shimmer Fire 🔥',   desc: 'Flame reflet arc',             color: '#FF4500', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'shimmer_toxic',   name: 'Shimmer Toxic ☢️',  desc: 'Radioactive sweep',            color: '#39FF14', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'shimmer_cosmic',  name: 'Shimmer Cosmic 💫', desc: 'Cosmic reflet ring',           color: '#E040FB', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 2.49, currency: 'CAD', isNew: true },
+  { id: 'shimmer_silver',  name: 'Shimmer Silver 🪞',  desc: 'Rotating silver reflet arc',  color: '#E0E0E0', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_gold',    name: 'Shimmer Gold ✨',    desc: 'Luxury gold shimmer arc',      color: '#FFD700', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_holo',    name: 'Shimmer Holo 🌈',   desc: 'Holographic reflet ring',      color: '#FF0080', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_aurora',  name: 'Shimmer Aurora 🌌', desc: 'Aurora shimmer ring',          color: '#00FF88', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_prism',   name: 'Shimmer Prism 🔮',  desc: 'Prismatic light arc',          color: '#7C4DFF', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_ice',     name: 'Shimmer Ice ❄️',    desc: 'Crystal sweep ring',           color: '#A0E8FF', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_void',    name: 'Shimmer Void 🌑',   desc: 'Dark void reflet',             color: '#BC13FE', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_fire',    name: 'Shimmer Fire 🔥',   desc: 'Flame reflet arc',             color: '#FF4500', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_toxic',   name: 'Shimmer Toxic ☢️',  desc: 'Radioactive sweep',            color: '#39FF14', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'shimmer_cosmic',  name: 'Shimmer Cosmic 💫', desc: 'Cosmic reflet ring',           color: '#E040FB', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+
+  // ── Glint / Reflet balayage (5 — cercle + reflet qui traverse) — 1,49 $ ─────
+  { id: 'glint_gold',    name: 'Glint Gold ✨',    desc: 'Circle + sweeping gold reflet',   color: '#C9A84C', glow: true, animated: true, sweep: true, pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true },
+  { id: 'glint_blue',    name: 'Glint Blue 💎',    desc: 'Circle + sweeping blue reflet',   color: '#00D4FF', glow: true, animated: true, sweep: true, pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true },
+  { id: 'glint_pink',    name: 'Glint Pink 🌸',    desc: 'Circle + sweeping pink reflet',   color: '#FF2D9D', glow: true, animated: true, sweep: true, pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true },
+  { id: 'glint_green',   name: 'Glint Green 🍀',   desc: 'Circle + sweeping green reflet',  color: '#30D158', glow: true, animated: true, sweep: true, pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true },
+  { id: 'glint_purple',  name: 'Glint Purple 🔮',  desc: 'Circle + sweeping purple reflet', color: '#BF5AF2', glow: true, animated: true, sweep: true, pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true },
+
+  // ── Cercle rotatif + reflet lumineux (5) — 1,99 $ ──────────────────────────
+  { id: 'spinglint_red',    name: 'Orbit Red 🔴',    desc: 'Rotating ring + bright reflet',   color: '#FF2D55', glow: true, animated: true, spinGlint: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'spinglint_cyan',   name: 'Orbit Cyan 🩵',   desc: 'Rotating ring + bright reflet',   color: '#00E5FF', glow: true, animated: true, spinGlint: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'spinglint_orange', name: 'Orbit Orange 🟠', desc: 'Rotating ring + bright reflet',   color: '#FF6D00', glow: true, animated: true, spinGlint: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'spinglint_silver', name: 'Orbit Silver 🪙', desc: 'Rotating ring + bright reflet',   color: '#C0C0C0', glow: true, animated: true, spinGlint: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'spinglint_holo',   name: 'Orbit Holo 🌈',   desc: 'Rotating ring + bright reflet',   color: '#FF0080', glow: true, animated: true, spinGlint: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'spinglint_pink',   name: 'Orbit Pink 🌸',   desc: 'Rotating ring + bright reflet',   color: '#FF2D9D', glow: true, animated: true, spinGlint: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
 
   // ── Exclusive (attribuées automatiquement) ─────────────────────────────────
   {
@@ -573,7 +588,7 @@ export const VIDEO_FRAMES = [
     desc: 'Animated flame border',
     color: '#FF4500',
     glow: true, animated: true,
-    pointsPrice: 1000, dollarsPrice: 1.39, currency: 'CAD',
+    pointsPrice: 1000, dollarsPrice: 0.99, currency: 'CAD',
   },
   {
     id: 'vf_lightning_animated',
@@ -581,7 +596,7 @@ export const VIDEO_FRAMES = [
     desc: 'Electric lightning border',
     color: '#FFD700',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'vf_galaxy_animated',
@@ -589,7 +604,7 @@ export const VIDEO_FRAMES = [
     desc: 'Spinning galaxy border',
     color: '#7C4DFF',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'vf_rainbow_animated',
@@ -597,7 +612,7 @@ export const VIDEO_FRAMES = [
     desc: 'Spinning rainbow border',
     color: '#FF0080',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'vf_royal_animated',
@@ -605,7 +620,7 @@ export const VIDEO_FRAMES = [
     desc: 'Shimmering gold border',
     color: '#FFD700',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'vf_cosmic_animated',
@@ -613,41 +628,41 @@ export const VIDEO_FRAMES = [
     desc: 'Ultimate cosmic border',
     color: '#E040FB',
     glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD',
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD',
   },
   {
     id: 'vf_holographic_anim',
     name: 'Holographic ✨',
     desc: 'Prismatic shimmer border',
     color: '#FF0080', glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
   {
     id: 'vf_sakura_anim',
     name: 'Sakura 🌸',
     desc: 'Cherry blossom border',
     color: '#FF69B4', glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
   {
     id: 'vf_toxic_anim',
     name: 'Toxic Pulse ☢️',
     desc: 'Radioactive border',
     color: '#39FF14', glow: true, animated: true,
-    pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true,
+    pointsPrice: 1500, dollarsPrice: 1.49, currency: 'CAD', isNew: true,
   },
 
   // ── Animées avec effet de reflet / shimmer (10) ──────────────────────────
-  { id: 'vf_shimmer_silver',  name: 'Shimmer Silver 🪞',  desc: 'Sweeping silver reflet',      color: '#E0E0E0', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_gold',    name: 'Shimmer Gold ✨',     desc: 'Luxury gold sweep',            color: '#FFD700', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_holo',    name: 'Shimmer Holo 🌈',    desc: 'Holographic reflet',           color: '#FF0080', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 2.49, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_aurora',  name: 'Shimmer Aurora 🌌',  desc: 'Aurora borealis sweep',        color: '#00FF88', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_prism',   name: 'Shimmer Prism 🔮',   desc: 'Prismatic light split',        color: '#7C4DFF', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 2.49, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_ice',     name: 'Shimmer Ice ❄️',     desc: 'Crystal ice sweep',            color: '#A0E8FF', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_void',    name: 'Shimmer Void 🌑',    desc: 'Dark void reflet',             color: '#BC13FE', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_fire',    name: 'Shimmer Fire 🔥',    desc: 'Flame reflet sweep',           color: '#FF4500', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_toxic',   name: 'Shimmer Toxic ☢️',   desc: 'Radioactive sweep',            color: '#39FF14', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
-  { id: 'vf_shimmer_rose',    name: 'Shimmer Rose 🌸',    desc: 'Sakura pink sweep',            color: '#FF69B4', glow: true, animated: true, shimmer: true, pointsPrice: 1500, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_silver',  name: 'Shimmer Silver 🪞',  desc: 'Sweeping silver reflet',      color: '#E0E0E0', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_gold',    name: 'Shimmer Gold ✨',     desc: 'Luxury gold sweep',            color: '#FFD700', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_holo',    name: 'Shimmer Holo 🌈',    desc: 'Holographic reflet',           color: '#FF0080', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_aurora',  name: 'Shimmer Aurora 🌌',  desc: 'Aurora borealis sweep',        color: '#00FF88', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_prism',   name: 'Shimmer Prism 🔮',   desc: 'Prismatic light split',        color: '#7C4DFF', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_ice',     name: 'Shimmer Ice ❄️',     desc: 'Crystal ice sweep',            color: '#A0E8FF', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_void',    name: 'Shimmer Void 🌑',    desc: 'Dark void reflet',             color: '#BC13FE', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_fire',    name: 'Shimmer Fire 🔥',    desc: 'Flame reflet sweep',           color: '#FF4500', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_toxic',   name: 'Shimmer Toxic ☢️',   desc: 'Radioactive sweep',            color: '#39FF14', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
+  { id: 'vf_shimmer_rose',    name: 'Shimmer Rose 🌸',    desc: 'Sakura pink sweep',            color: '#FF69B4', glow: true, animated: true, shimmer: true, pointsPrice: 2000, dollarsPrice: 1.99, currency: 'CAD', isNew: true },
 
   // Exclusive
   {
@@ -711,14 +726,14 @@ export const COMMENT_FRAMES = [
   // Animées
   { id: 'cf_pulse_blue',     name: 'Pulse Blue',       color: '#00D4FF',     glow: true,  pointsPrice: 750,  exclusive: false, animated: true, dollarsPrice: 0.99 },
   { id: 'cf_fire_animated',  name: 'Fire Animated 🔥', color: '#FF4500',     glow: true,  pointsPrice: 750,  exclusive: false, animated: true, dollarsPrice: 0.99 },
-  { id: 'cf_lightning',      name: 'Lightning ⚡',     color: '#FFD700',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.99 },
-  { id: 'cf_rainbow_anim',   name: 'Rainbow Spin 🌈',  color: '#FF0080',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.99 },
-  { id: 'cf_royal_anim',     name: 'Royal Gold ✨',    color: '#FFD700',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.99 },
-  { id: 'cf_cosmic_anim',    name: 'Cosmic 💫',        color: '#E040FB',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.99 },
-  { id: 'cf_holographic_anim', name: 'Holographic ✨', color: '#FF0080', glow: true, animated: true, pointsPrice: 1500, dollarsPrice: 1.99, exclusive: false, isNew: true },
+  { id: 'cf_lightning',      name: 'Lightning ⚡',     color: '#FFD700',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.49 },
+  { id: 'cf_rainbow_anim',   name: 'Rainbow Spin 🌈',  color: '#FF0080',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.49 },
+  { id: 'cf_royal_anim',     name: 'Royal Gold ✨',    color: '#FFD700',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.49 },
+  { id: 'cf_cosmic_anim',    name: 'Cosmic 💫',        color: '#E040FB',     glow: true,  pointsPrice: 1500, exclusive: false, animated: true, dollarsPrice: 1.49 },
+  { id: 'cf_holographic_anim', name: 'Holographic ✨', color: '#FF0080', glow: true, animated: true, pointsPrice: 1500, dollarsPrice: 1.49, exclusive: false, isNew: true },
   { id: 'cf_glitch_anim',    name: 'Glitch 💻',        color: '#00D4FF', glow: true, animated: true, pointsPrice: 1000, dollarsPrice: 1.49, exclusive: false, isNew: true },
-  { id: 'cf_sakura_anim',    name: 'Sakura 🌸',        color: '#FF69B4', glow: true, animated: true, pointsPrice: 1500, dollarsPrice: 1.99, exclusive: false, isNew: true },
-  { id: 'cf_void_pulse',     name: 'Void Pulse 🌑',    color: '#7C4DFF', glow: true, animated: true, pointsPrice: 1500, dollarsPrice: 1.99, exclusive: false, isNew: true },
+  { id: 'cf_sakura_anim',    name: 'Sakura 🌸',        color: '#FF69B4', glow: true, animated: true, pointsPrice: 1500, dollarsPrice: 1.49, exclusive: false, isNew: true },
+  { id: 'cf_void_pulse',     name: 'Void Pulse 🌑',    color: '#7C4DFF', glow: true, animated: true, pointsPrice: 1500, dollarsPrice: 1.49, exclusive: false, isNew: true },
   { id: 'cf_toxic_cf',       name: 'Toxic ☢️',          color: '#39FF14', glow: true, animated: true, pointsPrice: 750,  dollarsPrice: 0.99, exclusive: false, isNew: true },
 
   // Exclusives

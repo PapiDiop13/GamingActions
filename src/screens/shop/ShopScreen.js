@@ -11,15 +11,18 @@ import { doc, runTransaction, addDoc, collection, serverTimestamp, arrayUnion } 
 import { COLORS } from '../../constants/colors';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import { FRAMES, VIDEO_FRAMES, COMMENT_FRAMES } from '../../constants/frames';
+import { isFreebieCosmetic } from '../../constants/cosmeticAccess';
 import {
   PROFILE_BACKGROUNDS, PROFILE_BANNERS, USERNAME_EFFECTS,
-  PROFILE_BADGES, CARD_BORDERS, PROFILE_THEMES,
+  PROFILE_BADGES, PROFILE_THEMES,
   RARITY_CONFIG, canAccessCosmetic, getCosmeticPrice,
 } from '../../constants/cosmetics';
 import { ElectricRing, ElectricBorder, RotatingElectricRing } from '../../components/ElectricEffect';
 import useAuthStore from '../../store/useAuthStore';
 import { showAlert } from '../../store/useAlertStore';
 import { db } from '../../config/firebase';
+import { PRODUCT_IDS, cosmeticProductId, purchaseNonConsumable } from '../../hooks/useRevenueCat';
+import PurchaseSuccessOverlay from '../../components/PurchaseSuccessOverlay';
 
 const { width: SW } = Dimensions.get('window');
 const ITEM_W = (SW - 14 * 2 - 12) / 2;
@@ -66,7 +69,6 @@ const CATEGORIES = [
   { id: 'banners',        label: 'Banner',      icon: 'image-outline' },
   { id: 'badges',         label: 'Title',       icon: 'ribbon-outline' },
   { id: 'username_fx',    label: 'Username',    icon: 'text-outline' },
-  { id: 'card_borders',   label: 'Card',        icon: 'card-outline' },
   { id: 'themes', label: 'Themes 🔥', icon: 'sparkles-outline' },
   { id: 'video_frames',   label: 'Video',       icon: 'videocam-outline' },
   { id: 'comment_frames', label: 'Comment',     icon: 'chatbubble-outline' },
@@ -93,8 +95,21 @@ function RarityBadge({ rarity }) {
   );
 }
 
+// ─── Streak level helpers ─────────────────────────────────────────────────────
+const STREAK_ORDER = ['noob', 'bronze', 'silver', 'gold', 'goat'];
+const STREAK_LABEL = { noob: 'Noob', bronze: '🥉 Bronze', silver: '🥈 Silver', gold: '🥇 Gold', goat: '🐐 GOAT' };
+const STREAK_LABEL_SHORT = { noob: 'Noob', bronze: 'Bronze', silver: 'Silver', gold: 'Gold', goat: 'GOAT' };
+const STREAK_COLOR = { noob: '#888899', bronze: '#CD7F32', silver: '#C0C0C0', gold: '#FFD700', goat: '#FF2D55' };
+const STREAK_PTS   = { noob: 0, bronze: 500, silver: 2000, gold: 5000, goat: 15000 };
+function streakLocked(item, userStreakLevel) {
+  if (!item.streakRequired) return false;
+  const req = STREAK_ORDER.indexOf(item.streakRequired);
+  const cur = STREAK_ORDER.indexOf(userStreakLevel || 'noob');
+  return cur < req;
+}
+
 // ─── Price tag ────────────────────────────────────────────────────────────────
-function PriceTag({ cosmetic, userPlan, owned, equipped = false }) {
+function PriceTag({ cosmetic, userPlan, owned, equipped = false, userStreakLevel }) {
   if (owned && equipped) return (
     <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.2)', borderColor: COLORS.gold, borderWidth: 1.5 }]}>
       <Ionicons name="checkmark-circle" size={11} color={COLORS.gold} />
@@ -109,6 +124,24 @@ function PriceTag({ cosmetic, userPlan, owned, equipped = false }) {
   if (cosmetic.free) return (
     <View style={s.actionBtn}><Text style={s.actionBtnText}>FREE</Text></View>
   );
+  // Streak lock — show required level + pts threshold
+  if (cosmetic.streakRequired && streakLocked(cosmetic, userStreakLevel)) {
+    const req = cosmetic.streakRequired;
+    const rc = STREAK_COLOR[req] || '#FF9500';
+    return (
+      <View style={{ gap: 3, width: '100%' }}>
+        <View style={[s.actionBtn, { backgroundColor: rc + '18', borderColor: rc, justifyContent: 'center' }]}>
+          <Ionicons name="lock-closed" size={10} color={rc} />
+          <Text style={[s.actionBtnText, { color: rc, marginLeft: 3 }]}>
+            {STREAK_LABEL_SHORT[req]} requis
+          </Text>
+        </View>
+        <Text style={{ fontSize: 8, color: COLORS.gray2, textAlign: 'center', width: '100%' }}>
+          {STREAK_PTS[req].toLocaleString()} streak pts · {cosmetic.pointsPrice} pts
+        </Text>
+      </View>
+    );
+  }
   if (cosmetic.exclusive) return (
     <Text style={s.exclusiveLabel}>🔒 EARNED</Text>
   );
@@ -118,21 +151,30 @@ function PriceTag({ cosmetic, userPlan, owned, equipped = false }) {
       <Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>Legendary ✓</Text>
     </View>
   );
-  if (cosmetic.dollarsPrice) return (
-    <View style={[s.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}>
-      <Ionicons name="flash" size={10} color="#FF2D55" />
-      <Text style={[s.actionBtnText, { color: '#FF2D55', marginLeft: 3 }]}>CA${cosmetic.dollarsPrice.toFixed(2)}</Text>
+  if (cosmetic.dollarsPrice && isFreebieCosmetic(cosmetic) && userPlan !== 'legendary') return (
+    <View style={{ alignItems: 'center', width: '100%' }}>
+      <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}>
+        <Ionicons name="card" size={10} color="#30D158" />
+        <Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(cosmetic.dollarsPrice).toFixed(2)}</Text>
+      </View>
+      <Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text>
     </View>
   );
-  if (cosmetic.legendaryFree) return (
-    <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold + '80' }]}>
-      <Text style={[s.actionBtnText, { color: COLORS.gray }]}>👑 {cosmetic.pointsPrice} pts</Text>
+  if (cosmetic.dollarsPrice) return (
+    <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}>
+      <Ionicons name="card" size={10} color="#30D158" />
+      <Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(cosmetic.dollarsPrice).toFixed(2)}</Text>
     </View>
   );
   return (
-    <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}>
-      <Ionicons name="star" size={10} color={COLORS.gold} />
-      <Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{cosmetic.pointsPrice} pts</Text>
+    <View style={{ alignItems: 'center', width: '100%' }}>
+      <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}>
+        <Ionicons name="star" size={10} color={COLORS.gold} />
+        <Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{cosmetic.pointsPrice} pts</Text>
+      </View>
+      {isFreebieCosmetic(cosmetic) && userPlan !== 'legendary' && (
+        <Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text>
+      )}
     </View>
   );
 }
@@ -291,65 +333,29 @@ function BadgePreview({ cosmetic }) {
   );
 }
 
-// ─── Card Border Preview ──────────────────────────────────────────────────────
-function CardBorderPreview({ cosmetic }) {
-  // useNativeDriver: true — opacity only (borderWidth/shadowRadius stay static)
-  const pulse = React.useRef(new Animated.Value(0.55)).current;
-  React.useEffect(() => {
-    if (!cosmetic.animated) return;
-    let task;
-    const a = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
-      Animated.timing(pulse, { toValue: 0.55, duration: 800, useNativeDriver: true }),
-    ]));
-    task = InteractionManager.runAfterInteractions(() => a.start());
-    return () => { a.stop(); task?.cancel?.(); };
-  }, [cosmetic.id]);
-  const mainColor = cosmetic.color || (cosmetic.colors && cosmetic.colors[0]) || COLORS.gray3;
-  return (
-    <View style={{ width: '100%', height: 80, borderRadius: 10, backgroundColor: '#0A0A1A', alignItems: 'center', justifyContent: 'center' }}>
-      {cosmetic.animated ? (
-        // Static border + shadow, animate opacity of entire card → shadow scales with opacity
-        <Animated.View style={{ width: 60, height: 60, borderRadius: 10, backgroundColor: '#111120',
-          borderWidth: 2.5, borderColor: mainColor,
-          shadowColor: mainColor, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width: 0, height: 0 },
-          opacity: pulse,
-          alignItems: 'center', justifyContent: 'center' }}>
-          <Ionicons name="person" size={22} color={mainColor} style={{ opacity: 0.7 }} />
-        </Animated.View>
-      ) : (
-        <View style={{ width: 60, height: 60, borderRadius: 10, backgroundColor: '#111120',
-          borderWidth: cosmetic.glow ? 2 : 1.5, borderColor: mainColor,
-          shadowColor: cosmetic.glow ? mainColor : 'transparent',
-          shadowOpacity: cosmetic.glow ? 0.8 : 0, shadowRadius: 8, shadowOffset: { width: 0, height: 0 },
-          alignItems: 'center', justifyContent: 'center' }}>
-          <Ionicons name="person" size={22} color={mainColor} style={{ opacity: 0.6 }} />
-        </View>
-      )}
-      {cosmetic.animated && (
-        <View style={{ position: 'absolute', top: 6, right: 6, backgroundColor: '#FF2D55', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2 }}>
-          <Text style={{ fontSize: 7, color: '#fff', fontWeight: '900' }}>ANIMATED</Text>
-        </View>
-      )}
-    </View>
-  );
-}
 
 // ─── Theme Preview ────────────────────────────────────────────────────────────
 // Theme color palettes — chaque theme a sa propre identité visuelle
+// Palette par thème — règle : banner LUMINEUX, accent (contour) = même famille que le banner,
+// bg = version DOUCE/foncée de la même couleur (jamais du noir). Cohérence totale par thème.
 const THEME_PALETTES = {
-  theme_champion:   { bg: '#1A1200', banner: '#C9A84C',  accent: '#FFD700', avatar: '#C9A84C',  accent2: '#FF8C00' },
-  theme_phantom:    { bg: '#080010', banner: '#2A0040',  accent: '#BF5AF2', avatar: '#7C4DFF',  accent2: '#E040FB' },
-  theme_inferno:    { bg: '#1A0500', banner: '#FF3D00',  accent: '#FFD700', avatar: '#FF6D00',  accent2: '#FF0000' },
-  theme_storm:      { bg: '#050510', banner: '#001030',  accent: '#FFD700', avatar: '#00D4FF',  accent2: '#7C4DFF' },
-  theme_cosmic:     { bg: '#02000A', banner: '#0A0030',  accent: '#E040FB', avatar: '#7C4DFF',  accent2: '#00D4FF' },
-  theme_matrix:     { bg: '#001A05', banner: '#003010',  accent: '#00FF41', avatar: '#00C853',  accent2: '#00D4FF' },
+  theme_champion:     { bg: '#2E2100', banner: '#FFD24A', accent: '#FFC21A', avatar: '#C9A84C', accent2: '#FF8C00' },
+  theme_phantom:      { bg: '#1C0A30', banner: '#B15AFF', accent: '#A020F0', avatar: '#7C4DFF', accent2: '#E040FB' },
+  theme_inferno:      { bg: '#2E0A00', banner: '#FF6A00', accent: '#FF3D00', avatar: '#FF6D00', accent2: '#FFB000' },
+  theme_storm:        { bg: '#06202E', banner: '#22D0FF', accent: '#00B4E5', avatar: '#00D4FF', accent2: '#7C4DFF' },
+  theme_cosmic:       { bg: '#120A2E', banner: '#9D5CFF', accent: '#7C4DFF', avatar: '#7C4DFF', accent2: '#E040FB' },
+  theme_matrix:       { bg: '#032610', banner: '#00E63A', accent: '#00C030', avatar: '#00C853', accent2: '#39FF88' },
   // Nouveaux thèmes (2025)
-  theme_sakura:     { bg: '#0A0005', banner: '#FF69B4',  accent: '#FFB7C5', avatar: '#FF69B4',  accent2: '#FF2D9D' },
-  theme_cyber:      { bg: '#050515', banner: '#FF0080',  accent: '#00D4FF', avatar: '#FF0080',  accent2: '#7C4DFF' },
-  theme_arctic:     { bg: '#000810', banner: '#A0E8FF',  accent: '#00D4FF', avatar: '#A0E8FF',  accent2: '#FFFFFF' },
-  theme_void_walker:{ bg: '#030005', banner: '#7C4DFF',  accent: '#BC13FE', avatar: '#7C4DFF',  accent2: '#E040FB' },
-  theme_neon_city:  { bg: '#050510', banner: '#FF00FF',  accent: '#00FFFF', avatar: '#FF00FF',  accent2: '#FFD700' },
+  theme_sakura:       { bg: '#3D0F28', banner: '#FF7EC0', accent: '#FF4FA3', avatar: '#FF69B4', accent2: '#FF2D9D' },
+  theme_cyber:        { bg: '#2A0A22', banner: '#FF2D9D', accent: '#FF0080', avatar: '#FF0080', accent2: '#00E5FF' },
+  theme_arctic:       { bg: '#14203D', banner: '#9CB4FF', accent: '#6E88E0', avatar: '#A0C8E8', accent2: '#E0E8FF' },
+  theme_void_walker:  { bg: '#16002E', banner: '#9D3BFF', accent: '#7C1FD0', avatar: '#7C4DFF', accent2: '#E040FB' },
+  theme_neon_city:    { bg: '#06302B', banner: '#1FE0C8', accent: '#00C2A8', avatar: '#1FE0C8', accent2: '#FF6AD5' },
+  // Thèmes 2026
+  theme_white:        { bg: '#ECECF2', banner: '#FFFFFF', accent: '#B8B8C0', avatar: '#FFFFFF', accent2: '#888899' },
+  theme_glacier:      { bg: '#0F3A55', banner: '#9AD8EA', accent: '#5BAEC8', avatar: '#A8DCEA', accent2: '#C8EEF8' },
+  theme_konoha:       { bg: '#14260F', banner: '#4E8A34', accent: '#B89A2E', avatar: '#B89A2E', accent2: '#6EB84A' },
+  theme_sunset_ember: { bg: '#2E1200', banner: '#FF8C42', accent: '#FF6A00', avatar: '#D45500', accent2: '#FFB000' },
 };
 
 function ThemePreview({ cosmetic }) {
@@ -446,27 +452,33 @@ function AnimatedRingPreview({ frame, size }) {
   const rotateRev = spin2.interpolate({ inputRange: [0,1], outputRange: ['0deg','-360deg'] });
   const outerSize = size + 14;
   const innerSize = size + 6;
-  // ALL animated frames get spinning ring treatment
+  // Frames "glint" (sweep) = NON rotatif → juste halo + anneau pulsé (le reflet est ajouté à part).
+  // Frames "shimmer"/"spinGlint" = anneau rotatif.
+  const spinning = !frame.sweep;
   if (frame.animated) {
     return (
       <>
         {/* Outer glow halo */}
         <Animated.View style={{ position: 'absolute', width: outerSize + 6, height: outerSize + 6,
           borderRadius: (outerSize+6)/2, backgroundColor: frame.color, opacity: pulse.interpolate({ inputRange:[0.4,1], outputRange:[0.08, 0.22] }) }} />
-        {/* Outer spinning arc */}
-        <Animated.View style={{ position: 'absolute', width: outerSize, height: outerSize,
-          borderRadius: outerSize/2, borderWidth: 3,
-          borderColor: frame.color, borderTopColor: 'transparent', borderLeftColor: 'transparent',
-          transform: [{ rotate }],
-          shadowColor: frame.color, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width:0, height:0 } }} />
-        {/* Inner counter-spinning arc */}
-        <Animated.View style={{ position: 'absolute', width: innerSize, height: innerSize,
-          borderRadius: innerSize/2, borderWidth: 2,
-          borderColor: frame.color, borderBottomColor: 'transparent', borderRightColor: 'transparent',
-          opacity: 0.7, transform: [{ rotate: rotateRev }] }} />
-        {/* Solid ring underneath (pulsing glow) */}
-        <Animated.View style={{ position: 'absolute', width: innerSize, height: innerSize,
-          borderRadius: innerSize/2, borderWidth: 1.5, borderColor: frame.color, opacity: pulse,
+        {spinning && (
+          <>
+            {/* Outer spinning arc */}
+            <Animated.View style={{ position: 'absolute', width: outerSize, height: outerSize,
+              borderRadius: outerSize/2, borderWidth: 3,
+              borderColor: frame.color, borderTopColor: 'transparent', borderLeftColor: 'transparent',
+              transform: [{ rotate }],
+              shadowColor: frame.color, shadowOpacity: 1, shadowRadius: 10, shadowOffset: { width:0, height:0 } }} />
+            {/* Inner counter-spinning arc */}
+            <Animated.View style={{ position: 'absolute', width: innerSize, height: innerSize,
+              borderRadius: innerSize/2, borderWidth: 2,
+              borderColor: frame.color, borderBottomColor: 'transparent', borderRightColor: 'transparent',
+              opacity: 0.7, transform: [{ rotate: rotateRev }] }} />
+          </>
+        )}
+        {/* Solid ring (pulsing glow) — pour glint c'est l'anneau principal */}
+        <Animated.View style={{ position: 'absolute', width: spinning ? innerSize : outerSize, height: spinning ? innerSize : outerSize,
+          borderRadius: (spinning ? innerSize : outerSize)/2, borderWidth: spinning ? 1.5 : 2.5, borderColor: frame.color, opacity: pulse,
           shadowColor: frame.color, shadowOpacity: 0.8, shadowRadius: 8, shadowOffset: { width:0, height:0 } }} />
       </>
     );
@@ -476,6 +488,27 @@ function AnimatedRingPreview({ frame, size }) {
       borderRadius: outerSize/2, borderWidth: 3,
       borderColor: frame.color, opacity: pulse,
       shadowColor: frame.color, shadowOpacity: frame.glow ? 0.9 : 0.4, shadowRadius: frame.glow ? 8 : 4, shadowOffset: { width:0, height:0 } }} />
+  );
+}
+
+// Reflet glint qui traverse l'avatar (frames sweep + spinGlint)
+function GlintPreviewOverlay({ size, color }) {
+  const sweep = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const a = Animated.loop(Animated.timing(sweep, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: true }));
+    const task = InteractionManager.runAfterInteractions(() => a.start());
+    return () => { a.stop(); task?.cancel?.(); };
+  }, []);
+  const tx   = sweep.interpolate({ inputRange: [0, 1], outputRange: [-size * 0.6, size * 1.1] });
+  const opac = sweep.interpolate({ inputRange: [0, 0.12, 0.7, 1], outputRange: [0, 0.8, 0.3, 0] });
+  return (
+    <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }} pointerEvents="none">
+      <Animated.View style={{
+        position: 'absolute', top: -size * 0.3, bottom: -size * 0.3, width: Math.max(8, size * 0.28),
+        backgroundColor: color, opacity: opac,
+        transform: [{ translateX: tx }, { skewX: '-18deg' }],
+      }} />
+    </View>
   );
 }
 
@@ -496,6 +529,7 @@ function AvatarFramePreview({ frame, avatar, username, size = 54 }) {
             <Text style={{ color: COLORS.gold, fontWeight: '800', fontSize: size * 0.34 }}>{initials}</Text>
           </View>
       }
+      {(frame.sweep || frame.spinGlint) && <GlintPreviewOverlay size={size} color={frame.color} />}
     </View>
   );
 }
@@ -727,18 +761,22 @@ function ChampionBanner({ type }) {
 }
 
 // ─── Generic Cosmetic Grid ────────────────────────────────────────────────────
-function CosmeticGrid({ items, priceFilter, userPlan, ownedCosmetics, equippedId, onPress, renderPreview, infoText, isAdmin = false }) {
+function CosmeticGrid({ items, priceFilter, userPlan, ownedCosmetics, equippedId, onPress, renderPreview, infoText, isAdmin = false, userStreakLevel }) {
   const allOwned = isAdmin ? items.map(i => i.id) : ownedCosmetics;
   const tier = (item) => item.animated ? 2 : item.glow && item.dollarsPrice ? 1 : item.glow ? 0.5 : 0;
   const filtered = items.filter(item => {
-    if (!isAdmin && item.dollarsPrice) return false; // hidden from non-admins
     if (priceFilter === 'owned') return canAccessCosmetic(item, userPlan, allOwned) && !item.exclusive;
     if (priceFilter === 'free') return item.free;
     if (priceFilter === 'points') return item.pointsPrice > 0 && !item.dollarsPrice;
     if (priceFilter === 'legendary') return item.legendaryFree;
     if (priceFilter === 'dollars') return !!item.dollarsPrice;
     return true;
-  }).sort((a, b) => tier(a) - tier(b));
+  }).sort((a, b) => {
+    // Tri par prix croissant : gratuits → points (croissant) → argent (croissant)
+    const key = (x) => x.free ? 0 : (x.dollarsPrice ? 100000 + Number(x.dollarsPrice) * 100 : Number(x.pointsPrice || 0));
+    const kd = key(a) - key(b);
+    return kd !== 0 ? kd : tier(a) - tier(b);
+  });
 
   return (
     <FlatList
@@ -765,19 +803,33 @@ function CosmeticGrid({ items, priceFilter, userPlan, ownedCosmetics, equippedId
       )}
       renderItem={({ item }) => {
         const owned = isAdmin || canAccessCosmetic(item, userPlan, allOwned);
+        const comingSoon = Platform.OS !== 'ios' && !!item.dollarsPrice; // Android: achats $ pas encore dispo
         return (
           <TouchableOpacity
             activeOpacity={0.85}
-            style={[s.frameCard, owned && { borderColor: (item.color || COLORS.gold) + '80', borderWidth: 1.5 }]}
+            style={[s.frameCard, owned && !comingSoon && { borderColor: (item.color || COLORS.gold) + '80', borderWidth: 1.5 }]}
             onPress={() => onPress(item, owned)}
           >
             <View style={s.framePreviewWrap}>
               {renderPreview(item)}
+              {comingSoon && (
+                <View style={s.comingSoonOverlay}>
+                  <Text style={s.comingSoonIcon}>🔜</Text>
+                  <Text style={s.comingSoonText}>Soon</Text>
+                </View>
+              )}
             </View>
             <RarityBadge rarity={item.rarity || 'common'} />
             <Text style={s.frameName} numberOfLines={1}>{item.name}</Text>
             <Text style={s.frameDesc} numberOfLines={2}>{item.desc || item.preview || ''}</Text>
-            <PriceTag cosmetic={item} userPlan={userPlan} owned={owned} equipped={equippedId === item.id} />
+            {comingSoon ? (
+              <View style={[s.actionBtn, { backgroundColor: 'rgba(120,120,140,0.15)', borderColor: 'rgba(120,120,140,0.4)' }]}>
+                <Ionicons name="time-outline" size={10} color={COLORS.gray} />
+                <Text style={[s.actionBtnText, { color: COLORS.gray, marginLeft: 3 }]}>Coming soon</Text>
+              </View>
+            ) : (
+              <PriceTag cosmetic={item} userPlan={userPlan} owned={owned} equipped={equippedId === item.id} userStreakLevel={userStreakLevel} />
+            )}
           </TouchableOpacity>
         );
       }}
@@ -829,6 +881,7 @@ export default function ShopScreen() {
   const [category, setCategory] = useState('avatar_frames');
   const [loading, setLoading] = useState(false);
   const [priceFilter, setPriceFilter] = useState('all');
+  const [successItem, setSuccessItem] = useState(null); // overlay "achat réussi"
   // Lazy render — content mounts only after InteractionManager settles on each tab switch
   const [renderReady, setRenderReady] = React.useState(false);
   React.useEffect(() => {
@@ -841,7 +894,7 @@ export default function ShopScreen() {
   if (isGuest) return <GuestShopWall />;
 
   const isAdmin = userProfile?.accountType === 'gameconic' || userProfile?.accountType === 'admin'
-    || !!userProfile?.isAdmin;
+    || userProfile?.accountType === 'board' || !!userProfile?.isAdmin;
   const gaPoints         = userProfile?.gaPoints || 0;
   const userPlan         = userProfile?.plan || 'free';
   const equippedFrame    = userProfile?.equippedFrame || 'none';
@@ -852,13 +905,54 @@ export default function ShopScreen() {
   // Reset price filter when changing category
   const handleCategoryChange = (id) => { setCategory(id); /* Keep priceFilter — user set it intentionally */ };
 
+  // ─── Achat en argent réel (RevenueCat / App Store) ─────────────────────────
+  // Affiche une confirmation, lance l'achat IAP, et exécute onOwned() au succès.
+  // onOwned doit écrire la possession + l'équipement (comme le chemin points).
+  const buyWithMoney = async (item, productId, category, onOwned) => {
+    // Android: achats en argent réel pas encore disponibles (Google Play Billing à venir).
+    if (Platform.OS !== 'ios') {
+      showAlert({ title: 'Coming soon', message: 'Paid items aren\'t available on Android yet. Stay tuned!', type: 'info' });
+      return;
+    }
+    const price = Number(item.dollarsPrice || 0).toFixed(2);
+    showAlert({
+      title: `Buy "${item.name}"?`,
+      message: `Price: CA$${price}\nSecure payment via the App Store.`,
+      type: 'info',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        { text: `Buy — CA$${price}`, onPress: async () => {
+          setLoading(true);
+          const res = await purchaseNonConsumable(user.uid, productId, {
+            itemId: item.id, category, amountCAD: item.dollarsPrice, name: item.name,
+          });
+          setLoading(false);
+          if (res.success) {
+            try { await onOwned(); } catch (e) {}
+            setSuccessItem(item.name);
+          } else if (res.cancelled) {
+            /* purchase cancelled by user — silent */
+          } else {
+            showAlert({ title: 'Purchase failed', message: res.error || 'Please try again in a moment.', type: 'danger' });
+          }
+        }},
+      ],
+    });
+  };
+
   // ─── Avatar frame handlers ─────────────────────────────────────────────────
   const handleAvatarFrame = async (frame) => {
     if (frame.exclusive) return Alert.alert('Exclusive 🔒', 'Awarded automatically.');
     if (frame.free || frame.id === 'none') { await _equipAvatarFrame(frame.id); return; }
-    const owned = ownedFrames.includes(frame.id);
+    const owned = ownedFrames.includes(frame.id) || (userPlan === 'legendary' && isFreebieCosmetic(frame));
     if (owned) { await _equipAvatarFrame(equippedFrame === frame.id ? 'none' : frame.id); return; }
-    if (frame.animated && !isAdmin) { Alert.alert('🔜 Coming Soon', `This premium item (CA$${frame.dollarsPrice?.toFixed(2)}) will be available for purchase very soon!\n\nStay tuned! 🎮`, [{ text: 'Got it 👌' }]); return; }
+    if (frame.dollarsPrice && !isAdmin) {
+      await buyWithMoney(frame, PRODUCT_IDS.frame(frame.id), 'avatar_frame', async () => {
+        const newOwned = [...new Set([...ownedFrames, frame.id])];
+        await saveProfile({ ownedFrames: newOwned, equippedFrame: frame.id });
+      });
+      return;
+    }
     if (!isAdmin && gaPoints < frame.pointsPrice) return showAlert({ title: 'Not enough GA Points', message: `You need ${frame.pointsPrice} pts. You have ${gaPoints} pts.`, type: 'warning' });
     if (isAdmin) { await _buyAvatarFrame(frame); return; }
     showAlert({ title: `Buy "${frame.name}"?`, message: `Cost: ${frame.pointsPrice} GA Points\nYou have: ${gaPoints} pts`, type: 'info',
@@ -881,10 +975,24 @@ export default function ShopScreen() {
   const handleVideoFrame = async (frame) => {
     if (frame.exclusive) return Alert.alert('Exclusive 🔒', 'Awarded automatically.');
     if (frame.free || frame.id === 'none') { Alert.alert('Free frame', 'Available for free when uploading!'); return; }
-    const owned = ownedVideoFrames.includes(frame.id);
-    if (owned) { showAlert({ title: 'Already owned ✓', message: `"${frame.name}" is available when uploading.`, type: 'info' }); return; }
-    if (frame.animated && !isAdmin) { Alert.alert('🔜 Coming Soon', `This premium item (CA$${frame.dollarsPrice?.toFixed(2)}) will be available for purchase very soon!\n\nStay tuned! 🎮`, [{ text: 'Got it 👌' }]); return; }
-    if (!isAdmin && gaPoints < frame.pointsPrice) return showAlert({ title: 'Not enough GA Points', message: `You need ${frame.pointsPrice} pts.`, type: 'warning' });
+    const legendaryFreebie = userPlan === 'legendary' && isFreebieCosmetic(frame);
+    const owned = ownedVideoFrames.includes(frame.id) || legendaryFreebie;
+    if (owned) { showAlert({ title: legendaryFreebie && !ownedVideoFrames.includes(frame.id) ? 'Included with Legendary ⭐' : 'Already owned ✓', message: `"${frame.name}" is available when uploading.`, type: 'info' }); return; }
+    if (frame.dollarsPrice && !isAdmin) {
+      await buyWithMoney(frame, PRODUCT_IDS.videoFrame(frame.id), 'video_frame', async () => {
+        await saveProfile({ ownedVideoFrames: [...new Set([...ownedVideoFrames, frame.id])] });
+      });
+      return;
+    }
+    // Admin bypass — unlock for free
+    if (isAdmin) {
+      setLoading(true);
+      await saveProfile({ ownedVideoFrames: [...new Set([...ownedVideoFrames, frame.id])] });
+      setLoading(false);
+      showAlert({ title: '🧪 Unlocked! (admin)', message: `"${frame.name}" is now available when uploading.`, type: 'success' });
+      return;
+    }
+    if (gaPoints < frame.pointsPrice) return showAlert({ title: 'Not enough GA Points', message: `You need ${frame.pointsPrice} pts.`, type: 'warning' });
     showAlert({ title: `Buy "${frame.name}"?`, message: `Cost: ${frame.pointsPrice} pts\nAvailable when uploading.`, type: 'info',
       buttons: [{ text: 'Cancel', style: 'cancel' }, { text: `Buy — ${frame.pointsPrice} pts`, onPress: async () => {
         setLoading(true);
@@ -901,8 +1009,21 @@ export default function ShopScreen() {
   const handleCommentFrame = async (frame, owned) => {
     if (frame.exclusive) { showAlert({ title: 'Exclusive 🔒', message: 'Awarded to Monthly Champion.', type: 'info' }); return; }
     if (owned) { await saveProfile({ equippedCommentFrame: frame.id }); showAlert({ title: '✅ Equipped!', message: `"${frame.name}" is now your comment frame.`, type: 'success' }); return; }
-    if (frame.animated && !isAdmin) { Alert.alert('🔜 Coming Soon', `This premium item (CA$${frame.dollarsPrice?.toFixed(2)}) will be available for purchase very soon!\n\nStay tuned! 🎮`, [{ text: 'Got it 👌' }]); return; }
-    if (!isAdmin && gaPoints < frame.pointsPrice) return showAlert({ title: 'Not enough GA Points', message: `You need ${frame.pointsPrice} pts.`, type: 'warning' });
+    if (frame.dollarsPrice && !isAdmin) {
+      await buyWithMoney(frame, PRODUCT_IDS.commentFrame(frame.id), 'comment_frame', async () => {
+        await saveProfile({ equippedCommentFrame: frame.id, ownedCommentFrames: [...new Set([...(userProfile?.ownedCommentFrames || []), frame.id])] });
+      });
+      return;
+    }
+    // Admin bypass — unlock and equip for free
+    if (isAdmin) {
+      setLoading(true);
+      await saveProfile({ equippedCommentFrame: frame.id, ownedCommentFrames: [...new Set([...(userProfile?.ownedCommentFrames || []), frame.id])] });
+      setLoading(false);
+      showAlert({ title: '🧪 Equipped! (admin)', message: `"${frame.name}" is now your comment frame.`, type: 'success' });
+      return;
+    }
+    if (gaPoints < frame.pointsPrice) return showAlert({ title: 'Not enough GA Points', message: `You need ${frame.pointsPrice} pts.`, type: 'warning' });
     showAlert({ title: `Buy "${frame.name}"?`, message: `Cost: ${frame.pointsPrice} pts`, type: 'info',
       buttons: [{ text: 'Cancel', style: 'cancel' }, { text: `Buy — ${frame.pointsPrice} pts`, onPress: async () => {
         setLoading(true);
@@ -936,6 +1057,17 @@ export default function ShopScreen() {
   const handleCosmetic = async (item, owned) => {
     if (item.exclusive) { showAlert({ title: 'Exclusive 🔒', message: item.desc, type: 'info' }); return; }
 
+    // Streak level check — bloquer si niveau insuffisant (sauf admin)
+    if (!isAdmin && item.streakRequired && streakLocked(item, userProfile?.streakLevel)) {
+      const req = item.streakRequired;
+      showAlert({
+        title: `🔒 Niveau ${STREAK_LABEL[req]} requis`,
+        message: `Ce titre est réservé aux joueurs niveau ${STREAK_LABEL[req]} (${STREAK_PTS[req].toLocaleString()} streak pts).\n\nTon niveau actuel : ${STREAK_LABEL[userProfile?.streakLevel || 'noob']} (${(userProfile?.streakPoints || 0).toLocaleString()} pts)\n\nGagne des streak points en te connectant chaque jour et en recevant des GGs !`,
+        type: 'warning',
+      });
+      return;
+    }
+
     // Admin bypass — tous les items accessibles gratuitement
     if (isAdmin) {
       const equip = {};
@@ -951,7 +1083,20 @@ export default function ShopScreen() {
       return;
     }
 
-    if (item.dollarsPrice) { Alert.alert('🔜 Coming Soon', `This premium item will be available for purchase very soon!\n\nStay tuned! 🎮`, [{ text: 'Got it 👌' }]); return; }
+    if (item.dollarsPrice && !owned) {
+      const CAT_NORM = { background: 'background', banner: 'banner', badge: 'badge', username: 'username_effect', card: 'card_border' };
+      await buyWithMoney(item, cosmeticProductId(item.category, item.id), CAT_NORM[item.category] || item.category, async () => {
+        const newOwned = [...new Set([...ownedCosmetics, item.id])];
+        const equip = { ownedCosmetics: newOwned };
+        if (item.category === 'background') equip.equippedProfileBg = item.id;
+        if (item.category === 'banner') equip.equippedProfileBanner = item.id;
+        if (item.category === 'badge') equip.equippedProfileBadge = item.id;
+        if (item.category === 'username') equip.equippedUsernameEffect = item.id;
+        if (item.category === 'card') equip.equippedCardBorder = item.id;
+        await saveProfile(equip);
+      });
+      return;
+    }
     if (owned) {
       // Equip
       const equip = {};
@@ -1012,7 +1157,18 @@ export default function ShopScreen() {
   // ─── Theme handler ─────────────────────────────────────────────────────────
   const handleTheme = async (theme, owned) => {
     if (theme.dollarsPrice && !owned && !isAdmin) {
-      Alert.alert('🔜 Coming Soon', `This premium theme pack will be available for purchase very soon!\n\nStay tuned! 🎮`, [{ text: 'Got it 👌' }]);
+      await buyWithMoney(theme, cosmeticProductId('theme', theme.id), 'theme', async () => {
+        const newOwned = [...new Set([...ownedCosmetics, theme.id, ...(theme.includes || [])])];
+        await saveProfile({
+          ownedCosmetics: newOwned,
+          equippedTheme:         theme.id,
+          equippedProfileBg:     theme.includes?.[0],
+          equippedProfileBanner: theme.includes?.[1],
+          equippedProfileBadge:  theme.includes?.[2],
+          equippedCardBorder:    theme.includes?.[3],
+          equippedUsernameEffect:theme.includes?.[4],
+        });
+      });
       return;
     }
     showAlert({ title: `Apply "${theme.name}"?`, message: `This will activate all ${(theme.includes || []).length} items of this theme on your profile.${isAdmin && !owned ? '\n\n[Admin bypass — unlocking]' : ''}`, type: 'info',
@@ -1044,11 +1200,12 @@ export default function ShopScreen() {
   };
 
   // ─── Comment frame owned check ─────────────────────────────────────────────
-  const commentFrameOwned = (frame) => frame.free || frame.pointsPrice === 0 || (userProfile?.ownedCommentFrames || []).includes(frame.id) || (frame.legendaryFree && userPlan === 'legendary');
+  const commentFrameOwned = (frame) => frame.free || frame.pointsPrice === 0 || (userProfile?.ownedCommentFrames || []).includes(frame.id) || (frame.legendaryFree && userPlan === 'legendary') || (userPlan === 'legendary' && isFreebieCosmetic(frame));
 
   return (
     <View style={s.container}>
       <StatusBar style="light" />
+      <PurchaseSuccessOverlay visible={!!successItem} itemName={successItem} onClose={() => setSuccessItem(null)} />
       {loading && (
         <View style={s.loadingOverlay}>
           <ActivityIndicator size="large" color={COLORS.gold} />
@@ -1085,6 +1242,18 @@ export default function ShopScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Gift Cards — raccourci visible à côté des points (échange points → cartes cadeaux) */}
+      <TouchableOpacity onPress={() => handleCategoryChange('gift_cards')} activeOpacity={0.85} style={s.giftBanner}>
+        <View style={s.giftIconWrap}>
+          <Ionicons name="gift" size={18} color="#FF2D55" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.giftTitle}>Turn your points into Gift Cards 🎁</Text>
+          <Text style={s.giftSub}>Amazon, PlayStation, Xbox, Steam… with your GA Points</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={COLORS.gray} />
+      </TouchableOpacity>
 
       {/* Earn banner */}
       <View style={s.earnBanner}>
@@ -1126,7 +1295,6 @@ export default function ShopScreen() {
       {/* ─── AVATAR FRAMES ─── */}
       {renderReady && category === 'avatar_frames' && (() => {
         const avatarData = [...FRAMES].filter(f => !f.exclusive).filter(frame => {
-          if (!isAdmin && frame.dollarsPrice) return false;
           const owned = frame.free || ownedFrames.includes(frame.id);
           if (priceFilter === 'owned') return owned;
           if (priceFilter === 'free') return frame.free;
@@ -1154,24 +1322,42 @@ export default function ShopScreen() {
             ListHeaderComponent={<ChampionBanner type="avatar" />}
             renderItem={({ item: frame }) => {
               const isEquipped = equippedFrame === frame.id;
-              const isOwned = frame.free || ownedFrames.includes(frame.id);
+              const legendaryFreebie = userPlan === 'legendary' && !ownedFrames.includes(frame.id) && isFreebieCosmetic(frame);
+              const isOwned = frame.free || ownedFrames.includes(frame.id) || legendaryFreebie;
+              const comingSoon = Platform.OS !== 'ios' && !!frame.dollarsPrice; // Android: achats $ pas encore dispo
               return (
                 <TouchableOpacity onPress={() => handleAvatarFrame(frame)} activeOpacity={0.85}
-                  style={[s.frameCard, isEquipped && { borderColor: frame.color === COLORS.gray3 ? COLORS.gold : frame.color, borderWidth: 1.5 }]}>
+                  style={[s.frameCard, isEquipped && !comingSoon && { borderColor: frame.color === COLORS.gray3 ? COLORS.gold : frame.color, borderWidth: 1.5 }]}>
                   <View style={s.framePreviewWrap}>
                     <AvatarFramePreview frame={frame} avatar={userProfile?.avatar} username={userProfile?.username} size={54} />
-                    {isEquipped && <View style={[s.statusDot, { backgroundColor: COLORS.green }]}><Ionicons name="checkmark" size={9} color={COLORS.black} /></View>}
-                    {isOwned && !isEquipped && !frame.free && <View style={[s.statusDot, { backgroundColor: COLORS.blue }]}><Ionicons name="bag-check" size={9} color={COLORS.white} /></View>}
+                    {comingSoon && (
+                      <View style={s.comingSoonOverlay}>
+                        <Text style={s.comingSoonIcon}>🔜</Text>
+                        <Text style={s.comingSoonText}>Soon</Text>
+                      </View>
+                    )}
+                    {!comingSoon && isEquipped && <View style={[s.statusDot, { backgroundColor: COLORS.green }]}><Ionicons name="checkmark" size={9} color={COLORS.black} /></View>}
+                    {!comingSoon && isOwned && !isEquipped && !frame.free && <View style={[s.statusDot, { backgroundColor: COLORS.blue }]}><Ionicons name="bag-check" size={9} color={COLORS.white} /></View>}
                   </View>
                   <Text style={s.frameName} numberOfLines={1}>{frame.name}</Text>
-                  {isEquipped ? (
+                  {comingSoon ? (
+                    <View style={[s.actionBtn, { backgroundColor: 'rgba(120,120,140,0.15)', borderColor: 'rgba(120,120,140,0.4)' }]}>
+                      <Ionicons name="time-outline" size={10} color={COLORS.gray} />
+                      <Text style={[s.actionBtnText, { color: COLORS.gray, marginLeft: 3 }]}>Coming soon</Text>
+                    </View>
+                  ) : isEquipped ? (
                     <View style={[s.actionBtn, { backgroundColor: 'rgba(0,200,83,0.15)', borderColor: COLORS.green }]}><Text style={[s.actionBtnText, { color: COLORS.green }]}>✓ EQUIPPED</Text></View>
                   ) : isOwned ? (
                     <View style={[s.actionBtn, { backgroundColor: 'rgba(0,212,255,0.1)', borderColor: COLORS.blue }]}><Text style={[s.actionBtnText, { color: COLORS.blue }]}>TAP TO EQUIP</Text></View>
-                  ) : frame.animated ? (
-                    <View style={[s.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}><Ionicons name="flash" size={10} color="#FF2D55" /><Text style={[s.actionBtnText, { color: '#FF2D55', marginLeft: 3 }]}>CA${frame.dollarsPrice?.toFixed(2)}</Text></View>
+                  ) : frame.dollarsPrice && isFreebieCosmetic(frame) ? (
+                    <View style={{ alignItems: 'center', width: '100%' }}>
+                      <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}><Ionicons name="card" size={10} color="#30D158" /><Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(frame.dollarsPrice).toFixed(2)}</Text></View>
+                      <Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text>
+                    </View>
+                  ) : frame.dollarsPrice ? (
+                    <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}><Ionicons name="card" size={10} color="#30D158" /><Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(frame.dollarsPrice).toFixed(2)}</Text></View>
                   ) : (
-                    <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}><Ionicons name="star" size={10} color={COLORS.gold} /><Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{frame.pointsPrice} pts</Text></View>
+                    <View style={{ alignItems: 'center', width: '100%' }}><View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}><Ionicons name="star" size={10} color={COLORS.gold} /><Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{frame.pointsPrice} pts</Text></View>{isFreebieCosmetic(frame) && userPlan !== 'legendary' && <Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text>}</View>
                   )}
                 </TouchableOpacity>
               );
@@ -1210,6 +1396,7 @@ export default function ShopScreen() {
           onPress={handleCosmetic}
           renderPreview={(item) => <BadgePreview cosmetic={item} />}
           isAdmin={isAdmin}
+          userStreakLevel={userProfile?.streakLevel}
           infoText="🏅 Titles/Badges appear as a small colored tag under your username on your profile AND in comments. Show the community your identity." />
       )}
 
@@ -1224,17 +1411,6 @@ export default function ShopScreen() {
           infoText="✨ Username effects change the color and glow of your name on your profile page. Animated versions pulse with light. Visible on your profile header." />
       )}
 
-      {/* ─── CARD BORDERS ─── */}
-      {renderReady && category === 'card_borders' && (
-        <CosmeticGrid items={CARD_BORDERS} priceFilter={priceFilter} userPlan={userPlan}
-          ownedCosmetics={[...ownedCosmetics, ...(CARD_BORDERS.filter(c => c.free).map(c => c.id))]}
-          equippedId={userProfile?.equippedCardBorder}
-          onPress={handleCosmetic}
-          renderPreview={(item) => <CardBorderPreview cosmetic={item} />}
-          isAdmin={isAdmin}
-          infoText="🃏 Card borders appear on the mini-card when people tap your username in comments or see your profile chip in the feed — the small square frame around your avatar." />
-      )}
-
       {/* ─── THEMES ─── */}
       {renderReady && category === 'themes' && (
         <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
@@ -1244,18 +1420,24 @@ export default function ShopScreen() {
           </View>
           <View style={s.grid}>
             {PROFILE_THEMES.filter(theme => {
-              if (!isAdmin && theme.dollarsPrice) return false; // hidden from non-admins
               if (priceFilter === 'dollars') return !!theme.dollarsPrice;
               if (priceFilter === 'owned') return isAdmin || ownedCosmetics.includes(theme.id);
               return true;
             }).sort((a, b) => (a.dollarsPrice || 0) - (b.dollarsPrice || 0)).map(theme => {
               const owned = isAdmin || ownedCosmetics.includes(theme.id);
+              const comingSoon = Platform.OS !== 'ios' && !!theme.dollarsPrice; // Android: achats $ pas encore dispo
               const pal = THEME_PALETTES[theme.id] || { accent: COLORS.gold };
               return (
                 <TouchableOpacity key={theme.id} onPress={() => handleTheme(theme, owned)} activeOpacity={0.85}
-                  style={[s.frameCard, { width: '100%' }, owned && { borderColor: pal.accent + '80', borderWidth: 1.5 }]}>
+                  style={[s.frameCard, { width: '100%' }, owned && !comingSoon && { borderColor: pal.accent + '80', borderWidth: 1.5 }]}>
                   <View style={[s.framePreviewWrap, { height: 110 }]}>
                     <ThemePreview cosmetic={theme} />
+                    {comingSoon && (
+                      <View style={s.comingSoonOverlay}>
+                        <Text style={s.comingSoonIcon}>🔜</Text>
+                        <Text style={s.comingSoonText}>Soon</Text>
+                      </View>
+                    )}
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 4 }}>
                     <Text style={[s.frameName, { textAlign: 'left' }]}>{theme.name}</Text>
@@ -1263,10 +1445,17 @@ export default function ShopScreen() {
                   </View>
                   <Text style={[s.frameDesc, { textAlign: 'left' }]}>{theme.desc}</Text>
                   <Text style={{ fontSize: 10, color: COLORS.gray2, marginBottom: 6 }}>Includes {(theme.includes || []).length} items</Text>
-                  {owned ? (
+                  {comingSoon ? (
+                    <View style={[s.actionBtn, { backgroundColor: 'rgba(120,120,140,0.15)', borderColor: 'rgba(120,120,140,0.4)' }]}>
+                      <Ionicons name="time-outline" size={10} color={COLORS.gray} />
+                      <Text style={[s.actionBtnText, { color: COLORS.gray, marginLeft: 3 }]}>Coming soon</Text>
+                    </View>
+                  ) : owned ? (
                     <View style={[s.actionBtn, { backgroundColor: pal.accent + '22', borderColor: pal.accent }]}><Text style={[s.actionBtnText, { color: pal.accent }]}>🎨 APPLY THEME</Text></View>
+                  ) : theme.dollarsPrice ? (
+                    <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}><Ionicons name="card" size={10} color="#30D158" /><Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(theme.dollarsPrice).toFixed(2)}</Text></View>
                   ) : (
-                    <View style={[s.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}><Ionicons name="flash" size={10} color="#FF2D55" /><Text style={[s.actionBtnText, { color: '#FF2D55', marginLeft: 3 }]}>CA${theme.dollarsPrice?.toFixed(2)}</Text></View>
+                    <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}><Text style={[s.actionBtnText, { color: COLORS.gold }]}>{theme.pointsPrice} pts</Text></View>
                   )}
                 </TouchableOpacity>
               );
@@ -1278,7 +1467,6 @@ export default function ShopScreen() {
       {/* ─── VIDEO FRAMES ─── */}
       {renderReady && category === 'video_frames' && (() => {
         const videoData = [...VIDEO_FRAMES].filter(f => !f.exclusive).filter(frame => {
-          if (!isAdmin && frame.dollarsPrice) return false;
           const owned = frame.free || ownedVideoFrames.includes(frame.id);
           if (priceFilter === 'owned') return owned;
           if (priceFilter === 'free') return frame.free;
@@ -1312,17 +1500,36 @@ export default function ShopScreen() {
             )}
             renderItem={({ item: frame }) => {
               const isOwned = frame.free || ownedVideoFrames.includes(frame.id);
+              const comingSoon = Platform.OS !== 'ios' && !!frame.dollarsPrice; // Android: achats $ pas encore dispo
               return (
                 <TouchableOpacity onPress={() => handleVideoFrame(frame)} activeOpacity={0.85}
-                  style={[s.frameCard, isOwned && { borderColor: frame.color + '60', borderWidth: 1 }]}>
-                  <View style={s.framePreviewWrap}><VideoFramePreview frame={frame} /></View>
+                  style={[s.frameCard, isOwned && !comingSoon && { borderColor: frame.color + '60', borderWidth: 1 }]}>
+                  <View style={s.framePreviewWrap}>
+                    <VideoFramePreview frame={frame} />
+                    {comingSoon && (
+                      <View style={s.comingSoonOverlay}>
+                        <Text style={s.comingSoonIcon}>🔜</Text>
+                        <Text style={s.comingSoonText}>Soon</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={s.frameName} numberOfLines={1}>{frame.name}</Text>
-                  {isOwned ? (
+                  {comingSoon ? (
+                    <View style={[s.actionBtn, { backgroundColor: 'rgba(120,120,140,0.15)', borderColor: 'rgba(120,120,140,0.4)' }]}>
+                      <Ionicons name="time-outline" size={10} color={COLORS.gray} />
+                      <Text style={[s.actionBtnText, { color: COLORS.gray, marginLeft: 3 }]}>Coming soon</Text>
+                    </View>
+                  ) : isOwned ? (
                     <View style={[s.actionBtn, { backgroundColor: 'rgba(0,212,255,0.1)', borderColor: COLORS.blue }]}><Text style={[s.actionBtnText, { color: COLORS.blue }]}>✓ OWNED</Text></View>
-                  ) : frame.animated ? (
-                    <View style={[s.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}><Ionicons name="flash" size={10} color="#FF2D55" /><Text style={[s.actionBtnText, { color: '#FF2D55', marginLeft: 3 }]}>CA${frame.dollarsPrice?.toFixed(2)}</Text></View>
+                  ) : frame.dollarsPrice && isFreebieCosmetic(frame) ? (
+                    <View style={{ alignItems: 'center', width: '100%' }}>
+                      <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}><Ionicons name="card" size={10} color="#30D158" /><Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(frame.dollarsPrice).toFixed(2)}</Text></View>
+                      <Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text>
+                    </View>
+                  ) : frame.dollarsPrice ? (
+                    <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}><Ionicons name="card" size={10} color="#30D158" /><Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(frame.dollarsPrice).toFixed(2)}</Text></View>
                   ) : (
-                    <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}><Ionicons name="star" size={10} color={COLORS.gold} /><Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{frame.pointsPrice} pts</Text></View>
+                    <View style={{ alignItems: 'center', width: '100%' }}><View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}><Ionicons name="star" size={10} color={COLORS.gold} /><Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{frame.pointsPrice} pts</Text></View>{isFreebieCosmetic(frame) && userPlan !== 'legendary' && <Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text>}</View>
                   )}
                 </TouchableOpacity>
               );
@@ -1334,7 +1541,6 @@ export default function ShopScreen() {
       {/* ─── COMMENT FRAMES ─── */}
       {renderReady && category === 'comment_frames' && (() => {
         const commentData = [...COMMENT_FRAMES].filter(f => !f.exclusive).filter(frame => {
-          if (!isAdmin && frame.dollarsPrice) return false;
           const owned = commentFrameOwned(frame);
           if (priceFilter === 'owned') return owned;
           if (priceFilter === 'free') return frame.free || frame.pointsPrice === 0;
@@ -1369,16 +1575,27 @@ export default function ShopScreen() {
             renderItem={({ item: frame }) => {
               const owned = commentFrameOwned(frame);
               const equipped = userProfile?.equippedCommentFrame === frame.id;
+              const comingSoon = Platform.OS !== 'ios' && !!frame.dollarsPrice; // Android: achats $ pas encore dispo
               return (
                 <TouchableOpacity activeOpacity={0.85}
-                  style={[s.frameCard, equipped && { borderColor: frame.color || COLORS.gold, borderWidth: 1.5 }]}
+                  style={[s.frameCard, equipped && !comingSoon && { borderColor: frame.color || COLORS.gold, borderWidth: 1.5 }]}
                   onPress={() => handleCommentFrame(frame, owned)}>
-                  <View style={s.framePreviewWrap}><CommentBubblePreview frame={frame} /></View>
+                  <View style={s.framePreviewWrap}>
+                    <CommentBubblePreview frame={frame} />
+                    {comingSoon && (
+                      <View style={s.comingSoonOverlay}>
+                        <Text style={s.comingSoonIcon}>🔜</Text>
+                        <Text style={s.comingSoonText}>Soon</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={s.frameName}>{frame.name}</Text>
                   {frame.exclusive ? <Text style={s.exclusiveLabel}>🏆 Champion only</Text>
+                    : comingSoon ? <View style={[s.actionBtn, { backgroundColor: 'rgba(120,120,140,0.15)', borderColor: 'rgba(120,120,140,0.4)' }]}><Ionicons name="time-outline" size={10} color={COLORS.gray} /><Text style={[s.actionBtnText, { color: COLORS.gray, marginLeft: 3 }]}>Coming soon</Text></View>
                     : owned ? <View style={[s.actionBtn, { backgroundColor: equipped ? 'rgba(201,168,76,0.15)' : 'rgba(0,212,255,0.1)', borderColor: equipped ? COLORS.gold : COLORS.blue }]}><Text style={[s.actionBtnText, { color: equipped ? COLORS.gold : COLORS.blue }]}>{equipped ? '✓ EQUIPPED' : 'TAP TO EQUIP'}</Text></View>
-                    : frame.animated ? <View style={[s.actionBtn, { backgroundColor: 'rgba(255,45,85,0.1)', borderColor: '#FF2D55' }]}><Text style={[s.actionBtnText, { color: '#FF2D55' }]}>CA${frame.dollarsPrice?.toFixed(2)}</Text></View>
-                    : <View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}><Ionicons name="star" size={10} color={COLORS.gold} /><Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{frame.pointsPrice} pts</Text></View>
+                    : frame.dollarsPrice && isFreebieCosmetic(frame) ? <View style={{ alignItems: 'center', width: '100%' }}><View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}><Ionicons name="card" size={10} color="#30D158" /><Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(frame.dollarsPrice).toFixed(2)}</Text></View><Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text></View>
+                    : frame.dollarsPrice ? <View style={[s.actionBtn, { backgroundColor: 'rgba(48,209,88,0.12)', borderColor: '#30D158' }]}><Ionicons name="card" size={10} color="#30D158" /><Text style={[s.actionBtnText, { color: '#30D158', marginLeft: 3 }]}>CA${Number(frame.dollarsPrice).toFixed(2)}</Text></View>
+                    : <View style={{ alignItems: 'center', width: '100%' }}><View style={[s.actionBtn, { backgroundColor: 'rgba(201,168,76,0.1)', borderColor: COLORS.gold }]}><Ionicons name="star" size={10} color={COLORS.gold} /><Text style={[s.actionBtnText, { color: COLORS.gold, marginLeft: 3 }]}>{frame.pointsPrice} pts</Text></View>{isFreebieCosmetic(frame) && userPlan !== 'legendary' && <Text numberOfLines={1} style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2, fontSize: 7.5, color: COLORS.gold, fontWeight: '800', textAlign: 'center' }}>👑 FREE WITH LEGENDARY</Text>}</View>
                   }
                 </TouchableOpacity>
               );
@@ -1434,6 +1651,10 @@ const s = StyleSheet.create({
   pointsLabel: { fontSize: 11, color: COLORS.gray },
   earnBanner: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 8, padding: 10, backgroundColor: 'rgba(0,212,255,0.06)', borderRadius: 10, borderWidth: 0.5, borderColor: COLORS.blue + '40' },
   earnText: { flex: 1, fontSize: 10, color: COLORS.gray, marginLeft: 7, lineHeight: 14 },
+  giftBanner: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginTop: 4, marginBottom: 8, padding: 12, backgroundColor: 'rgba(255,45,85,0.08)', borderRadius: 12, borderWidth: 0.5, borderColor: '#FF2D5550', gap: 10 },
+  giftIconWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,45,85,0.14)' },
+  giftTitle: { fontSize: 13, fontWeight: '800', color: COLORS.white },
+  giftSub: { fontSize: 10, color: COLORS.gray, marginTop: 2 },
   catRow: { paddingHorizontal: 14, paddingBottom: 14, paddingTop: 4 },
   catChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: COLORS.card, borderWidth: 0.5, borderColor: COLORS.gray3, marginRight: 8, height: 34 },
   catChipActive: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
@@ -1449,6 +1670,9 @@ const s = StyleSheet.create({
   frameCard: { width: ITEM_W, backgroundColor: COLORS.card, borderRadius: 14, padding: 10, borderWidth: 0.5, borderColor: COLORS.gray3, marginBottom: 12, alignItems: 'center' },
   framePreviewWrap: { height: 90, width: '100%', alignItems: 'center', justifyContent: 'center', marginBottom: 8, position: 'relative' },
   statusDot: { position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: COLORS.card },
+  comingSoonOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 10, backgroundColor: 'rgba(8,8,16,0.72)', alignItems: 'center', justifyContent: 'center' },
+  comingSoonIcon: { fontSize: 22, marginBottom: 2 },
+  comingSoonText: { fontSize: 10, fontWeight: '800', color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5 },
   frameName: { fontSize: 12, fontWeight: '700', color: COLORS.white, textAlign: 'center', marginBottom: 3 },
   frameDesc: { fontSize: 10, color: COLORS.gray, marginBottom: 6, textAlign: 'center', lineHeight: 13 },
   framePrice: { fontSize: 11, color: COLORS.gray, textAlign: 'center' },

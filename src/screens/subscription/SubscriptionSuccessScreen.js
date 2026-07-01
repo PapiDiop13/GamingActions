@@ -24,7 +24,9 @@ export default function SubscriptionSuccessScreen({ navigation, route }) {
   const { user } = useAuthStore();
   const type = route?.params?.type || 'legendary'; // 'legendary' or 'fanbase'
   const creator = route?.params?.creator;
+  const plan = route?.params?.plan;
   const isLegendary = type === 'legendary';
+  const legendaryPrice = plan === 'legendary_yearly' ? 'CA$19.99/year' : 'CA$2.99/month';
   const benefits = isLegendary ? BENEFITS : FANBASE_BENEFITS;
   const color = isLegendary ? COLORS.gold : '#00C853';
 
@@ -48,7 +50,7 @@ export default function SubscriptionSuccessScreen({ navigation, route }) {
           </Text>
           <View style={[styles.heroBadge, { backgroundColor: color + '18', borderColor: color }]}>
             <Text style={[styles.heroBadgeText, { color }]}>
-              {isLegendary ? 'CA$3.99/month · Cancel anytime' : '$4.99/month · Cancel anytime'}
+              {isLegendary ? `${legendaryPrice} · Cancel anytime` : 'CA$3.99/month · Cancel anytime'}
             </Text>
           </View>
         </View>

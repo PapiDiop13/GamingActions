@@ -1,29 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, TouchableOpacity, FlatList,
   Modal, TouchableWithoutFeedback, KeyboardAvoidingView,
-  TextInput, Platform, Image, Alert, ActivityIndicator,
+  TextInput, Platform, Alert, ActivityIndicator, Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import {
   collection, query, where, orderBy, onSnapshot,
-  addDoc, updateDoc, doc, getDoc, serverTimestamp, increment, getDocs,
+  addDoc, updateDoc, deleteDoc, doc, getDoc, serverTimestamp, increment,
+  getDocs, limit, startAfter,
 } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
-import { getVideoUrl, getThumbnailUrl } from '../../config/mux';
+import { getVideoUrl } from '../../config/mux';
 import useAuthStore from '../../store/useAuthStore';
-import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import Avatar from '../../components/FramedAvatar';
 import { commentFrameStyle } from '../../constants/frames';
+import { USERNAME_EFFECTS } from '../../constants/cosmetics';
+import { LeaderBadge, ChampionBadge } from '../../components/ElectricEffect';
+import { UserPlanBadges, ProfileBadgePill, PROFILE_BADGE_DATA as BADGE_DATA } from '../../components/UserBadges';
 import { findBannedWords, censorText, logModeration } from '../../utils/moderation';
 
-const THANKS_COST = 5;
+const THANKS_COST = 10;
 const THANKS_COLOR = '#7C4DFF';
-
+const GREEN = '#00C853';
+const COMMENT_PAGE = 15;
+const MAX_COMMENT = 100;
 
 function tipFmtTime(ts) {
   if (!ts) return 'now';
@@ -35,395 +40,679 @@ function tipFmtTime(ts) {
   return Math.floor(diff / 86400) + 'd';
 }
 
-function TipCommentBubble({ comment, onReply, currentUser, currentProfile }) {
+function fmtDuration(seconds) {
+  if (!seconds) return null;
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// ─── Account type decorators ─────────────────────────────────────────────────
+function AccountBadge({ accountType, plan, size = 11 }) {
+  if (accountType === 'gameconic') return <Ionicons name="flash" size={size} color={COLORS.red} style={{ marginLeft: 3 }} />;
+  if (accountType === 'creator') return <Ionicons name="videocam" size={size} color={COLORS.blue} style={{ marginLeft: 3 }} />;
+  if (accountType === 'developer') return <Ionicons name="code-slash" size={size} color="#7C4DFF" style={{ marginLeft: 3 }} />;
+  if (plan === 'legendary') return <Ionicons name="star" size={size} color={COLORS.gold} style={{ marginLeft: 3 }} />;
+  return null;
+}
+
+function accountNameColor(accountType, plan) {
+  if (accountType === 'gameconic') return COLORS.red;
+  if (accountType === 'creator') return COLORS.blue;
+  if (accountType === 'developer') return '#7C4DFF';
+  if (plan === 'legendary') return COLORS.gold;
+  return COLORS.white;
+}
+
+// ─── Rich text renderer (@ blue, # gold) ────────────────────────────────────
+function renderRichText(text, baseStyle) {
+  if (!text) return null;
+  return (
+    <Text style={baseStyle}>
+      {text.split(/(@\w+|#\w+)/g).map((part, i) => {
+        if (part.startsWith('@')) return <Text key={i} style={{ color: COLORS.blue, fontWeight: '700' }}>{part}</Text>;
+        if (part.startsWith('#')) return <Text key={i} style={{ color: COLORS.gold, fontWeight: '700' }}>{part}</Text>;
+        return <Text key={i}>{part}</Text>;
+      })}
+    </Text>
+  );
+}
+
+// ─── Comment bubble — identical to feed's SheetCommentItem ───────────────────
+function TipCommentBubble({ comment, replies = [], onReply, onDelete, onEdit, currentUser, currentProfile }) {
   const [liveUser, setLiveUser] = useState(comment);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(comment.likes || 0);
+  const [showReplies, setShowReplies] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(comment.text || '');
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const cfPulse = useRef(new Animated.Value(0.5)).current;
 
+  const isMine = comment.userId && currentUser?.uid === comment.userId;
+
+  const handleLongPress = () => {
+    if (!isMine) return;
+    Alert.alert('Commentaire', 'Que veux-tu faire ?', [
+      { text: 'Modifier ✏️', onPress: () => { setEditText(comment.text || ''); setEditing(true); } },
+      { text: 'Supprimer 🗑️', style: 'destructive', onPress: () => onDelete?.(comment.id) },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
+  };
+
+  const handleSaveEdit = async () => {
+    const trimmed = editText.trim();
+    if (!trimmed) return;
+    setEditing(false);
+    await onEdit?.(comment.id, trimmed);
+  };
+
+  // Live user data via onSnapshot (frame/plan updates in real-time)
   useEffect(() => {
-    let alive = true;
-    if (comment.userId) {
+    if (!comment.userId) return;
+    const unsub = onSnapshot(doc(db, 'users', comment.userId), snap => {
+      if (snap.exists()) setLiveUser({ uid: comment.userId, ...snap.data() });
+    }, () => {
       getDoc(doc(db, 'users', comment.userId)).then(snap => {
-        if (alive && snap.exists()) setLiveUser({ uid: comment.userId, ...snap.data() });
+        if (snap.exists()) setLiveUser({ uid: comment.userId, ...snap.data() });
       }).catch(() => {});
-    }
-    return () => { alive = false; };
+    });
+    return () => unsub();
   }, [comment.userId]);
 
   const cf = commentFrameStyle(liveUser);
   const hasBorder = cf && cf.id !== 'none';
   const borderColor = hasBorder ? cf.color : 'transparent';
   const isChampionFrame = cf?.id === 'cf_champion';
-  const nameColor = liveUser?.accountType === 'gameconic' ? COLORS.red
+
+  useEffect(() => {
+    if (!cf?.animated || !cf?.glow) { cfPulse.setValue(0.65); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(cfPulse, { toValue: 1.0, duration: 700, useNativeDriver: true }),
+      Animated.timing(cfPulse, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [cf?.id]);
+
+  // Name color + animated effect — mirrors CommentsScreen
+  const _baseNameColor = liveUser?.accountType === 'gameconic' ? COLORS.red
+    : liveUser?.accountType === 'board' ? '#00E676'
     : liveUser?.accountType === 'creator' ? COLORS.blue
+    : liveUser?.accountType === 'developer' ? '#7C4DFF'
     : liveUser?.plan === 'legendary' ? COLORS.gold
-    : COLORS.gold;
+    : COLORS.white;
+  const _ueItem = USERNAME_EFFECTS?.find(e => e.id === liveUser?.equippedUsernameEffect);
+  const nameColor = _ueItem ? (_ueItem.color || _ueItem.colors?.[0] || _baseNameColor) : _baseNameColor;
+  const nameGlow = _ueItem?.glow || false;
+  const nameAnim = _ueItem?.animated || false;
+  const uePulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!nameAnim) { uePulse.setValue(1); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(uePulse, { toValue: 0.55, duration: 750, useNativeDriver: true }),
+      Animated.timing(uePulse, { toValue: 1,    duration: 750, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [nameAnim, nameColor]);
 
   const handleLike = async () => {
-    if (liked) return;
-    setLiked(true);
-    setLikeCount(c => c + 1);
+    const newLiked = !liked;
+    setLiked(newLiked);
+    setLikeCount(c => newLiked ? c + 1 : Math.max(0, c - 1));
+    Animated.sequence([
+      Animated.spring(scaleAnim, { toValue: 1.3, useNativeDriver: true, speed: 60 }),
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }),
+    ]).start();
     try {
-      await updateDoc(doc(db, 'tipComments', comment.id), { likes: increment(1) });
-      if (comment.userId && comment.userId !== currentUser?.uid) {
-        await addDoc(collection(db, 'notifications'), {
-          userId: comment.userId, type: 'comment_like', fromUserId: currentUser?.uid,
-          fromUsername: currentProfile?.username || 'Someone', text: 'liked your comment ❤️',
-          read: false, createdAt: serverTimestamp(),
-        });
-      }
-    } catch (e) {}
+      await updateDoc(doc(db, 'tipComments', comment.id), { likes: increment(newLiked ? 1 : -1) });
+    } catch (e) {
+      setLiked(!newLiked);
+      setLikeCount(c => newLiked ? Math.max(0, c - 1) : c + 1);
+    }
   };
 
   return (
-    <View style={[
-      sheetS.commentCard,
-      hasBorder && { borderColor, borderWidth: 1.5 },
-      isChampionFrame && { borderColor: '#E8C96B', borderWidth: 2 },
-      hasBorder && cf.glow && { shadowColor: borderColor, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 5 },
-    ]}>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-        <Avatar user={liveUser} size={28} />
-        <View style={{ flex: 1, marginLeft: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={[sheetS.commentName, { color: nameColor }]}>{liveUser?.username || comment.username}</Text>
-            <Text style={sheetS.commentTime}> · {tipFmtTime(comment.createdAt)}</Text>
-          </View>
-          <Text style={sheetS.commentText}>
-            {comment.text.split(/(@\w+)/g).map((part, i) =>
-              part.startsWith('@')
-                ? <Text key={i} style={{ color: COLORS.blue, fontWeight: '700' }}>{part}</Text>
-                : <Text key={i}>{part}</Text>
-            )}
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
-            <TouchableOpacity onPress={() => onReply(liveUser?.username || comment.username)} style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}>
-              <Ionicons name="chatbubble-outline" size={12} color={COLORS.gray} />
-              <Text style={{ fontSize: 11, color: COLORS.gray, marginLeft: 4, fontWeight: '600' }}>Reply</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleLike} style={{ flexDirection: 'row', alignItems: 'center' }} disabled={liked}>
-              <Ionicons name={liked ? 'heart' : 'heart-outline'} size={14} color={liked ? COLORS.red : COLORS.gray} />
-              {likeCount > 0 && <Text style={{ fontSize: 11, color: liked ? COLORS.red : COLORS.gray, marginLeft: 4 }}>{likeCount}</Text>}
-            </TouchableOpacity>
+    <View>
+      {/* ── Top-level comment ── */}
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onLongPress={handleLongPress}
+        style={[
+          cS.card,
+          hasBorder && { borderColor, borderWidth: 1.5 },
+          isChampionFrame && { borderColor: '#E8C96B', borderWidth: 2 },
+        ]}
+      >
+        {hasBorder && !isChampionFrame && cf.glow && (
+          cf.animated ? (
+            <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 12, borderWidth: 2, borderColor, shadowColor: borderColor, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 14, opacity: cfPulse }]} pointerEvents="none" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { borderRadius: 12, borderWidth: 1.5, borderColor, shadowColor: borderColor, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 5 }]} pointerEvents="none" />
+          )
+        )}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+          <Avatar user={liveUser} size={28} />
+          <View style={{ flex: 1, marginLeft: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+              {nameAnim ? (
+                <Animated.Text style={[cS.name, { color: nameColor, opacity: uePulse, textShadowColor: nameColor, textShadowRadius: 9, textShadowOffset: { width: 0, height: 0 } }]}>
+                  {liveUser?.username || comment.username}
+                </Animated.Text>
+              ) : (
+                <Text style={[cS.name, { color: nameColor, textShadowColor: nameGlow ? nameColor : 'transparent', textShadowRadius: nameGlow ? 6 : 0, textShadowOffset: { width: 0, height: 0 } }]}>
+                  {liveUser?.username || comment.username}
+                </Text>
+              )}
+              {(() => {
+                const excl = ['creator', 'gameconic'];
+                if (liveUser?.isChampion && !excl.includes(liveUser?.accountType)) return <ChampionBadge small />;
+                if (liveUser?.isCurrentLeader && !excl.includes(liveUser?.accountType)) return <LeaderBadge small />;
+                return null;
+              })()}
+              <Text style={cS.time}> · {tipFmtTime(comment.createdAt)}</Text>
+            </View>
+            {editing ? (
+              <View style={{ marginTop: 4 }}>
+                <TextInput
+                  value={editText}
+                  onChangeText={setEditText}
+                  style={[cS.text, { backgroundColor: COLORS.card, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5, borderWidth: 1, borderColor: COLORS.blue }]}
+                  multiline
+                  maxLength={100}
+                  autoFocus
+                />
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 5 }}>
+                  <TouchableOpacity onPress={handleSaveEdit} style={{ paddingHorizontal: 10, paddingVertical: 4, backgroundColor: COLORS.blue, borderRadius: 6 }}>
+                    <Text style={{ fontSize: 11, color: COLORS.white, fontWeight: '700' }}>Sauvegarder</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setEditing(false)} style={{ paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ fontSize: 11, color: COLORS.gray }}>Annuler</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : renderRichText(comment.text, cS.text)}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5 }}>
+              <TouchableOpacity onPress={() => onReply({ parentId: comment.id, username: liveUser?.username || comment.username, toUserId: comment.userId })} style={cS.actionBtn}>
+                <Ionicons name="chatbubble-outline" size={12} color={COLORS.gray} />
+                <Text style={cS.actionText}>Reply{replies.length > 0 ? ` · ${replies.length}` : ''}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleLike} style={cS.actionBtn}>
+                <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+                  <Ionicons name={liked ? 'heart' : 'heart-outline'} size={13} color={liked ? COLORS.red : COLORS.gray} />
+                </Animated.View>
+                {likeCount > 0 && <Text style={[cS.actionText, liked && { color: COLORS.red }]}> {likeCount}</Text>}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
+
+      {/* ── View replies toggle ── */}
+      {replies.length > 0 && (
+        <TouchableOpacity onPress={() => setShowReplies(v => !v)} style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 44, paddingVertical: 4, marginBottom: 2, gap: 6 }}>
+          <View style={{ width: 20, height: 1, backgroundColor: COLORS.gray3 }} />
+          <Text style={{ fontSize: 11, color: COLORS.blue, fontWeight: '700' }}>
+            {showReplies ? 'Masquer les réponses' : `Voir ${replies.length} réponse${replies.length > 1 ? 's' : ''}`}
+          </Text>
+          <Ionicons name={showReplies ? 'chevron-up' : 'chevron-down'} size={11} color={COLORS.blue} />
+        </TouchableOpacity>
+      )}
+
+      {/* ── Inline replies (feed style: indented, minimal, no avatar) ── */}
+      {showReplies && replies.map(r => (
+        <TipReplyBubble key={r.id} comment={r} onDelete={onDelete} onEdit={onEdit} currentUser={currentUser} />
+      ))}
     </View>
   );
 }
 
-function CommentsSheet({ visible, onClose, tipId, userProfile }) {
-  const { user } = useAuthStore();
-  const [comments, setComments] = useState([]);
-  const [text, setText] = useState('');
-  const [replyTo, setReplyTo] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const MAX = 100;
+// ─── Reply bubble (minimal, indented — feed style) ───────────────────────────
+function TipReplyBubble({ comment, onDelete, onEdit, currentUser }) {
+  const [liveUser, setLiveUser] = useState(comment);
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(comment.likes || 0);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(comment.text || '');
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  useEffect(() => {
-    if (!visible || !tipId) return;
-    const q = query(
-      collection(db, 'tipComments'),
-      where('tipId', '==', tipId),
-      orderBy('createdAt', 'desc')
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [visible, tipId]);
-
-  const handleSend = async () => {
-    const raw = (replyTo ? '@' + replyTo + ' ' : '') + text.trim();
-    if (!raw || !userProfile?.uid) return;
-    setText('');
-    setReplyTo(null);
-    // Modération
-    const banned = findBannedWords(raw);
-    const body = banned.length > 0 ? censorText(raw) : raw;
-    if (banned.length > 0) logModeration(userProfile.uid, userProfile.username, raw, banned);
-    try {
-      await addDoc(collection(db, 'tipComments'), {
-        tipId,
-        userId: userProfile.uid,
-        username: userProfile.username,
-        avatar: userProfile.avatar || '',
-        accountType: userProfile.accountType || 'gamer',
-        plan: userProfile.plan || 'free',
-        equippedFrame: userProfile.equippedFrame || 'none',
-        equippedCommentFrame: userProfile.equippedCommentFrame || 'none',
-        isChampion: userProfile.isChampion || false,
-        text: body,
-        likes: 0,
-        createdAt: serverTimestamp(),
-      });
-      await updateDoc(doc(db, 'videos', tipId), { commentsCount: increment(1) });
-    } catch(e){}
+  const isMine = comment.userId && currentUser?.uid === comment.userId;
+  const handleLongPress = () => {
+    if (!isMine) return;
+    Alert.alert('Réponse', 'Que veux-tu faire ?', [
+      { text: 'Modifier ✏️', onPress: () => { setEditText(comment.text || ''); setEditing(true); } },
+      { text: 'Supprimer 🗑️', style: 'destructive', onPress: () => onDelete?.(comment.id) },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
+  };
+  const handleSaveEdit = async () => {
+    const trimmed = editText.trim();
+    if (!trimmed) return;
+    setEditing(false);
+    await onEdit?.(comment.id, trimmed);
   };
 
-  const remaining = MAX - text.length;
+  useEffect(() => {
+    if (!comment.userId) return;
+    const unsub = onSnapshot(doc(db, 'users', comment.userId), snap => {
+      if (snap.exists()) setLiveUser({ uid: comment.userId, ...snap.data() });
+    }, () => {});
+    return () => unsub();
+  }, [comment.userId]);
+
+  const _base = liveUser?.accountType === 'gameconic' ? COLORS.red
+    : liveUser?.accountType === 'board' ? '#00E676'
+    : liveUser?.accountType === 'creator' ? COLORS.blue
+    : liveUser?.plan === 'legendary' ? COLORS.gold : COLORS.white;
+  const _ue = USERNAME_EFFECTS?.find(e => e.id === liveUser?.equippedUsernameEffect);
+  const nameColor = _ue ? (_ue.color || _ue.colors?.[0] || _base) : _base;
+  const nameGlow = _ue?.glow || false;
+  const nameAnim = _ue?.animated || false;
+  const uePulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!nameAnim) { uePulse.setValue(1); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(uePulse, { toValue: 0.55, duration: 750, useNativeDriver: true }),
+      Animated.timing(uePulse, { toValue: 1,    duration: 750, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [nameAnim, nameColor]);
+
+  const handleLike = async () => {
+    const newLiked = !liked;
+    setLiked(newLiked);
+    setLikeCount(c => newLiked ? c + 1 : Math.max(0, c - 1));
+    Animated.sequence([
+      Animated.spring(scaleAnim, { toValue: 1.3, useNativeDriver: true, speed: 60 }),
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, speed: 30 }),
+    ]).start();
+    try {
+      await updateDoc(doc(db, 'tipComments', comment.id), { likes: increment(newLiked ? 1 : -1) });
+    } catch (e) {
+      setLiked(!newLiked);
+      setLikeCount(c => newLiked ? Math.max(0, c - 1) : c + 1);
+    }
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={sheetS.backdrop} />
-      </TouchableWithoutFeedback>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={sheetS.wrap}>
-        <View style={sheetS.sheet}>
-          <View style={sheetS.handle} />
-          <Text style={sheetS.title}>{comments.length} Comments</Text>
-          {loading ? (
-            <ActivityIndicator color={COLORS.gold} style={{ marginTop: 20 }} />
-          ) : (
-            <ScrollView style={sheetS.list} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingVertical: 8 }}>
-              {comments.length === 0 ? (
-                <Text style={{ color: COLORS.gray, textAlign: 'center', marginTop: 30, fontSize: 14 }}>No comments yet. Be the first! 👇</Text>
-              ) : comments.map((c) => (
-                <TipCommentBubble key={c.id} comment={c} onReply={setReplyTo} currentUser={user} currentProfile={userProfile} />
-              ))}
-              <View style={{ height: 20 }} />
-            </ScrollView>
-          )}
-          {replyTo && (
-            <View style={sheetS.replyBar}>
-              <Ionicons name="return-down-forward" size={14} color={COLORS.blue} />
-              <Text style={sheetS.replyBarText}> Replying to @{replyTo}</Text>
-              <TouchableOpacity onPress={() => setReplyTo(null)} style={{ marginLeft: 'auto' }}>
-                <Ionicons name="close-circle" size={18} color={COLORS.gray} />
-              </TouchableOpacity>
-            </View>
-          )}
-          <View style={sheetS.inputRow}>
-            <Avatar user={userProfile} size={28} />
-            <View style={{ flex: 1, marginHorizontal: 10 }}>
-              <TextInput
-                value={text}
-                onChangeText={t => setText(t.slice(0, MAX))}
-                placeholder={replyTo ? `Reply to @${replyTo}...` : 'Add a comment...'}
-                placeholderTextColor={COLORS.gray}
-                style={sheetS.input}
-                autoFocus
-                maxLength={MAX}
-                multiline
-              />
-              {text.length > 70 && (
-                <Text style={{ fontSize: 10, color: remaining < 15 ? COLORS.red : COLORS.gray, textAlign: 'right', marginTop: 2 }}>{remaining}</Text>
-              )}
-            </View>
-            <TouchableOpacity onPress={handleSend} style={[sheetS.sendBtn, !text.trim() && { opacity: 0.4 }]} disabled={!text.trim()}>
-              <Ionicons name="send" size={14} color={COLORS.black} />
+    <TouchableOpacity activeOpacity={0.9} onLongPress={handleLongPress} style={cS.replyCard}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 }}>
+        {nameAnim ? (
+          <Animated.Text style={{ fontSize: 11, fontWeight: '800', color: nameColor, opacity: uePulse, textShadowColor: nameColor, textShadowRadius: 9, textShadowOffset: { width: 0, height: 0 } }}>
+            {liveUser?.username || comment.username}
+          </Animated.Text>
+        ) : (
+          <Text style={{ fontSize: 11, fontWeight: '800', color: nameColor, textShadowColor: nameGlow ? nameColor : 'transparent', textShadowRadius: nameGlow ? 5 : 0, textShadowOffset: { width: 0, height: 0 } }}>
+            {liveUser?.username || comment.username}
+          </Text>
+        )}
+        <Text style={{ fontSize: 9, color: COLORS.gray }}> · {tipFmtTime(comment.createdAt)}</Text>
+      </View>
+      {editing ? (
+        <View style={{ marginTop: 2 }}>
+          <TextInput
+            value={editText}
+            onChangeText={setEditText}
+            style={{ fontSize: 12, color: COLORS.white, backgroundColor: COLORS.card, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.blue }}
+            multiline maxLength={100} autoFocus
+          />
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+            <TouchableOpacity onPress={handleSaveEdit} style={{ paddingHorizontal: 9, paddingVertical: 3, backgroundColor: COLORS.blue, borderRadius: 5 }}>
+              <Text style={{ fontSize: 10, color: COLORS.white, fontWeight: '700' }}>Sauvegarder</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setEditing(false)}>
+              <Text style={{ fontSize: 10, color: COLORS.gray }}>Annuler</Text>
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+      ) : (
+        <Text style={{ fontSize: 12, color: COLORS.white, lineHeight: 17 }} numberOfLines={3}>
+          {(comment.text || '').split(/(@\w+|#\w+)/g).map((part, i) => {
+            if (part.startsWith('@')) return <Text key={i} style={{ color: COLORS.blue, fontWeight: '600' }}>{part}</Text>;
+            if (part.startsWith('#')) return <Text key={i} style={{ color: COLORS.gold, fontWeight: '600' }}>{part}</Text>;
+            return <Text key={i}>{part}</Text>;
+          })}
+        </Text>
+      )}
+      <TouchableOpacity onPress={handleLike} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+        <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+          <Ionicons name={liked ? 'heart' : 'heart-outline'} size={11} color={liked ? COLORS.red : COLORS.gray} />
+        </Animated.View>
+        {likeCount > 0 && <Text style={{ fontSize: 9, color: liked ? COLORS.red : COLORS.gray, marginLeft: 3 }}>{likeCount}</Text>}
+      </TouchableOpacity>
+    </TouchableOpacity>
   );
 }
 
-const sheetS = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  wrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
-  sheet: { backgroundColor: 'rgba(18,18,26,0.96)', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: Platform.OS === 'ios' ? 30 : 10, height: '85%' },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.gray2, alignSelf: 'center', marginTop: 10, marginBottom: 10 },
-  title: { fontSize: 15, fontWeight: '700', color: COLORS.white, paddingHorizontal: 16, marginBottom: 8, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3, paddingBottom: 10 },
-  list: { flex: 1, paddingHorizontal: 12 },
-  commentCard: { backgroundColor: COLORS.card, borderRadius: 12, padding: 11, marginBottom: 8, borderWidth: 1, borderColor: 'transparent' },
-  commentName: { fontSize: 12, fontWeight: '800' },
-  commentTime: { fontSize: 10, color: COLORS.gray },
-  commentText: { fontSize: 13, color: COLORS.white, lineHeight: 18, marginTop: 3 },
-  replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: COLORS.card, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 },
-  replyBarText: { fontSize: 12, color: COLORS.blue, fontWeight: '600' },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 0.5, borderTopColor: COLORS.gray3 },
-  input: { backgroundColor: COLORS.card, borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: COLORS.white, maxHeight: 80 },
-  sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
+const cS = StyleSheet.create({
+  card: { backgroundColor: COLORS.card, borderRadius: 12, padding: 11, borderWidth: 1, borderColor: 'transparent', overflow: 'hidden', marginBottom: 8 },
+  replyCard: { marginLeft: 52, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: COLORS.gray3, marginBottom: 6 },
+  name: { fontSize: 12, fontWeight: '800' },
+  time: { fontSize: 10, color: COLORS.gray },
+  text: { fontSize: 13, color: COLORS.white, lineHeight: 18, marginTop: 3 },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', marginRight: 16 },
+  actionText: { fontSize: 11, color: COLORS.gray, marginLeft: 3, fontWeight: '600' },
 });
 
+// ─── Main screen ─────────────────────────────────────────────────────────────
 export default function TipDetailScreen({ navigation, route }) {
   const { tip } = route.params;
-  const { user: authUser, userProfile, saveProfile } = useAuthStore();
-  const player = useVideoPlayer(tip.videoUrl ? getVideoUrl(tip.videoUrl) : null, (p) => {
+  const { user: authUser, userProfile } = useAuthStore();
+
+  const player = useVideoPlayer(getVideoUrl(tip), (p) => {
     p.loop = false;
+    p.play();
   });
 
+  // Thanks
   const [skipThanksConfirm, setSkipThanksConfirm] = useState(false);
   const [showThanksConfirm, setShowThanksConfirm] = useState(false);
   const [dontAskAgain, setDontAskAgain] = useState(false);
+  const [thanksQty, setThanksQty] = useState(1);
+  const [customQtyStr, setCustomQtyStr] = useState('');
   const [thanksCount, setThanksCount] = useState(tip.thanksCount || 0);
-  const [commentsCount, setCommentsCount] = useState(tip.commentsCount || 0);
-  const [showComments, setShowComments] = useState(false);
   const [thankLoading, setThankLoading] = useState(false);
+
+  // Comments
+  const [comments, setComments] = useState([]);
+  const [commentsCount, setCommentsCount] = useState(tip.commentsCount || 0);
+  const [commentText, setCommentText] = useState('');
+  const [replyTo, setReplyTo] = useState(null);
+  const [loadingComments, setLoadingComments] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const lastDocRef = useRef(null);
+
+  // Creator
   const [creatorProfile, setCreatorProfile] = useState(null);
 
-  const CAT_COLORS = {
-    flashtuto: COLORS.blue,
-    flashinfo: COLORS.red,
-    gameindev: '#7C4DFF',
-    gatv: COLORS.gold,
-  };
+  const CAT_COLORS = { flashtuto: COLORS.blue, flashinfo: COLORS.red, gameindev: '#7C4DFF', gatv: COLORS.gold };
   const catColor = CAT_COLORS[tip.contentType] || COLORS.gray;
-
-  const BADGE_COLORS = {
+  const CAT_LABELS = { flashtuto: 'FLASHTUTO', flashinfo: 'FLASHINFO', gameindev: 'GAMEINDEV' };
+  const BADGES = {
     gameconic: { bg: COLORS.red, text: COLORS.white, label: 'ICON' },
-    creator: { bg: COLORS.blue, text: COLORS.dark, label: 'CREATOR' },
+    creator: { bg: COLORS.blue, text: '#0A0A0F', label: 'CREATOR' },
+    developer: { bg: '#7C4DFF', text: COLORS.white, label: 'DEV' },
     gamer: { bg: COLORS.gray2, text: COLORS.white, label: 'GA' },
   };
-  const badge = BADGE_COLORS[tip.accountType] || BADGE_COLORS.gamer;
+  const badge = BADGES[tip.accountType] || BADGES.gamer;
+
+  const maxAffordableQty = Math.floor((userProfile?.gaPoints || 0) / THANKS_COST);
+  const effectiveQty = (() => {
+    if (customQtyStr) { const n = parseInt(customQtyStr); if (!isNaN(n) && n >= 1) return n; }
+    return thanksQty;
+  })();
+  const totalCost = THANKS_COST * effectiveQty;
+
+  const showFanbase = tip.accountType !== 'gamer' && tip.userId !== authUser?.uid;
+  const _creatorBase = accountNameColor(creatorProfile?.accountType || tip.accountType, creatorProfile?.plan || tip.plan);
+  const _creatorUe = USERNAME_EFFECTS?.find(e => e.id === creatorProfile?.equippedUsernameEffect);
+  const creatorNameColor = _creatorUe ? (_creatorUe.color || _creatorUe.colors?.[0] || _creatorBase) : _creatorBase;
+  const creatorNameGlow = _creatorUe?.glow || false;
+  const creatorNameAnim = _creatorUe?.animated || false;
+  const creatorUePulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!creatorNameAnim) { creatorUePulse.setValue(1); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(creatorUePulse, { toValue: 0.55, duration: 750, useNativeDriver: true }),
+      Animated.timing(creatorUePulse, { toValue: 1,    duration: 750, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [creatorNameAnim, creatorNameColor]);
+
+  // Load comments
+  const loadFirstComments = async () => {
+    setLoadingComments(true);
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'tipComments'),
+        where('tipId', '==', tip.id),
+        orderBy('createdAt', 'desc'),
+        limit(COMMENT_PAGE)
+      ));
+      setComments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      lastDocRef.current = snap.docs[snap.docs.length - 1] || null;
+      setHasMore(snap.docs.length === COMMENT_PAGE);
+    } catch (e) { setComments([]); }
+    finally { setLoadingComments(false); }
+  };
+
+  const loadMoreComments = async () => {
+    if (loadingMore || !hasMore || !lastDocRef.current) return;
+    setLoadingMore(true);
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'tipComments'),
+        where('tipId', '==', tip.id),
+        orderBy('createdAt', 'desc'),
+        startAfter(lastDocRef.current),
+        limit(COMMENT_PAGE)
+      ));
+      setComments(prev => [...prev, ...snap.docs.map(d => ({ id: d.id, ...d.data() }))]);
+      lastDocRef.current = snap.docs[snap.docs.length - 1] || lastDocRef.current;
+      setHasMore(snap.docs.length === COMMENT_PAGE);
+    } catch (e) {}
+    finally { setLoadingMore(false); }
+  };
 
   useEffect(() => {
-    // Charge le profil créateur
+    let unsubCreator = null;
     if (tip.userId) {
-      getDoc(doc(db, 'users', tip.userId)).then(snap => {
-        if (snap.exists()) setCreatorProfile(snap.data());
+      unsubCreator = onSnapshot(doc(db, 'users', tip.userId), snap => {
+        if (snap.exists()) setCreatorProfile({ uid: tip.userId, ...snap.data() });
+      }, () => {
+        getDoc(doc(db, 'users', tip.userId)).then(snap => {
+          if (snap.exists()) setCreatorProfile({ uid: tip.userId, ...snap.data() });
+        }).catch(() => {});
       });
     }
-    // Charge la préférence "ne plus me demander" pour le Thanks (mémorisée définitivement)
     AsyncStorage.getItem('@ga_skip_thanks_confirm').then(val => {
       if (val === 'true') setSkipThanksConfirm(true);
     }).catch(() => {});
-    // Écoute les commentaires count
-    const unsub = onSnapshot(doc(db, 'videos', tip.id), (snap) => {
+    const unsub = onSnapshot(doc(db, 'videos', tip.id), snap => {
       if (snap.exists()) {
         setCommentsCount(snap.data().commentsCount || 0);
         setThanksCount(snap.data().thanksCount || 0);
       }
     });
-    return () => unsub();
-  }, [tip.id, authUser?.uid]);
+    loadFirstComments();
+    return () => { unsub(); if (unsubCreator) unsubCreator(); };
+  }, [tip.id]);
 
-  // Étape 1 : clic Thanks → vérifie les points, puis confirme (ou envoie direct si "ne plus demander")
+  // Thanks
   const handleThanks = () => {
     if (!authUser?.uid) return;
-    // Les creators et gameconics ne peuvent pas envoyer de Thanks
-    // (empêche le blanchiment GA Points → Thanks → cash entre créateurs)
     if (userProfile?.accountType === 'creator' || userProfile?.accountType === 'gameconic') {
-      Alert.alert(
-        'Not available',
-        'Creators and Gameconics cannot send Thanks. This keeps the rewards economy fair for everyone. 🛡️',
-        [{ text: 'OK' }]
-      );
+      Alert.alert('Non disponible', "Les créateurs et Gameconics ne peuvent pas envoyer de THX pour garder l'économie équitable. 🛡️", [{ text: 'OK' }]);
       return;
     }
-    const currentPoints = userProfile?.gaPoints || 0;
-    if (currentPoints < THANKS_COST) {
-      Alert.alert(
-        '❌ Pas assez de GA Points',
-        `Il te faut ${THANKS_COST} GA Points pour envoyer un Thanks. Tu en as ${currentPoints}.`,
-        [{ text: 'OK' }]
-      );
+    if ((userProfile?.gaPoints || 0) < THANKS_COST) {
+      Alert.alert('❌ Pas assez de GA Points', `Minimum ${THANKS_COST} pts (1 THX). Tu en as ${userProfile?.gaPoints || 0}.`, [{ text: 'OK' }]);
       return;
     }
-    if (skipThanksConfirm) {
-      doThanks();
-    } else {
-      setDontAskAgain(false);
-      setShowThanksConfirm(true);
-    }
+    if (skipThanksConfirm) { doThanks(); return; }
+    setDontAskAgain(false); setThanksQty(1); setCustomQtyStr('');
+    setShowThanksConfirm(true);
   };
 
-  // Étape 2 : envoi réel — ILLIMITÉ, l'user peut remercier autant qu'il veut (il paie ses points à chaque fois)
   const doThanks = async () => {
     if (!authUser?.uid) return;
-    const currentPoints = userProfile?.gaPoints || 0;
-    if (currentPoints < THANKS_COST) { setShowThanksConfirm(false); return; }
-
-    // "Ne plus me demander" coché → on mémorise définitivement
+    const qty = effectiveQty;
+    const cost = THANKS_COST * qty;
+    if ((userProfile?.gaPoints || 0) < cost) { setShowThanksConfirm(false); return; }
     if (dontAskAgain) {
-      try { await AsyncStorage.setItem('@ga_skip_thanks_confirm', 'true'); } catch (e) {}
+      try { await AsyncStorage.setItem('@ga_skip_thanks_confirm', 'true'); } catch {}
       setSkipThanksConfirm(true);
     }
     setShowThanksConfirm(false);
-
     setThankLoading(true);
     try {
-      // Enregistre le thanks (un doc par Thanks — illimité)
-      await addDoc(collection(db, 'thanks'), {
-        userId: authUser.uid,
-        tipId: tip.id,
-        creatorId: tip.userId,
-        points: THANKS_COST,
-        createdAt: serverTimestamp(),
-      });
-
-      // Déduit les points du user
-      await updateDoc(doc(db, 'users', authUser.uid), {
-        gaPoints: increment(-THANKS_COST),
-      });
-
-      // Crédite le créateur
-      await updateDoc(doc(db, 'users', tip.userId), {
-        gaPoints: increment(THANKS_COST),
-      });
-
-      // Incrémente le count de thanks sur la vidéo
-      await updateDoc(doc(db, 'videos', tip.id), {
-        thanksCount: increment(1),
-      });
-
-      // Notifie le créateur
+      await addDoc(collection(db, 'thanks'), { userId: authUser.uid, tipId: tip.id, creatorId: tip.userId, points: cost, qty, createdAt: serverTimestamp() });
+      await updateDoc(doc(db, 'users', authUser.uid), { gaPoints: increment(-cost) });
+      await updateDoc(doc(db, 'users', tip.userId), { gaPoints: increment(cost) });
+      await updateDoc(doc(db, 'videos', tip.id), { thanksCount: increment(qty) });
       await addDoc(collection(db, 'notifications'), {
-        userId: tip.userId,
-        type: 'thanks',
-        fromUserId: authUser.uid,
+        userId: tip.userId, type: 'thanks', fromUserId: authUser.uid,
         fromUsername: userProfile?.username || 'Someone',
-        text: `sent you a Thanks on your tip! 👍 +${THANKS_COST} GA Points`,
-        videoId: tip.id,
-        read: false,
-        createdAt: serverTimestamp(),
+        text: `t'a envoyé ${qty > 1 ? qty + '× ' : ''}THX sur ton tip ! ⚡ +${cost} GA Points`,
+        videoId: tip.id, read: false, createdAt: serverTimestamp(),
       });
-
-      // Met à jour le profil local (sans ré-écrire Firestore — increment déjà fait)
       useAuthStore.setState(state => ({
         userProfile: state.userProfile
-          ? { ...state.userProfile, gaPoints: Math.max(0, (state.userProfile.gaPoints || 0) - THANKS_COST) }
+          ? { ...state.userProfile, gaPoints: Math.max(0, (state.userProfile.gaPoints || 0) - cost) }
           : state.userProfile,
       }));
-
-      setThanksCount(prev => prev + 1);
+      setThanksCount(prev => prev + qty);
     } catch (e) {
-      Alert.alert('Error', 'Something went wrong. Please try again.');
-    } finally {
-      setThankLoading(false);
+      Alert.alert('Erreur', 'Une erreur est survenue. Réessaie.');
+    } finally { setThankLoading(false); }
+  };
+
+  // Comments — split top-level vs replies
+  const topComments = comments.filter(c => !c.parentId);
+  const repliesMap = {};
+  comments.forEach(c => {
+    if (c.parentId) {
+      if (!repliesMap[c.parentId]) repliesMap[c.parentId] = [];
+      repliesMap[c.parentId].push(c);
     }
+  });
+
+  const handleDeleteComment = async (commentId) => {
+    try {
+      await deleteDoc(doc(db, 'tipComments', commentId));
+      await updateDoc(doc(db, 'videos', tip.id), { commentsCount: increment(-1) });
+      setComments(prev => prev.filter(c => c.id !== commentId));
+    } catch (e) { Alert.alert('Erreur', 'Impossible de supprimer.'); }
   };
 
-  const formatDuration = (seconds) => {
-    if (!seconds) return '—';
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
+  const handleEditComment = async (commentId, newText) => {
+    try {
+      await updateDoc(doc(db, 'tipComments', commentId), { text: newText });
+      setComments(prev => prev.map(c => c.id === commentId ? { ...c, text: newText } : c));
+    } catch (e) { Alert.alert('Erreur', 'Impossible de modifier.'); }
   };
 
-  const CAT_LABELS = {
-    flashtuto: 'FLASHTUTO',
-    flashinfo: 'FLASHINFO',
-    gameindev: 'GAMEINDEV',
+  const handleSendComment = async () => {
+    // replyTo is { parentId, username } | null
+    const prefix = replyTo ? '@' + replyTo.username + ' ' : '';
+    const raw = prefix + commentText.trim();
+    if (!raw || !userProfile?.uid) return;
+    const capturedReplyTo = replyTo;
+    setCommentText(''); setReplyTo(null);
+    const banned = findBannedWords(raw);
+    const body = banned.length > 0 ? censorText(raw) : raw;
+    if (banned.length > 0) logModeration(userProfile.uid, userProfile.username, raw, banned);
+    try {
+      const ref = await addDoc(collection(db, 'tipComments'), {
+        tipId: tip.id, userId: userProfile.uid, username: userProfile.username,
+        avatar: userProfile.avatar || '', accountType: userProfile.accountType || 'gamer',
+        plan: userProfile.plan || 'free', equippedFrame: userProfile.equippedFrame || 'none',
+        equippedCommentFrame: userProfile.equippedCommentFrame || 'none',
+        isChampion: userProfile.isChampion || false, text: body, likes: 0,
+        parentId: capturedReplyTo?.parentId || null,
+        createdAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, 'videos', tip.id), { commentsCount: increment(1) });
+
+      // ── Notification au créateur du tip (commentaire top-level) ──
+      if (!capturedReplyTo && tip.userId && tip.userId !== userProfile.uid) {
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            userId: tip.userId, type: 'comment', fromUserId: userProfile.uid,
+            fromUsername: userProfile.username || 'Someone',
+            text: `a commenté ton tip "${tip.title || tip.caption}" : "${body.slice(0, 50)}${body.length > 50 ? '…' : ''}"`,
+            videoId: tip.id, read: false, createdAt: serverTimestamp(),
+          });
+        } catch (_) {}
+      }
+      // ── Notification à l'auteur du commentaire (reply) ──
+      if (capturedReplyTo?.parentId && capturedReplyTo?.toUserId && capturedReplyTo.toUserId !== userProfile.uid) {
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            userId: capturedReplyTo.toUserId, type: 'reply', fromUserId: userProfile.uid,
+            fromUsername: userProfile.username || 'Someone',
+            text: `a répondu à ton commentaire : "${body.slice(0, 60)}${body.length > 60 ? '…' : ''}"`,
+            videoId: tip.id, read: false, createdAt: serverTimestamp(),
+          });
+        } catch (_) {}
+      }
+
+      setComments(prev => [{
+        id: ref.id, tipId: tip.id, userId: userProfile.uid,
+        username: userProfile.username, avatar: userProfile.avatar || '',
+        accountType: userProfile.accountType, plan: userProfile.plan,
+        equippedFrame: userProfile.equippedFrame, equippedCommentFrame: userProfile.equippedCommentFrame,
+        text: body, likes: 0, parentId: capturedReplyTo?.parentId || null,
+        createdAt: { toDate: () => new Date() },
+      }, ...prev]);
+    } catch (e) {}
   };
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <CommentsSheet
-        visible={showComments}
-        onClose={() => setShowComments(false)}
-        tipId={tip.id}
-        userProfile={userProfile}
-      />
 
-      {/* Confirmation Thanks (-5 pts) avec "ne plus me demander" */}
+      {/* ── Thanks modal ─────────────────────────────────────────── */}
       <Modal visible={showThanksConfirm} transparent animationType="fade" statusBarTranslucent>
         <TouchableWithoutFeedback onPress={() => setShowThanksConfirm(false)}>
           <View style={tcS.backdrop}>
             <TouchableWithoutFeedback>
               <View style={tcS.card}>
                 <View style={tcS.iconCircle}>
-                  <Ionicons name="thumbs-up" size={28} color={THANKS_COLOR} />
+                  <Ionicons name="flash" size={28} color={THANKS_COLOR} />
                 </View>
-                <Text style={tcS.title}>Envoyer un Thanks ?</Text>
+                <Text style={tcS.title}>Envoyer des THX ⚡</Text>
                 <Text style={tcS.subtitle}>
-                  Tu vas envoyer <Text style={{ color: THANKS_COLOR, fontWeight: '800' }}>{THANKS_COST} GA Points</Text> à {tip.username}.
-                  {'\n'}Solde après : {Math.max(0, (userProfile?.gaPoints || 0) - THANKS_COST)} pts
+                  <Text style={{ color: COLORS.white, fontWeight: '800' }}>1 THX = {THANKS_COST} GA Points</Text>
+                  {'\n'}Tu as {userProfile?.gaPoints || 0} pts · max {maxAffordableQty} THX
                 </Text>
+
+                <View style={tcS.qtyRow}>
+                  {[1, 2, 5, 10].map(q => {
+                    const isActive = !customQtyStr && thanksQty === q;
+                    const tooExp = (userProfile?.gaPoints || 0) < THANKS_COST * q;
+                    return (
+                      <TouchableOpacity
+                        key={q}
+                        onPress={() => { if (!tooExp) { setThanksQty(q); setCustomQtyStr(''); } }}
+                        style={[tcS.qtyBtn, isActive && tcS.qtyBtnActive, tooExp && { opacity: 0.28 }]}
+                        disabled={tooExp}
+                      >
+                        <Text style={[tcS.qtyNum, isActive && { color: COLORS.black }]}>{q} THX</Text>
+                        <Text style={[tcS.qtyCost, isActive && { color: COLORS.black }]}>{THANKS_COST * q} pts</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <View style={tcS.customRow}>
+                  <Ionicons name="create-outline" size={14} color={COLORS.gray} style={{ marginRight: 8 }} />
+                  <TextInput
+                    value={customQtyStr}
+                    onChangeText={v => {
+                      const raw = v.replace(/[^0-9]/g, '');
+                      if (!raw) { setCustomQtyStr(''); return; }
+                      setCustomQtyStr(String(Math.min(parseInt(raw), maxAffordableQty)));
+                    }}
+                    placeholder={`Custom (max ${maxAffordableQty} THX)`}
+                    placeholderTextColor={COLORS.gray}
+                    style={tcS.customInput}
+                    keyboardType="number-pad"
+                  />
+                </View>
+
+                <View style={tcS.summaryRow}>
+                  <Text style={tcS.summaryText}>
+                    {effectiveQty} THX = <Text style={{ color: THANKS_COLOR, fontWeight: '800' }}>{totalCost} pts</Text>
+                  </Text>
+                  <Text style={tcS.balanceText}>
+                    Solde après : {Math.max(0, (userProfile?.gaPoints || 0) - totalCost)} pts
+                  </Text>
+                </View>
 
                 <TouchableOpacity style={tcS.checkRow} onPress={() => setDontAskAgain(v => !v)} activeOpacity={0.8}>
                   <View style={[tcS.checkbox, dontAskAgain && tcS.checkboxOn]}>
@@ -434,10 +723,15 @@ export default function TipDetailScreen({ navigation, route }) {
 
                 <View style={tcS.btnRow}>
                   <TouchableOpacity onPress={() => setShowThanksConfirm(false)} style={tcS.cancelBtn}>
-                    <Text style={tcS.cancelText}>Cancel</Text>
+                    <Text style={tcS.cancelText}>Annuler</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={doThanks} style={tcS.confirmBtn}>
-                    <Text style={tcS.confirmText}>Envoyer · {THANKS_COST} pts</Text>
+                  <TouchableOpacity
+                    onPress={doThanks}
+                    style={[tcS.confirmBtn, effectiveQty < 1 && { opacity: 0.4 }]}
+                    disabled={effectiveQty < 1}
+                  >
+                    <Ionicons name="flash" size={13} color={COLORS.white} style={{ marginRight: 5 }} />
+                    <Text style={tcS.confirmText}>{effectiveQty} THX · {totalCost} pts</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -446,176 +740,272 @@ export default function TipDetailScreen({ navigation, route }) {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* ── Fixed header ─────────────────────────────────────────── */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={COLORS.white} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{tip.caption}</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>{tip.title || tip.caption}</Text>
         <View style={{ width: 22 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      {/* ── Fixed top content ─────────────────────────────────────── */}
+      <View>
         {/* Video */}
         <View style={styles.videoArea}>
-          {tip.videoUrl ? (
-            <VideoView
-              player={player}
-              style={StyleSheet.absoluteFill}
-              contentFit="contain"
-              nativeControls
-              allowsFullscreen
-            />
-          ) : (
-            <Ionicons name="game-controller" size={48} color={COLORS.gold} style={{ opacity: 0.15 }} />
+          <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls allowsFullscreen />
+          {fmtDuration(tip.duration) && (
+            <View style={styles.durationBadge}>
+              <Text style={styles.durationText}>{fmtDuration(tip.duration)}</Text>
+            </View>
           )}
-          <View style={styles.durationBadge}>
-            <Text style={styles.durationText}>{formatDuration(tip.duration)}</Text>
-          </View>
         </View>
 
         {/* Info */}
         <View style={styles.infoSection}>
-          <View style={[styles.catTag, { backgroundColor: catColor + '18' }]}>
+          <View style={[styles.catTag, { backgroundColor: catColor + '20' }]}>
             <Text style={[styles.catTagText, { color: catColor }]}>{CAT_LABELS[tip.contentType] || tip.contentType?.toUpperCase()}</Text>
           </View>
-          <Text style={styles.title}>{tip.caption}</Text>
+          <Text style={styles.title}>{tip.title || tip.caption}</Text>
+          {!!(tip.caption && tip.title) && (
+            <Text style={styles.tipDesc}>{tip.caption}</Text>
+          )}
           <Text style={styles.game}>🎮 {tip.game}</Text>
         </View>
 
-        {/* Creator */}
-        <TouchableOpacity onPress={() => navigation.navigate('UserProfile', { userId: tip.userId })} style={styles.creatorCard} activeOpacity={0.85}>
-          <Avatar user={{ ...tip, ...creatorProfile }} size={44} />
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.creatorName}>{tip.username}</Text>
-              <View style={[styles.badge, { backgroundColor: badge.bg, marginLeft: 6 }]}>
-                <Text style={[styles.badgeText, { color: badge.text }]}>{badge.label}</Text>
-              </View>
-            </View>
-            <Text style={styles.creatorSub}>Tap to view profile</Text>
+        {/* Action bar: Views | THX | Comments | [Fanbase] */}
+        <View style={styles.actionBar}>
+          <View style={styles.actionItem}>
+            <Ionicons name="eye-outline" size={19} color={COLORS.gray} />
+            <Text style={styles.actionLabel}>{tip.viewsCount || 0}</Text>
           </View>
-        </TouchableOpacity>
-
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <View style={styles.stat}>
-            <Text style={styles.statNum}>{tip.viewsCount || 0}</Text>
-            <Text style={styles.statLabel}>Views</Text>
-          </View>
-          <TouchableOpacity style={styles.stat} onPress={() => setShowComments(true)}>
-            <Text style={[styles.statNum, { color: COLORS.blue }]}>{commentsCount}</Text>
-            <Text style={styles.statLabel}>Comments 💬</Text>
+          <View style={styles.actionDivider} />
+          <TouchableOpacity
+            style={styles.actionItem}
+            onPress={tip.userId !== authUser?.uid ? handleThanks : undefined}
+            disabled={thankLoading || tip.userId === authUser?.uid}
+          >
+            {thankLoading
+              ? <ActivityIndicator size="small" color={THANKS_COLOR} />
+              : <Ionicons name="flash-outline" size={19} color={THANKS_COLOR} />}
+            <Text style={[styles.actionLabel, { color: THANKS_COLOR }]}>{thanksCount} THX</Text>
           </TouchableOpacity>
-          <View style={styles.stat}>
-            <Text style={[styles.statNum, { color: THANKS_COLOR }]}>{thanksCount}</Text>
-            <Text style={styles.statLabel}>Thanks 👍</Text>
+          <View style={styles.actionDivider} />
+          <View style={styles.actionItem}>
+            <Ionicons name="chatbubble-outline" size={19} color={COLORS.blue} />
+            <Text style={[styles.actionLabel, { color: COLORS.blue }]}>{commentsCount}</Text>
           </View>
+          {showFanbase && (
+            <>
+              <View style={styles.actionDivider} />
+              <TouchableOpacity
+                style={[styles.actionItem, styles.fanbaseActionItem]}
+                onPress={() => navigation.navigate('Fanbase', { creator: creatorProfile || { ...tip, uid: tip.userId } })}
+              >
+                <Ionicons name="star" size={19} color={GREEN} />
+                <Text style={[styles.actionLabel, { color: GREEN }]}>Fanbase</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
-        {/* Comments button */}
-        <TouchableOpacity onPress={() => setShowComments(true)} style={styles.commentsBtn}>
-          <Ionicons name="chatbubble-outline" size={18} color={COLORS.white} />
-          <Text style={styles.commentsBtnText}>View {commentsCount} Comments</Text>
-          <Ionicons name="chevron-up" size={16} color={COLORS.gray} />
-        </TouchableOpacity>
-
-        {/* Thanks section */}
-        {tip.userId !== authUser?.uid && (
-          <View style={styles.thanksSection}>
-            <Ionicons name="thumbs-up-outline" size={22} color={THANKS_COLOR} />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.thanksTitle}>Found this helpful?</Text>
-              <Text style={styles.thanksDesc}>
-                Send {THANKS_COST} GA Points to thank {tip.username}
-                {'\n'}
-                <Text style={{ color: THANKS_COLOR, fontWeight: '700' }}>
-                  Tes points: {userProfile?.gaPoints || 0} pts
-                </Text>
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={handleThanks}
-              disabled={thankLoading}
-              style={styles.thanksBtn}
-            >
-              {thankLoading ? (
-                <ActivityIndicator size="small" color={COLORS.white} />
+        {/* Creator card */}
+        <TouchableOpacity
+          onPress={() => navigation.navigate('UserProfile', { userId: tip.userId })}
+          style={styles.creatorCard}
+          activeOpacity={0.85}
+        >
+          <Avatar user={creatorProfile || { ...tip, uid: tip.userId }} size={44} />
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            {/* Username + feed-style badges */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+              {creatorNameAnim ? (
+                <Animated.Text style={[styles.creatorName, { color: creatorNameColor, opacity: creatorUePulse, textShadowColor: creatorNameColor, textShadowRadius: 9, textShadowOffset: { width: 0, height: 0 } }]}>
+                  {creatorProfile?.username || tip.username}
+                </Animated.Text>
               ) : (
-                <Text style={styles.thanksBtnText}>{`Thanks · ${THANKS_COST} pts`}</Text>
+                <Text style={[styles.creatorName, { color: creatorNameColor, textShadowColor: creatorNameGlow ? creatorNameColor : 'transparent', textShadowRadius: creatorNameGlow ? 8 : 0, textShadowOffset: { width: 0, height: 0 } }]}>
+                  {creatorProfile?.username || tip.username}
+                </Text>
               )}
+              {/* Account type icon */}
+              {(creatorProfile?.accountType || tip.accountType) === 'gameconic' && <Ionicons name="flash" size={13} color={COLORS.red} style={{ marginLeft: 4 }} />}
+              {(creatorProfile?.accountType || tip.accountType) === 'creator' && <Ionicons name="videocam" size={13} color={COLORS.blue} style={{ marginLeft: 4 }} />}
+              {(creatorProfile?.accountType || tip.accountType) === 'developer' && <Ionicons name="code-slash" size={13} color="#7C4DFF" style={{ marginLeft: 4 }} />}
+              {/* Feed-style LEG / ICON / CR / GA badges */}
+              <UserPlanBadges
+                accountType={creatorProfile?.accountType || tip.accountType}
+                plan={creatorProfile?.plan || tip.plan}
+                style={{ marginLeft: 5 }}
+              />
+            </View>
+            {/* Profile badge cosmétique (GOD MODE, G.O.A.T, etc.) */}
+            <ProfileBadgePill equippedProfileBadge={creatorProfile?.equippedProfileBadge} />
+            <Text style={styles.creatorSub}>
+              {creatorProfile?.followers ? `${creatorProfile.followers} abonnés · ` : ''}Voir le profil
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={15} color={COLORS.gray} />
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Comments section — scrolls independently ──────────────── */}
+      <View style={styles.commentsSection}>
+        <View style={styles.commentsHeader}>
+          <Ionicons name="chatbubble-outline" size={14} color={COLORS.gray} />
+          <Text style={styles.commentsHeaderText}>{commentsCount} Commentaires</Text>
+        </View>
+        {loadingComments ? (
+          <ActivityIndicator color={COLORS.gold} style={{ marginTop: 20 }} />
+        ) : (
+          <FlatList
+            data={topComments}
+            keyExtractor={c => c.id}
+            renderItem={({ item }) => (
+              <View style={styles.commentWrap}>
+                <TipCommentBubble
+                  comment={item}
+                  replies={repliesMap[item.id] || []}
+                  onReply={setReplyTo}
+                  onDelete={handleDeleteComment}
+                  onEdit={handleEditComment}
+                  currentUser={authUser}
+                  currentProfile={userProfile}
+                />
+              </View>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.emptyComments}>Aucun commentaire. Sois le premier ! 👇</Text>
+            }
+            ListFooterComponent={
+              loadingMore
+                ? <ActivityIndicator color={COLORS.gold} style={{ marginVertical: 12 }} />
+                : !hasMore && comments.length > 0
+                  ? <Text style={styles.noMoreText}>— fin —</Text>
+                  : <View style={{ height: 10 }} />
+            }
+            onEndReached={loadMoreComments}
+            onEndReachedThreshold={0.4}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews
+            initialNumToRender={8}
+            maxToRenderPerBatch={8}
+            windowSize={7}
+            keyboardShouldPersistTaps="handled"
+          />
+        )}
+      </View>
+
+      {/* ── Sticky comment input ──────────────────────────────────── */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        {replyTo && (
+          <View style={styles.replyBar}>
+            <Ionicons name="return-down-forward" size={13} color={COLORS.blue} />
+            <Text style={styles.replyBarText}> Répondre à <Text style={{ fontWeight: '800' }}>@{replyTo.username}</Text></Text>
+            <TouchableOpacity onPress={() => setReplyTo(null)} style={{ marginLeft: 'auto' }}>
+              <Ionicons name="close-circle" size={17} color={COLORS.gray} />
             </TouchableOpacity>
           </View>
         )}
-
-        {/* Join fanbase CTA */}
-        {tip.accountType !== 'gamer' && tip.userId !== authUser?.uid && (
+        <View style={styles.inputRow}>
+          <Avatar user={userProfile} size={30} />
+          <TextInput
+            value={commentText}
+            onChangeText={t => setCommentText(t.slice(0, MAX_COMMENT))}
+            placeholder="Ajouter un commentaire..."
+            placeholderTextColor={COLORS.gray}
+            style={styles.commentInput}
+            maxLength={MAX_COMMENT}
+            multiline
+          />
           <TouchableOpacity
-            onPress={() => navigation.navigate('Fanbase', { creator: { ...tip, ...creatorProfile } })}
-            style={styles.fanbaseCTA}
+            onPress={handleSendComment}
+            style={[styles.sendBtn, !commentText.trim() && { opacity: 0.35 }]}
+            disabled={!commentText.trim()}
           >
-            <Ionicons name="lock-closed-outline" size={20} color={COLORS.blue} />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={styles.fanbaseCTATitle}>Join {tip.username}'s Fanbase</Text>
-              <Text style={styles.fanbaseCTADesc}>Exclusive clips, private tips & direct chat · $4.99/mo</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={COLORS.blue} />
+            <Ionicons name="send" size={14} color={COLORS.black} />
           </TouchableOpacity>
-        )}
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.black },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  header: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14,
+    paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 10,
+    borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3,
+  },
   backBtn: { width: 36 },
   headerTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: COLORS.white, marginHorizontal: 8 },
-  shareBtn: { width: 36, alignItems: 'flex-end' },
-  videoArea: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#060610', alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  durationBadge: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  durationText: { fontSize: 11, color: COLORS.white, fontWeight: '700' },
-  infoSection: { padding: 14, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
-  catTag: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginBottom: 8 },
-  catTagText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  title: { fontSize: 18, fontWeight: '900', color: COLORS.white, marginBottom: 6, lineHeight: 24 },
-  game: { fontSize: 12, color: COLORS.gold },
-  creatorCard: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
-  creatorName: { fontSize: 15, fontWeight: '700', color: COLORS.white },
-  creatorSub: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
-  badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  badgeText: { fontSize: 8, fontWeight: '900' },
-  statsRow: { flexDirection: 'row', margin: 14, backgroundColor: COLORS.card, borderRadius: 12, overflow: 'hidden', borderWidth: 0.5, borderColor: COLORS.gray3 },
-  stat: { flex: 1, alignItems: 'center', paddingVertical: 14 },
-  statNum: { fontSize: 18, fontWeight: '800', color: COLORS.white },
-  statLabel: { fontSize: 9, color: COLORS.gray, textTransform: 'uppercase', marginTop: 2 },
-  commentsBtn: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 14, padding: 14, backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.gray3 },
-  commentsBtnText: { flex: 1, fontSize: 14, color: COLORS.white, fontWeight: '600', marginLeft: 10 },
-  thanksSection: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 14, padding: 14, backgroundColor: 'rgba(124,77,255,0.08)', borderRadius: 12, borderWidth: 0.5, borderColor: 'rgba(124,77,255,0.25)' },
-  thanksTitle: { fontSize: 13, fontWeight: '700', color: COLORS.white },
-  thanksDesc: { fontSize: 11, color: COLORS.gray, marginTop: 2, lineHeight: 16 },
-  thanksBtn: { backgroundColor: '#7C4DFF', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
-  thanksBtnDone: { backgroundColor: 'rgba(124,77,255,0.15)', borderWidth: 1, borderColor: '#7C4DFF' },
-  thanksBtnText: { fontSize: 11, color: COLORS.white, fontWeight: '700' },
-  fanbaseCTA: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 14, padding: 14, backgroundColor: 'rgba(0,212,255,0.06)', borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.blue + '40' },
-  fanbaseCTATitle: { fontSize: 13, fontWeight: '700', color: COLORS.white },
-  fanbaseCTADesc: { fontSize: 11, color: COLORS.gray, marginTop: 2 },
+  videoArea: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#060610', position: 'relative' },
+  durationBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 },
+  durationText: { fontSize: 10, color: COLORS.white, fontWeight: '700' },
+  infoSection: { paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  catTag: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginBottom: 5 },
+  catTagText: { fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
+  title: { fontSize: 17, fontWeight: '900', color: COLORS.white, marginBottom: 3, lineHeight: 22 },
+  tipDesc: { fontSize: 12, color: COLORS.gray, fontStyle: 'italic', lineHeight: 16, marginBottom: 4 },
+  game: { fontSize: 11, color: COLORS.gold },
+  // Action bar
+  actionBar: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  actionItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 11 },
+  fanbaseActionItem: { backgroundColor: 'rgba(0,200,83,0.08)' },
+  actionLabel: { fontSize: 10, color: COLORS.gray, fontWeight: '600', marginTop: 3 },
+  actionDivider: { width: 0.5, backgroundColor: COLORS.gray3, alignSelf: 'stretch' },
+  // Creator
+  creatorCard: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  creatorName: { fontSize: 15, fontWeight: '700' },
+  creatorSub: { fontSize: 10, color: COLORS.gray, marginTop: 2 },
+  badge: { paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
+  badgeText: { fontSize: 7, fontWeight: '900' },
+  // Comments section
+  commentsSection: { flex: 1 },
+  commentsHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  commentsHeaderText: { fontSize: 13, fontWeight: '700', color: COLORS.white, marginLeft: 7 },
+  commentWrap: { paddingHorizontal: 12, paddingVertical: 4 },
+  emptyComments: { fontSize: 13, color: COLORS.gray, textAlign: 'center', marginTop: 24 },
+  noMoreText: { fontSize: 10, color: COLORS.gray2, textAlign: 'center', paddingVertical: 12 },
+  // Comment input
+  replyBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 7, backgroundColor: 'rgba(0,122,255,0.08)', borderTopWidth: 0.5, borderTopColor: COLORS.gray3 },
+  replyBarText: { fontSize: 12, color: COLORS.blue },
+  inputRow: {
+    flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 12,
+    paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 22 : 10,
+    borderTopWidth: 0.5, borderTopColor: COLORS.gray3, backgroundColor: COLORS.black,
+  },
+  commentInput: {
+    flex: 1, marginHorizontal: 10, backgroundColor: COLORS.card, borderRadius: 20,
+    paddingHorizontal: 13, paddingVertical: 9, fontSize: 14, color: COLORS.white, maxHeight: 80,
+  },
+  sendBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
 });
+
 const tcS = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.78)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card: { backgroundColor: '#141420', borderRadius: 20, padding: 24, width: '100%', alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(124,77,255,0.3)' },
-  iconCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(124,77,255,0.12)', alignItems: 'center', justifyContent: 'center', marginBottom: 12, borderWidth: 1, borderColor: 'rgba(124,77,255,0.3)' },
-  title: { fontSize: 19, fontWeight: '900', color: COLORS.white, marginBottom: 8, textAlign: 'center' },
-  subtitle: { fontSize: 13, color: COLORS.gray, textAlign: 'center', lineHeight: 19, marginBottom: 18 },
-  checkRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginBottom: 18 },
-  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: COLORS.gray2, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  card: { backgroundColor: '#141420', borderRadius: 22, padding: 22, width: '100%', alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(124,77,255,0.3)' },
+  iconCircle: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(124,77,255,0.12)', alignItems: 'center', justifyContent: 'center', marginBottom: 10, borderWidth: 1, borderColor: 'rgba(124,77,255,0.3)' },
+  title: { fontSize: 18, fontWeight: '900', color: COLORS.white, marginBottom: 5, textAlign: 'center' },
+  subtitle: { fontSize: 13, color: COLORS.gray, textAlign: 'center', lineHeight: 19, marginBottom: 14 },
+  qtyRow: { flexDirection: 'row', width: '100%', marginBottom: 11 },
+  qtyBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.gray3, marginHorizontal: 3 },
+  qtyBtnActive: { backgroundColor: THANKS_COLOR, borderColor: THANKS_COLOR },
+  qtyNum: { fontSize: 12, fontWeight: '800', color: COLORS.white },
+  qtyCost: { fontSize: 9, color: COLORS.gray, marginTop: 2 },
+  customRow: { flexDirection: 'row', alignItems: 'center', width: '100%', backgroundColor: COLORS.card, borderRadius: 10, paddingHorizontal: 12, marginBottom: 11, borderWidth: 0.5, borderColor: COLORS.gray3 },
+  customInput: { flex: 1, fontSize: 14, color: COLORS.white, paddingVertical: 9 },
+  summaryRow: { alignItems: 'center', marginBottom: 3 },
+  summaryText: { fontSize: 14, color: COLORS.white, fontWeight: '700' },
+  balanceText: { fontSize: 11, color: COLORS.gray, marginTop: 2, marginBottom: 13 },
+  checkRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginBottom: 16 },
+  checkbox: { width: 21, height: 21, borderRadius: 6, borderWidth: 1.5, borderColor: COLORS.gray2, alignItems: 'center', justifyContent: 'center', marginRight: 9 },
   checkboxOn: { backgroundColor: THANKS_COLOR, borderColor: THANKS_COLOR },
   checkLabel: { fontSize: 13, color: COLORS.white, fontWeight: '600' },
   btnRow: { flexDirection: 'row', width: '100%' },
   cancelBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.gray3, alignItems: 'center', marginRight: 8 },
   cancelText: { fontSize: 14, color: COLORS.gray, fontWeight: '700' },
-  confirmBtn: { flex: 1.4, paddingVertical: 13, borderRadius: 12, backgroundColor: THANKS_COLOR, alignItems: 'center' },
-  confirmText: { fontSize: 14, color: COLORS.white, fontWeight: '900' },
+  confirmBtn: { flex: 1.5, paddingVertical: 13, borderRadius: 12, backgroundColor: THANKS_COLOR, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
+  confirmText: { fontSize: 13, color: COLORS.white, fontWeight: '900' },
 });

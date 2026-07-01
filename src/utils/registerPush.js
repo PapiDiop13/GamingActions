@@ -25,9 +25,11 @@ import { logEvent, logError, LOG_CONTEXT } from './errorLogger';
 // Configure how notifications appear when the app is in the foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge:  false, // Badge managed manually via setBadgeCountAsync (synced to real unread count)
+    shouldShowAlert:  true,   // SDK ≤52 (legacy)
+    shouldShowBanner: true,   // SDK 53+ — bannière au premier plan
+    shouldShowList:   true,   // SDK 53+ — centre de notifications
+    shouldPlaySound:  true,
+    shouldSetBadge:   false,  // Badge géré manuellement via setBadgeCountAsync
   }),
 });
 
@@ -46,9 +48,14 @@ Notifications.setNotificationHandler({
 export async function registerPushToken(userId) {
   if (!userId) return;
 
-  // Push tokens require a physical device — simulators have no APNs/FCM support
-  // expo-constants isDevice is available without expo-device package
-  if (!Constants.isDevice) {
+  // Efface le badge de l'icône à chaque ouverture (sinon il reste bloqué)
+  try { await Notifications.setBadgeCountAsync(0); } catch (e) {}
+
+  // Push tokens require a physical device — simulators have no APNs/FCM support.
+  // ⚠️ En SDK 54, Constants.isDevice peut être `undefined` : on ne skip QUE si
+  // c'est explicitement `false` (simulateur), sinon on tente l'enregistrement
+  // (sinon aucun nouveau device n'enregistrerait son token → push cassé).
+  if (Constants.isDevice === false) {
     console.log('[Push] Skipping push token registration on simulator');
     return;
   }

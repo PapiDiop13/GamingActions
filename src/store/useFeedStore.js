@@ -187,7 +187,7 @@ const useFeedStore = create((set, get) => ({
       get().fetchUserProfiles(newVideos.map(v => v.userId).filter(Boolean));
 
     } catch (e) {
-      console.log('fetchVideos error:', e.message);
+      if (__DEV__) { console.log('fetchVideos error:', e.message); }
       set({ isLoading: false });
     }
   },
@@ -293,7 +293,7 @@ const useFeedStore = create((set, get) => ({
       }
     } catch (e) {
       await logError(LOG_CONTEXT.GG_VOTE_FAIL, e, userId);
-      console.log('toggleGG error:', e.message);
+      if (__DEV__) { console.log('toggleGG error:', e.message); }
       set((state) => ({
         videos: state.videos.map((v) =>
           v.id === videoId ? { ...v, hasGG: !newHasGG, ggCount: storeVideo.ggCount } : v
@@ -333,7 +333,7 @@ const useFeedStore = create((set, get) => ({
       return { hasGG: newHasGG, ggCount: newCount };
     } catch (e) {
       await logError(LOG_CONTEXT.GG_VOTE_FAIL, e, userId);
-      console.log('toggleGGDirect error:', e.message);
+      if (__DEV__) { console.log('toggleGGDirect error:', e.message); }
       return null;
     }
   },
@@ -417,7 +417,7 @@ const useFeedStore = create((set, get) => ({
         } catch (e) {}
       }
     } catch(e) {
-      console.warn('[addComment] failed:', e.message);
+      if (__DEV__) { console.warn('[addComment] failed:', e.message); }
       throw e; // let calling component show an error toast
     }
   },
@@ -529,7 +529,7 @@ const useFeedStore = create((set, get) => ({
       set({ videos: shuffled, isLoading: false, hasMore: false });
       get().fetchUserProfiles(shuffled.map(v => v.userId).filter(Boolean));
     } catch (e) {
-      console.log('fetchFilteredVideos error:', e.message);
+      if (__DEV__) { console.log('fetchFilteredVideos error:', e.message); }
       set({ isLoading: false });
     }
   },
@@ -600,7 +600,7 @@ const useFeedStore = create((set, get) => ({
       set({ videos: normalized, isLoading: false, hasMore: false });
       get().fetchUserProfiles(normalized.map(v => v.userId).filter(Boolean));
     } catch (e) {
-      console.log('fetchFollowingVideos error:', e.message);
+      if (__DEV__) { console.log('fetchFollowingVideos error:', e.message); }
       set({ isLoading: false });
     }
   },

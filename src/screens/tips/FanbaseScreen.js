@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../config/firebase';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import useFanbaseStore from '../../store/useFanbaseStore';
@@ -26,16 +28,24 @@ export default function FanbaseScreen({ navigation, route }) {
   const creatorId = creator?.uid || creator?.id;
 
   const { user } = useAuthStore();
-  const { isSubscribedTo, checkIsSubscribed, joinFanbase } = useFanbaseStore();
+  const { isSubscribedTo, checkIsSubscribed } = useFanbaseStore();
 
   const [checking, setChecking] = useState(true);
-  const [joining, setJoining] = useState(false);
+  const [subSince, setSubSince] = useState(null);
   const subscribed = isSubscribedTo(creatorId);
 
-  // Vérifie l'abonnement réel au montage
+  // Vérifie l'abonnement réel au montage + récupère la date d'adhésion
   useEffect(() => {
     if (!user?.uid || !creatorId) { setChecking(false); return; }
-    checkIsSubscribed(user.uid, creatorId).finally(() => setChecking(false));
+    (async () => {
+      await checkIsSubscribed(user.uid, creatorId);
+      try {
+        const snap = await getDoc(doc(db, 'fanbase_subscriptions', `${user.uid}_${creatorId}`));
+        const ts = snap.exists() ? snap.data()?.createdAt : null;
+        if (ts?.toDate) setSubSince(ts.toDate());
+      } catch (e) {}
+      setChecking(false);
+    })();
   }, [user?.uid, creatorId]);
 
   const BADGE = {
@@ -44,24 +54,9 @@ export default function FanbaseScreen({ navigation, route }) {
   };
   const badge = BADGE[creator.accountType] || BADGE.creator;
 
-  const handleJoin = async () => {
-    if (!user?.uid) { Alert.alert('Login Required', 'Please sign in to join a fanbase.'); return; }
-    if (user.uid === creatorId) { Alert.alert('Not possible', 'You cannot join your own fanbase.'); return; }
-
-    setJoining(true);
-    const ok = await joinFanbase(user.uid, creator);
-    setJoining(false);
-
-    if (ok) {
-      Alert.alert(
-        '🔓 Fanbase rejointe !',
-        `Tu as maintenant accès au contenu exclusif de ${creator.username}.`,
-        [{ text: 'Voir le contenu', onPress: () => navigation.replace('FanbaseContent', { creator }) }]
-      );
-    } else {
-      Alert.alert('Error', 'Could not join right now. Please try again later.');
-    }
-  };
+  const sinceLabel = subSince
+    ? subSince.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
 
   return (
     <View style={styles.container}>
@@ -99,7 +94,7 @@ export default function FanbaseScreen({ navigation, route }) {
         </View>
 
         <View style={styles.priceSection}>
-          <Text style={styles.price}>$4.99</Text>
+          <Text style={styles.price}>$3.99</Text>
           <Text style={styles.pricePer}>/month</Text>
         </View>
 
@@ -119,37 +114,35 @@ export default function FanbaseScreen({ navigation, route }) {
 
         <View style={styles.ctaSection}>
           {checking ? (
-            <View style={[styles.subscribeBtn, { backgroundColor: COLORS.card }]}>
+            <View style={[styles.statusCard, { alignItems: 'center' }]}>
               <ActivityIndicator color={COLORS.gold} />
             </View>
           ) : subscribed ? (
             <>
+              <View style={[styles.statusCard, { borderColor: GREEN + '55', backgroundColor: 'rgba(0,200,83,0.06)' }]}>
+                <Ionicons name="checkmark-circle" size={22} color={GREEN} />
+                <Text style={styles.statusTitle}>You're a Fanbase member</Text>
+                {sinceLabel && <Text style={styles.statusSub}>Member since {sinceLabel}</Text>}
+              </View>
               <TouchableOpacity
                 onPress={() => navigation.replace('FanbaseContent', { creator })}
                 style={[styles.subscribeBtn, { backgroundColor: GREEN }]}
               >
                 <Ionicons name="lock-open" size={18} color={COLORS.black} />
-                <Text style={[styles.subscribeBtnText, { color: COLORS.black }]}>Voir le contenu exclusif</Text>
+                <Text style={[styles.subscribeBtnText, { color: COLORS.black }]}>View exclusive content</Text>
               </TouchableOpacity>
-              <Text style={styles.subscribeNote}>✓ Tu es déjà abonné · annule depuis My Fanbase</Text>
+              <Text style={styles.subscribeNote}>Your subscription can't be managed here.</Text>
             </>
           ) : (
             <>
-              <TouchableOpacity
-                onPress={handleJoin}
-                disabled={joining}
-                style={[styles.subscribeBtn, joining && { opacity: 0.6 }]}
-              >
-                {joining ? (
-                  <ActivityIndicator color={COLORS.white} />
-                ) : (
-                  <>
-                    <Ionicons name="lock-open-outline" size={18} color={COLORS.white} />
-                    <Text style={styles.subscribeBtnText}>Join (mode test · gratuit)</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-              <Text style={styles.subscribeNote}>Accès gratuit pendant la phase de lancement 🚀</Text>
+              <View style={styles.statusCard}>
+                <Ionicons name="lock-closed" size={22} color="#7C4DFF" />
+                <Text style={styles.statusTitle}>Members-only content</Text>
+                <Text style={styles.statusSub}>
+                  You're not a member of {creator.username}'s Fanbase yet.
+                </Text>
+              </View>
+              <Text style={styles.subscribeNote}>Fanbase subscriptions can't be managed here.</Text>
             </>
           )}
         </View>
@@ -182,6 +175,9 @@ const styles = StyleSheet.create({
   benefitLabel: { fontSize: 14, fontWeight: '700', color: COLORS.white, marginBottom: 2 },
   benefitDesc: { fontSize: 11, color: COLORS.gray },
   ctaSection: { padding: 14, paddingTop: 20 },
+  statusCard: { borderWidth: 1, borderColor: 'rgba(124,77,255,0.4)', backgroundColor: 'rgba(124,77,255,0.06)', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 12 },
+  statusTitle: { fontSize: 15, fontWeight: '800', color: COLORS.white, marginTop: 8, textAlign: 'center' },
+  statusSub: { fontSize: 12, color: COLORS.gray, marginTop: 4, textAlign: 'center' },
   subscribeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#7C4DFF', borderRadius: 14, paddingVertical: 16, marginBottom: 10, minHeight: 54 },
   subscribeBtnText: { fontSize: 16, fontWeight: '900', color: COLORS.white, marginLeft: 8 },
   subscribeNote: { fontSize: 11, color: COLORS.gray, textAlign: 'center' },

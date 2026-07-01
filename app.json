@@ -2,7 +2,7 @@
   "expo": {
     "name": "Gaming Actions",
     "slug": "GamingActions",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.gamingactions.app",
-      "buildNumber": "47",
+      "buildNumber": "56",
       "infoPlist": {
         "NSCameraUsageDescription": "Gaming Actions needs access to your camera to record gameplay clips and take profile pictures.",
         "NSPhotoLibraryUsageDescription": "Gaming Actions needs access to your photo library to upload gameplay clips and set your profile picture.",
@@ -38,7 +38,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.gamingactions.app",
-      "versionCode": 47,
+      "versionCode": 56,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -85,6 +85,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withAppDelegate",
       "expo-video",
       [
         "expo-notifications",
@@ -121,6 +122,14 @@
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.878199468974-57kfnd5o91gatnl3lv079v49gdvhkt2t"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Gaming Actions needs access to your photo library to save branded clips.",
+          "savePhotosPermission": "Gaming Actions needs permission to save branded clips to your photo library.",
+          "isAccessMediaLocationEnabled": true
         }
       ]
     ],

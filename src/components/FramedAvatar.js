@@ -79,6 +79,48 @@ function ShimmerRing({ size, color }) {
   );
 }
 
+// Diagonal glint sweep over the avatar (same reflet as the comment frames)
+function GlintOverlay({ size, color }) {
+  const sweep = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const a = Animated.loop(Animated.timing(sweep, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: true }));
+    a.start();
+    return () => a.stop();
+  }, []);
+  const tx   = sweep.interpolate({ inputRange: [0, 1], outputRange: [-size * 0.6, size * 1.1] });
+  const opac = sweep.interpolate({ inputRange: [0, 0.12, 0.7, 1], outputRange: [0, 0.8, 0.3, 0] });
+  return (
+    <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, overflow: 'hidden' }} pointerEvents="none">
+      <Animated.View style={{
+        position: 'absolute', top: -size * 0.3, bottom: -size * 0.3, width: Math.max(8, size * 0.28),
+        backgroundColor: color, opacity: opac,
+        transform: [{ translateX: tx }, { skewX: '-18deg' }],
+      }} />
+    </View>
+  );
+}
+
+// Pulsing colored ring (used by the "sweep" frames — circle + glint)
+function GlintRing({ size, color }) {
+  const pulse = React.useRef(new Animated.Value(0.5)).current;
+  React.useEffect(() => {
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1,   duration: 800, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0.5, duration: 800, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, []);
+  const ringSize = size + 10;
+  return (
+    <Animated.View style={{
+      position: 'absolute', width: ringSize, height: ringSize, borderRadius: ringSize / 2,
+      borderWidth: 2.5, borderColor: color, opacity: pulse,
+      shadowColor: color, shadowOpacity: 1, shadowRadius: 9, shadowOffset: { width: 0, height: 0 },
+    }} />
+  );
+}
+
 function SpinningRing({ size, color }) {
   // Two separate Animated.Values — one for native (rotate), one for JS (border)
   const spin = React.useRef(new Animated.Value(0)).current;
@@ -168,6 +210,8 @@ export default function FramedAvatar({ user, size = 36, onPress, showGlow = true
       {!isChampion && (() => {
         const frame = getFrameById(user?.equippedFrame);
         if (!frame?.animated) return null;
+        if (frame.spinGlint) return <ShimmerRing size={size} color={frame.color} />;
+        if (frame.sweep)     return <GlintRing size={size} color={frame.color} />;
         if (frame.shimmer) return <ShimmerRing size={size} color={frame.color} />;
         const spinIds = ['neon_pulse_blue','neon_pulse_pink','galaxy_animated','rainbow_animated','lightning_animated','void_animated','nebula_animated','neon_city_animated','cosmic_animated','blizzard_animated'];
         if (spinIds.includes(frame.id)) return <SpinningRing size={size} color={frame.color} />;
@@ -214,6 +258,13 @@ export default function FramedAvatar({ user, size = 36, onPress, showGlow = true
           <Text style={{ color: COLORS.gold, fontWeight: '800', fontSize: size * 0.35 }}>{initials}</Text>
         </View>
       )}
+
+      {/* Glint/reflet sweep par-dessus l'avatar (frames sweep + spinGlint) */}
+      {!isChampion && (() => {
+        const f = getFrameById(user?.equippedFrame);
+        if (f?.sweep || f?.spinGlint) return <GlintOverlay size={size} color={f.color} />;
+        return null;
+      })()}
     </View>
   );
 

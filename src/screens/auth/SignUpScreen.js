@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { OAuthProvider, signInWithCredential } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
@@ -95,16 +96,19 @@ export default function SignUpScreen({ navigation }) {
   const handleApple = async () => {
     try {
       setLoading(true);
+      const rawNonce = Math.random().toString(36).substring(2, 18);
+      const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, rawNonce);
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
       const provider = new OAuthProvider('apple.com');
       const oAuthCredential = provider.credential({
         idToken: credential.identityToken,
-        rawNonce: credential.authorizationCode,
+        rawNonce,
       });
       const { user } = await signInWithCredential(auth, oAuthCredential);
       const docRef = doc(db, 'users', user.uid);
@@ -116,8 +120,10 @@ export default function SignUpScreen({ navigation }) {
           avatar: '', accountType: 'gamer', plan: 'free',
           followers: 0, following: 0, gaPoints: 0, createdAt: serverTimestamp(),
         });
+        navigation.replace('CompleteProfile');
+      } else {
+        navigation.replace('Main');
       }
-      navigation.replace('CompleteProfile');
     } catch (e) {
       if (e.code !== 'ERR_CANCELED') {
         await logError('SignUp_Apple', e);

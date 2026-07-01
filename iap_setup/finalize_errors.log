@@ -1,0 +1,4 @@
+IMG com.gamingactions.app.frame_fire_animated: reserve 500
+IMG com.gamingactions.app.frame_ice_animated: reserve 500
+IMG com.gamingactions.app.frame_dna_frame: reserve 500
+IMG com.gamingactions.app.frame_shimmer_prism: reserve 500

@@ -4,6 +4,7 @@ import {
   Platform, Image, Animated, Dimensions, ActivityIndicator,
   LayoutAnimation, UIManager,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, query, orderBy, limit, getDocs, getDoc, doc, updateDoc, setDoc, onSnapshot, where, serverTimestamp } from 'firebase/firestore';
@@ -25,6 +26,9 @@ const RANKING_EXEMPT_UIDS = [
 
 // AccountTypes exclus du classement (trop influents)
 const EXCLUDED_ACCOUNT_TYPES = ['creator', 'gameconic'];
+
+// Exclu du classement : creator/gameconic uniquement (admins et Board restent).
+const isRankExcluded = (u) => EXCLUDED_ACCOUNT_TYPES.includes(u?.accountType);
 
 // Enable LayoutAnimation on Android (iOS has it by default)
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -71,6 +75,13 @@ function TierBadge({ user }) {
   );
 }
 
+/* ------------------------------------------------------------ Trend Icon */
+function TrendIcon({ trend }) {
+  if (trend === 'up')   return <Ionicons name="trending-up"   size={13} color="#34C759" />;
+  if (trend === 'down') return <Ionicons name="trending-down" size={13} color="#FF3B30" />;
+  return <Ionicons name="remove" size={13} color={COLORS.gray2} />;
+}
+
 /* --------------------------------------------------------- Genre Leaderboard */
 // In-memory cache for genre leaderboards — avoids re-fetching on tab switch
 const GENRE_CACHE = {};
@@ -99,10 +110,10 @@ function GenreLeaderboard({ genreId, navigation }) {
         const userGGs = {};
         snap.docs.forEach(d => {
           const v = d.data();
-          if (!v.userId || !(v.ggCount > 0)) return;
+          if (!v.userId || !(v.ggMonth > 0)) return;
           if (v.banned || v.restricted) return;
           if (!userGGs[v.userId]) userGGs[v.userId] = { uid: v.userId, username: v.username, avatar: v.avatar || '', ggCount: 0 };
-          userGGs[v.userId].ggCount += v.ggCount || 0;
+          userGGs[v.userId].ggCount += v.ggMonth || 0;
         });
         const top3 = Object.values(userGGs)
           .sort((a, b) => b.ggCount - a.ggCount)
@@ -155,16 +166,16 @@ function HeroPodium({ data, navigation }) {
   const second = top3[1];
   const third = top3[2];
 
-  const glow = useRef(new Animated.Value(0)).current;
-  const bob = useRef(new Animated.Value(0)).current;
-  // Pop animation when the #1 spot changes hands
+  const glow  = useRef(new Animated.Value(0)).current;
+  const glow2 = useRef(new Animated.Value(0)).current;
+  const bob   = useRef(new Animated.Value(0)).current;
+  const ring  = useRef(new Animated.Value(0)).current;
   const firstPop = useRef(new Animated.Value(1)).current;
   const prevFirstRef = useRef(first?.uid);
   const loopRefs = useRef([]);
 
   useEffect(() => {
     if (first?.uid && prevFirstRef.current && prevFirstRef.current !== first.uid) {
-      // New leader — celebratory pop
       firstPop.setValue(0.6);
       Animated.spring(firstPop, { toValue: 1, useNativeDriver: true, speed: 8, bounciness: 14 }).start();
     }
@@ -172,61 +183,79 @@ function HeroPodium({ data, navigation }) {
   }, [first?.uid]);
 
   useEffect(() => {
-    const glowLoop = Animated.loop(Animated.sequence([
-      Animated.timing(glow, { toValue: 1, duration: 1600, useNativeDriver: true }),
-      Animated.timing(glow, { toValue: 0, duration: 1600, useNativeDriver: true }),
-    ]));
-    glowLoop.start();
-    loopRefs.current.push(glowLoop);
-
-    const bobLoop = Animated.loop(Animated.sequence([
-      Animated.timing(bob, { toValue: 1, duration: 1400, useNativeDriver: true }),
-      Animated.timing(bob, { toValue: 0, duration: 1400, useNativeDriver: true }),
-    ]));
-    bobLoop.start();
-    loopRefs.current.push(bobLoop);
-
-    return () => { loopRefs.current.forEach(l => l.stop()); };
+    const loops = [
+      Animated.loop(Animated.sequence([
+        Animated.timing(glow,  { toValue: 1, duration: 1600, useNativeDriver: true }),
+        Animated.timing(glow,  { toValue: 0, duration: 1600, useNativeDriver: true }),
+      ])),
+      Animated.loop(Animated.sequence([
+        Animated.timing(glow2, { toValue: 1, duration: 2200, useNativeDriver: true }),
+        Animated.timing(glow2, { toValue: 0, duration: 2200, useNativeDriver: true }),
+      ])),
+      Animated.loop(Animated.sequence([
+        Animated.timing(bob,   { toValue: 1, duration: 1400, useNativeDriver: true }),
+        Animated.timing(bob,   { toValue: 0, duration: 1400, useNativeDriver: true }),
+      ])),
+      Animated.loop(Animated.sequence([
+        Animated.timing(ring,  { toValue: 1, duration: 1800, useNativeDriver: true }),
+        Animated.timing(ring,  { toValue: 0, duration: 1800, useNativeDriver: true }),
+      ])),
+    ];
+    loops.forEach(l => l.start());
+    loopRefs.current = loops;
+    return () => loopRefs.current.forEach(l => l.stop());
   }, []);
 
-  const glowScale = glow.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.2] });
-  const glowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.55] });
-  const bobY = bob.interpolate({ inputRange: [0, 1], outputRange: [0, -7] });
+  const glowScale   = glow.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1.25] });
+  const glowOpacity = glow.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.50] });
+  const glow2Scale  = glow2.interpolate({ inputRange: [0, 1], outputRange: [1.1, 1.6] });
+  const glow2Op     = glow2.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.22] });
+  const ringScale   = ring.interpolate({ inputRange: [0, 1], outputRange: [0.90, 1.45] });
+  const ringOp      = ring.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.0] });
+  const bobY        = bob.interpolate({ inputRange: [0, 1], outputRange: [0, -9] });
 
   const Spot = ({ user, place }) => {
     if (!user) return <View style={{ flex: 1 }} />;
-    const isFirst = place === 1;
-    const tier = getTier(user);
-    const accent = isFirst ? COLORS.gold : place === 2 ? COLORS.silver : COLORS.bronze;
-    const pedH = isFirst ? 92 : place === 2 ? 66 : 52;
-    const avSize = isFirst ? 66 : 50;
+    const isFirst  = place === 1;
+    const isSecond = place === 2;
+    const accent = isFirst ? COLORS.gold : isSecond ? COLORS.silver : COLORS.bronze;
+    const pedH   = isFirst ? 110 : isSecond ? 78 : 62;
+    const avSize = isFirst ? 80 : isSecond ? 62 : 52;
     return (
       <TouchableOpacity style={pod.spot} activeOpacity={0.85} onPress={() => navigation.navigate('UserProfile', { userId: user.uid })}>
         {/* Crown / medal */}
         {isFirst ? (
           <Animated.Text style={[pod.crown, { transform: [{ translateY: bobY }] }]}>👑</Animated.Text>
         ) : (
-          <Text style={pod.medal}>{place === 2 ? '🥈' : '🥉'}</Text>
+          <Text style={[pod.medal, isSecond && { fontSize: 26 }]}>{isSecond ? '🥈' : '🥉'}</Text>
         )}
 
-        {/* Avatar with animated glow for #1 */}
+        {/* Avatar with animated layers for #1 */}
         <Animated.View style={{ alignItems: 'center', justifyContent: 'center', transform: isFirst ? [{ scale: firstPop }] : [] }}>
           {isFirst && (
-            <Animated.View style={[pod.glow, { opacity: glowOpacity, transform: [{ scale: glowScale }] }]} />
+            <>
+              {/* Outer pulsing halo */}
+              <Animated.View style={[pod.glowOuter, { opacity: glow2Op, transform: [{ scale: glow2Scale }] }]} />
+              {/* Electric ring */}
+              <Animated.View style={[pod.ringBorder, { opacity: ringOp, transform: [{ scale: ringScale }] }]} />
+              {/* Inner soft glow */}
+              <Animated.View style={[pod.glow, { opacity: glowOpacity, transform: [{ scale: glowScale }] }]} />
+            </>
           )}
-          <Avatar user={user} size={avSize} glow={!isFirst} />
+          <Avatar user={user} size={avSize} glow={isSecond || (!isFirst)} />
         </Animated.View>
 
-        <Text style={[pod.name, isFirst && { color: COLORS.gold, fontSize: 14 }]} numberOfLines={1}>{user.username}</Text>
-        <View style={[pod.ggChip, { borderColor: accent + '60', backgroundColor: accent + '14' }]}>
-          <Ionicons name="star" size={9} color={accent} />
-          <Text style={[pod.ggChipText, { color: accent }]}> {fmtGG(user.ggCount)} GG</Text>
+        <Text style={[pod.name, isFirst && { color: COLORS.gold, fontSize: 14.5, letterSpacing: 0.5 }]} numberOfLines={1}>{user.username}</Text>
+        <TierBadge user={user} />
+        <View style={[pod.ggChip, { borderColor: accent + '70', backgroundColor: accent + '18' }]}>
+          <Ionicons name="star" size={10} color={accent} />
+          <Text style={[pod.ggChipText, { color: accent, fontSize: isFirst ? 13 : 11 }]}> {fmtGG(user.ggCount)} GG</Text>
         </View>
 
         {/* Pedestal */}
-        <View style={[pod.pedestal, { height: pedH, borderColor: accent, backgroundColor: isFirst ? 'rgba(201,168,76,0.14)' : COLORS.card }]}>
-          <View style={[pod.pedestalTop, { backgroundColor: accent + '55' }]} />
-          <Text style={[pod.pedestalNum, { color: accent, fontSize: isFirst ? 30 : 22 }]}>{place}</Text>
+        <View style={[pod.pedestal, { height: pedH, borderColor: accent, backgroundColor: isFirst ? 'rgba(201,168,76,0.16)' : COLORS.card }]}>
+          <View style={[pod.pedestalTop, { backgroundColor: accent + '70' }]} />
+          <Text style={[pod.pedestalNum, { color: accent, fontSize: isFirst ? 36 : isSecond ? 26 : 20 }]}>{place}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -235,24 +264,26 @@ function HeroPodium({ data, navigation }) {
   return (
     <View style={pod.container}>
       <Spot user={second} place={2} />
-      <Spot user={first} place={1} />
-      <Spot user={third} place={3} />
+      <Spot user={first}  place={1} />
+      <Spot user={third}  place={3} />
     </View>
   );
 }
 
 const pod = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: 8, paddingTop: 20, paddingBottom: 12, backgroundColor: 'rgba(201,168,76,0.03)', marginHorizontal: 0, borderBottomWidth: 0.5, borderBottomColor: 'rgba(201,168,76,0.15)' },
-  spot: { flex: 1, alignItems: 'center' },
-  crown: { fontSize: 30, marginBottom: 4 },
-  medal: { fontSize: 22, marginBottom: 6 },
-  glow: { position: 'absolute', width: 100, height: 100, borderRadius: 50, backgroundColor: COLORS.gold },
-  name: { fontSize: 12, fontWeight: '900', color: COLORS.white, textAlign: 'center', marginTop: 7, maxWidth: '95%', letterSpacing: 0.3 },
-  ggChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginTop: 6, marginBottom: 10 },
-  ggChipText: { fontSize: 11, fontWeight: '900', letterSpacing: 0.3 },
-  pedestal: { width: '85%', borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  pedestalTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 5 },
-  pedestalNum: { fontWeight: '900' },
+  container:    { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', paddingHorizontal: 6, paddingTop: 24, paddingBottom: 16, backgroundColor: 'rgba(201,168,76,0.04)', borderBottomWidth: 0.5, borderBottomColor: 'rgba(201,168,76,0.18)' },
+  spot:         { flex: 1, alignItems: 'center' },
+  crown:        { fontSize: 36, marginBottom: 2 },
+  medal:        { fontSize: 24, marginBottom: 4 },
+  glow:         { position: 'absolute', width: 110, height: 110, borderRadius: 55, backgroundColor: COLORS.gold },
+  glowOuter:    { position: 'absolute', width: 140, height: 140, borderRadius: 70, backgroundColor: COLORS.gold },
+  ringBorder:   { position: 'absolute', width: 120, height: 120, borderRadius: 60, borderWidth: 2.5, borderColor: COLORS.gold },
+  name:         { fontSize: 12, fontWeight: '900', color: COLORS.white, textAlign: 'center', marginTop: 7, maxWidth: '95%', letterSpacing: 0.3 },
+  ggChip:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 12, borderWidth: 1, marginTop: 6, marginBottom: 10 },
+  ggChipText:   { fontWeight: '900', letterSpacing: 0.3 },
+  pedestal:     { width: '85%', borderRadius: 12, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  pedestalTop:  { position: 'absolute', top: 0, left: 0, right: 0, height: 6 },
+  pedestalNum:  { fontWeight: '900' },
 });
 
 /* -------------------------------------------------------- Your Rank Card */
@@ -307,22 +338,26 @@ function PlayerRow({ user, maxGG, navigation }) {
   const tier = getTier(user);
   const pct = Math.max(streakPct(user), 2);
 
-  // Animate when this player's rank changes (live leaderboard movement).
   const prevRankRef = useRef(user.rank);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const glowAnim  = useRef(new Animated.Value(0)).current;
+  const arrowAnim = useRef(new Animated.Value(0)).current;
+  const [rankDir, setRankDir] = useState(null);
 
   useEffect(() => {
     if (prevRankRef.current !== user.rank) {
       const movedUp = user.rank < prevRankRef.current;
       prevRankRef.current = user.rank;
+      setRankDir(movedUp ? 'up' : 'down');
       slideAnim.setValue(movedUp ? -20 : 20);
       glowAnim.setValue(1);
+      arrowAnim.setValue(1);
       const anim = Animated.parallel([
         Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, speed: 12, bounciness: 8 }),
         Animated.timing(glowAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
+        Animated.timing(arrowAnim, { toValue: 0, duration: 5000, delay: 1200, useNativeDriver: true }),
       ]);
-      anim.start();
+      anim.start(() => setRankDir(null));
       return () => anim.stop();
     }
   }, [user.rank]);
@@ -333,13 +368,10 @@ function PlayerRow({ user, maxGG, navigation }) {
   });
 
   return (
-    // Deux Animated.View imbriquées — obligatoire car on ne peut pas mélanger
-    // useNativeDriver: true (transform/slide) et false (backgroundColor/glow)
-    // sur le même nœud natif.
     <Animated.View style={{ backgroundColor: glowBg, borderRadius: 12 }}>
     <Animated.View style={{ transform: [{ translateY: slideAnim }] }}>
     <TouchableOpacity onPress={() => navigation.navigate('UserProfile', { userId: user.uid })} style={s.pRow} activeOpacity={0.85}>
-      <Text style={[s.pRank, { color: tier.color }]}>{user.rank}</Text>
+      <Text style={[s.pRank, { color: tier.color, width: 32, textAlign: 'center' }]}>{user.rank}</Text>
       <Avatar user={user} size={38} />
       <View style={{ flex: 1, marginLeft: 12 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5, flexWrap: 'wrap' }}>
@@ -348,6 +380,17 @@ function PlayerRow({ user, maxGG, navigation }) {
           {user.plan === 'legendary' && <View style={s.legBadge}><Text style={s.legBadgeText}>LEG</Text></View>}
           {user.isChampion ? <ChampionBadge small /> : user.isCurrentLeader ? <LeaderBadge small /> : null}
         </View>
+        {/* Rank change indicator above streak bar */}
+        {rankDir && (
+          <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3, opacity: arrowAnim }}>
+            <Text style={{ fontSize: 9, fontWeight: '900', color: rankDir === 'up' ? '#34C759' : '#FF3B30' }}>
+              {rankDir === 'up' ? '▲' : '▼'}
+            </Text>
+            <Text style={{ fontSize: 9, fontWeight: '700', color: rankDir === 'up' ? '#34C759' : '#FF3B30' }}>
+              {rankDir === 'up' ? 'Rank up' : 'Rank down'}
+            </Text>
+          </Animated.View>
+        )}
         <View style={s.powerTrack}>
           <View style={[s.powerFill, { width: `${pct}%`, backgroundColor: tier.color }]} />
         </View>
@@ -361,6 +404,159 @@ function PlayerRow({ user, maxGG, navigation }) {
     </Animated.View>
   );
 }
+
+/* ------------------------------------------------------------ Elite Row (4-10) */
+function EliteRow({ user, maxGG, navigation }) {
+  const tier = getTier(user);
+  const pct = Math.max(streakPct(user), 2);
+  const prevRankRef = useRef(user.rank);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const glowAnim  = useRef(new Animated.Value(0)).current;
+  const arrowAnim = useRef(new Animated.Value(0)).current;
+  const [rankDir, setRankDir] = useState(null); // 'up' | 'down' | null
+
+  useEffect(() => {
+    if (prevRankRef.current !== user.rank) {
+      const movedUp = user.rank < prevRankRef.current;
+      prevRankRef.current = user.rank;
+      setRankDir(movedUp ? 'up' : 'down');
+      slideAnim.setValue(movedUp ? -16 : 16);
+      glowAnim.setValue(1);
+      arrowAnim.setValue(1);
+      const anim = Animated.parallel([
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, speed: 12, bounciness: 8 }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
+        Animated.timing(arrowAnim, { toValue: 0, duration: 5000, delay: 1200, useNativeDriver: true }),
+      ]);
+      anim.start(() => setRankDir(null));
+      return () => anim.stop();
+    }
+  }, [user.rank]);
+
+  const glowBg = glowAnim.interpolate({ inputRange: [0, 1], outputRange: ['rgba(201,168,76,0)', 'rgba(201,168,76,0.12)'] });
+
+  return (
+    <Animated.View style={{ backgroundColor: glowBg, borderRadius: 14, marginHorizontal: 10, marginVertical: 3 }}>
+    <Animated.View style={{ transform: [{ translateY: slideAnim }] }}>
+    <TouchableOpacity
+      onPress={() => navigation.navigate('UserProfile', { userId: user.uid })}
+      style={er.row}
+      activeOpacity={0.85}
+    >
+      {/* Rank badge */}
+      <View style={{ alignItems: 'center', marginRight: 10 }}>
+        <View style={er.rankBadge}>
+          <Text style={er.rankHash}>#</Text>
+          <Text style={er.rankNum}>{user.rank}</Text>
+        </View>
+      </View>
+
+      <Avatar user={user} size={44} glow />
+
+      <View style={{ flex: 1, marginLeft: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+          <Text style={er.name} numberOfLines={1}>{user.username}</Text>
+          <TierBadge user={user} />
+          {user.plan === 'legendary' && <View style={s.legBadge}><Text style={s.legBadgeText}>LEG</Text></View>}
+          {user.isChampion ? <ChampionBadge small /> : user.isCurrentLeader ? <LeaderBadge small /> : null}
+        </View>
+        {/* Rank change indicator — shown above streak bar, fades after 5s */}
+        {rankDir && (
+          <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginBottom: 3, opacity: arrowAnim }}>
+            <Text style={{ fontSize: 9, fontWeight: '900', color: rankDir === 'up' ? '#34C759' : '#FF3B30' }}>
+              {rankDir === 'up' ? '▲' : '▼'}
+            </Text>
+            <Text style={{ fontSize: 9, fontWeight: '700', color: rankDir === 'up' ? '#34C759' : '#FF3B30' }}>
+              {rankDir === 'up' ? 'Rank up' : 'Rank down'}
+            </Text>
+          </Animated.View>
+        )}
+        <View style={s.powerTrack}>
+          <View style={[s.powerFill, { width: `${pct}%`, backgroundColor: tier.color }]} />
+        </View>
+      </View>
+
+      <View style={{ alignItems: 'center', marginLeft: 8, gap: 4 }}>
+        <TrendIcon trend={user.trend} />
+        <View style={er.ggBox}>
+          <Text style={er.ggCount}>{fmtGG(user.ggCount)}</Text>
+          <Text style={er.ggLabel}>GG ⭐</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+    </Animated.View>
+    </Animated.View>
+  );
+}
+
+const er = StyleSheet.create({
+  row:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(201,168,76,0.18)' },
+  rankBadge: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.35)', alignItems: 'center', justifyContent: 'center', marginRight: 10 },
+  rankHash:  { fontSize: 8, color: COLORS.gold, fontWeight: '900', marginBottom: -2 },
+  rankNum:   { fontSize: 18, color: COLORS.gold, fontWeight: '900', lineHeight: 20 },
+  name:      { fontSize: 13, fontWeight: '900', color: COLORS.white, letterSpacing: 0.2, flexShrink: 1 },
+  ggBox:     { alignItems: 'flex-end', marginLeft: 10 },
+  ggCount:   { fontSize: 16, fontWeight: '900', color: COLORS.gold, letterSpacing: 0.3 },
+  ggLabel:   { fontSize: 9, color: COLORS.gray, fontWeight: '700', marginTop: 1 },
+});
+
+/* ------------------------------------------------------------ Gold Tier Row (11-50) */
+function GoldTierRow({ user, navigation }) {
+  return (
+    <TouchableOpacity
+      onPress={() => navigation.navigate('UserProfile', { userId: user.uid })}
+      style={gtr.row}
+      activeOpacity={0.85}
+    >
+      <View style={gtr.leftAccent} />
+      <Text style={gtr.rank}>{user.rank}</Text>
+      <Avatar user={user} size={32} />
+      <Text style={gtr.name} numberOfLines={1}>{user.username}</Text>
+      <TrendIcon trend={user.trend} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+        <Ionicons name="star" size={10} color={COLORS.gold} />
+        <Text style={gtr.gg}>{fmtGG(user.ggCount)}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const gtr = StyleSheet.create({
+  row:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 14, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.05)', gap: 10 },
+  leftAccent:{ width: 3, height: 28, borderRadius: 2, backgroundColor: COLORS.gold, marginRight: 2 },
+  rank:      { fontSize: 13, fontWeight: '900', color: COLORS.gold, width: 28, textAlign: 'center' },
+  name:      { flex: 1, fontSize: 13, fontWeight: '700', color: COLORS.white, letterSpacing: 0.1 },
+  gg:        { fontSize: 12, fontWeight: '900', color: COLORS.gold },
+});
+
+/* ------------------------------------------------------------ Silver Tier Row (51-100) */
+function SilverTierRow({ user, navigation }) {
+  return (
+    <TouchableOpacity
+      onPress={() => navigation.navigate('UserProfile', { userId: user.uid })}
+      style={str.row}
+      activeOpacity={0.85}
+    >
+      <View style={str.leftAccent} />
+      <Text style={str.rank}>{user.rank}</Text>
+      <Avatar user={user} size={28} />
+      <Text style={str.name} numberOfLines={1}>{user.username}</Text>
+      <TrendIcon trend={user.trend} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+        <Ionicons name="star" size={9} color={COLORS.silver} />
+        <Text style={str.gg}>{fmtGG(user.ggCount)}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const str = StyleSheet.create({
+  row:       { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255,255,255,0.04)', gap: 10 },
+  leftAccent:{ width: 2.5, height: 24, borderRadius: 2, backgroundColor: COLORS.silver, marginRight: 2 },
+  rank:      { fontSize: 12, fontWeight: '800', color: COLORS.silver, width: 28, textAlign: 'center' },
+  name:      { flex: 1, fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.75)', letterSpacing: 0.1 },
+  gg:        { fontSize: 11, fontWeight: '800', color: COLORS.silver },
+});
 
 /* ------------------------------------------------------------- Video Row */
 function VideoRow({ v, rank, highlight, navigation }) {
@@ -401,6 +597,19 @@ export default function RankingsScreen({ navigation }) {
   const [videosOfDay, setVideosOfDay] = useState([]);
   const [myRank, setMyRank] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [wall, setWall] = useState([]); // Wall of Legends — champions mensuels (hall_of_fame)
+
+  // Charge le Wall of Legends une fois
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDocs(
+          query(collection(db, 'hall_of_fame'), orderBy('month', 'desc'), limit(12))
+        );
+        setWall(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) {}
+    })();
+  }, []);
 
   // Profile cache — avoid N getDoc calls on every GG event. TTL: 90 seconds.
   const profileCache = React.useRef({}); // { uid: { data, fetchedAt } }
@@ -425,7 +634,7 @@ export default function RankingsScreen({ navigation }) {
           setLoading(false); // ensure spinner clears on error
         }
       },
-      (err) => { console.log('rankings listener error:', err.message); setLoading(false); }
+      (err) => { if (__DEV__) { console.log('rankings listener error:', err.message); } setLoading(false); }
     );
     return () => unsub();
   }, [user?.uid]);
@@ -440,21 +649,21 @@ export default function RankingsScreen({ navigation }) {
   // Called by the real-time listener whenever GG counts change.
   const processRankings = async (allVideos) => {
     try {
-      // Top vidéos par ggCount
+      // Top vidéos par ggMonth (GG DU MOIS — classement mensuel)
       const topVids = [...allVideos]
-        .sort((a, b) => (b.ggCount || 0) - (a.ggCount || 0))
-        .map((v, i) => ({ rank: i + 1, ...v }));
-      setTopVideos(topVids.filter(v => (v.ggCount || 0) > 0).slice(0, 5));
+        .sort((a, b) => (b.ggMonth || 0) - (a.ggMonth || 0))
+        .map((v, i) => ({ rank: i + 1, ...v, ggCount: v.ggMonth || 0 }));
+      setTopVideos(topVids.filter(v => (v.ggMonth || 0) > 0).slice(0, 5));
 
-      // Agrège les GG par joueur depuis TOUTES les vidéos (hors bannis/restricted)
+      // Agrège les GG DU MOIS par joueur depuis TOUTES les vidéos (hors bannis/restricted)
       const userGGs = {};
       allVideos.forEach((v) => {
-        if (!v.userId || !(v.ggCount > 0)) return;
+        if (!v.userId || !(v.ggMonth > 0)) return;
         if (v.banned || v.restricted) return;
         if (!userGGs[v.userId]) {
           userGGs[v.userId] = { uid: v.userId, username: v.username, avatar: v.avatar || '', plan: v.plan || 'free', streakLevel: v.streakLevel, ggCount: 0 };
         }
-        userGGs[v.userId].ggCount += v.ggCount || 0;
+        userGGs[v.userId].ggCount += v.ggMonth || 0;
       });
 
       // Sort ALL users before slicing so myRank can be found regardless of position
@@ -466,12 +675,15 @@ export default function RankingsScreen({ navigation }) {
       const myRankEntry = allUsersSorted.find(u => u.uid === user?.uid);
       const myRankIndex = myRankEntry ? allUsersSorted.indexOf(myRankEntry) : -1;
 
-      const usersList = allUsersSorted.slice(0, 20);
+      // Only enrich top 20 with fresh profile data (avatarFrame, badges, etc.)
+      // Ranks 21-100 use data embedded in video docs — fast, no extra reads.
+      const usersToEnrich = allUsersSorted.slice(0, 20);
+      const usersRaw21to100 = allUsersSorted.slice(20, 100);
 
       // Enrichit avec les vrais profils — TTL cache: only re-fetch after 90s
       const CACHE_TTL_MS = 90_000;
       const now = Date.now();
-      const toFetch = usersList.filter(u => {
+      const toFetch = usersToEnrich.filter(u => {
         const cached = profileCache.current[u.uid];
         return !cached || (now - cached.fetchedAt) > CACHE_TTL_MS;
       });
@@ -483,12 +695,14 @@ export default function RankingsScreen({ navigation }) {
           } catch (e) {}
         }));
       }
-      const enrichedUsers = usersList.map((u) => {
+      const enrichedTop20 = usersToEnrich.map((u) => {
         const cached = profileCache.current[u.uid];
         if (!cached) return u;
         const p = cached.data;
         return { ...u, avatar: p.avatar || '', plan: p.plan || u.plan, username: p.username || u.username, streakLevel: p.streakLevel || u.streakLevel, accountType: p.accountType || 'gamer', isChampion: p.isChampion || false, isCurrentLeader: p.isCurrentLeader || false, equippedFrame: p.equippedFrame || 'none' };
       });
+      // Merge: enriched top 20 + raw 21-100 (video doc data is good enough for compact rows)
+      const enrichedUsers = [...enrichedTop20, ...usersRaw21to100];
       // Animate position changes — items smoothly slide to their new rank
       // when GG counts change the order (live leaderboard effect).
       if (Platform.OS === 'ios' || Platform.OS === 'android') {
@@ -499,15 +713,38 @@ export default function RankingsScreen({ navigation }) {
       // Exclure creators/gameconic du classement (sauf UIDs exemptés)
       const filteredUsers = enrichedUsers.filter(u =>
         RANKING_EXEMPT_UIDS.includes(u.uid) ||
-        !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType)
-      ).slice(0, 10).map((u, i) => ({ ...u, rank: i + 1 }));
+        !isRankExcluded(u)
+      ).slice(0, 100).map((u, i) => ({ ...u, rank: i + 1 }));
 
-      setTopUsers(filteredUsers);
+      // Trend icons — compare avec le snapshot sauvegardé (session précédente)
+      let prevRanks = {};
+      try {
+        const stored = await AsyncStorage.getItem('@ga_rank_snapshot');
+        if (stored) prevRanks = JSON.parse(stored);
+      } catch {}
+      const usersWithTrend = filteredUsers.map((u, i) => {
+        const prev = prevRanks[u.uid];
+        let trend = 'stable';
+        if (prev !== undefined && prev !== u.rank) {
+          trend = u.rank < prev ? 'up' : 'down';
+        }
+        // Garantie visuelle : le #1 est toujours marqué leader même si Firestore est en retard
+        const isLeaderGuarantee = i === 0 ? { isCurrentLeader: true } : {};
+        return { ...u, ...isLeaderGuarantee, trend };
+      });
+      // Persiste le snapshot actuel pour la prochaine session
+      try {
+        const snap = {};
+        filteredUsers.forEach(u => { snap[u.uid] = u.rank; });
+        await AsyncStorage.setItem('@ga_rank_snapshot', JSON.stringify(snap));
+      } catch {}
+
+      setTopUsers(usersWithTrend);
 
       // Remove isCurrentLeader badge from excluded users
       const excludedWithLeader = enrichedUsers.filter(u =>
         u.isCurrentLeader &&
-        EXCLUDED_ACCOUNT_TYPES.includes(u.accountType) &&
+        isRankExcluded(u) &&
         !RANKING_EXEMPT_UIDS.includes(u.uid)
       );
       for (const u of excludedWithLeader) {
@@ -516,16 +753,21 @@ export default function RankingsScreen({ navigation }) {
 
       // Mon rang — calculé sur les utilisateurs filtrés (hors créateurs/gameconic)
       if (user?.uid) {
-        // myRankEntry was computed from the full sorted list (before slicing to top 20)
-        // so users ranked 21st or lower are correctly found
-        if (myRankEntry) {
-          // Re-rank after filtering excluded account types (accountType may not be set
-          // for users outside the enriched top-20, so fall back to 'gamer')
+        // Skip rank computation entirely for excluded account types
+        // Use userProfile.accountType (from auth store) — more reliable than video doc data
+        const isExcluded = isRankExcluded(userProfile)
+          && !RANKING_EXEMPT_UIDS.includes(user.uid);
+
+        if (!isExcluded && myRankEntry) {
           const allUsersFiltered = allUsersSorted
-            .filter(u => RANKING_EXEMPT_UIDS.includes(u.uid) || !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType || 'gamer'))
+            .filter(u => RANKING_EXEMPT_UIDS.includes(u.uid) || !isRankExcluded(u))
             .sort((a, b) => b.ggCount - a.ggCount);
           const myPos = allUsersFiltered.findIndex(u => u.uid === user.uid) + 1;
-          if (myPos > 0) setMyRank({ rank: myPos, ggCount: myRankEntry.ggCount });
+          if (myPos > 0) {
+            setMyRank({ rank: myPos, ggCount: myRankEntry.ggCount });
+            // Persist rank on user doc so the profile can display it
+            try { await updateDoc(doc(db, 'users', user.uid), { monthlyRank: myPos }); } catch {}
+          }
         }
 
         // ── Real-time leader sync ────────────────────────────────────────────
@@ -535,7 +777,7 @@ export default function RankingsScreen({ navigation }) {
         // Firestore-backed debounce: reads system/leaderStatus before writing so writes
         // are skipped if the correct leader is already recorded — survives app restarts.
         const rankedSorted = enrichedUsers
-          .filter(u => RANKING_EXEMPT_UIDS.includes(u.uid) || !EXCLUDED_ACCOUNT_TYPES.includes(u.accountType))
+          .filter(u => RANKING_EXEMPT_UIDS.includes(u.uid) || !isRankExcluded(u))
           .sort((a, b) => b.ggCount - a.ggCount);
         const trueLeaderId = rankedSorted[0]?.uid;
         const trueLeaderGG = rankedSorted[0]?.ggCount || 0;
@@ -595,7 +837,7 @@ export default function RankingsScreen({ navigation }) {
     { id: 'topvideo', label: 'Top Video', icon: 'videocam' },
     { id: 'bygenre',  label: 'By Genre',  icon: 'grid' },
     { id: 'videoday', label: 'Of the Day',icon: 'sunny' },
-    { id: 'history',  label: 'History',   icon: 'time' },
+    { id: 'history',  label: 'Legends',   icon: 'trophy' },
   ];
 
   const GENRE_LIST = [
@@ -694,21 +936,60 @@ export default function RankingsScreen({ navigation }) {
 
                 <HeroPodium data={topUsers} navigation={navigation} />
 
-                {/* Hide rank card if user is excluded from rankings */}
-                {!EXCLUDED_ACCOUNT_TYPES.includes(userProfile?.accountType) && (
+                {/* Your rank — hidden for excluded account types (creator, gameconic) */}
+                {!isRankExcluded(userProfile) && (
                   <YourRankCard myRank={myRank} userProfile={userProfile} topUsers={topUsers} />
                 )}
 
+                {/* ── Ranks 4-10: Elite cards ── */}
                 {topUsers.length > 3 && (
-                  <View style={s.challengersHeader}>
-                    <View style={s.challengersDivider} />
-                    <Text style={s.listLabel}>⚡ CHALLENGERS</Text>
-                    <View style={s.challengersDivider} />
-                  </View>
+                  <>
+                    <View style={s.challengersHeader}>
+                      <View style={s.challengersDivider} />
+                      <Text style={s.listLabel}>⚡ CHALLENGERS</Text>
+                      <View style={s.challengersDivider} />
+                    </View>
+                    {topUsers.slice(3, 10).map((u) => (
+                      <EliteRow key={u.uid} user={u} maxGG={maxGG} navigation={navigation} />
+                    ))}
+                  </>
                 )}
-                {topUsers.slice(3).map((u) => (
-                  <PlayerRow key={u.uid} user={u} maxGG={maxGG} navigation={navigation} />
-                ))}
+
+                {/* ── Ranks 11-50: Gold tier ── */}
+                {topUsers.length > 10 && (
+                  <>
+                    <View style={[s.challengersHeader, { marginTop: 14 }]}>
+                      <View style={[s.challengersDivider, { backgroundColor: COLORS.gold + '40' }]} />
+                      <Text style={[s.listLabel, { color: COLORS.gold }]}>🥇 GOLD TIER · TOP 50</Text>
+                      <View style={[s.challengersDivider, { backgroundColor: COLORS.gold + '40' }]} />
+                    </View>
+                    <View style={{ marginHorizontal: 10, borderRadius: 14, backgroundColor: 'rgba(201,168,76,0.05)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.15)', overflow: 'hidden', marginBottom: 6 }}>
+                      {topUsers.slice(10, 50).map((u) => (
+                        <GoldTierRow key={u.uid} user={u} navigation={navigation} />
+                      ))}
+                    </View>
+                  </>
+                )}
+
+                {/* ── Ranks 51-100: Silver tier ── */}
+                {topUsers.length > 50 && (
+                  <>
+                    <View style={[s.challengersHeader, { marginTop: 10 }]}>
+                      <View style={[s.challengersDivider, { backgroundColor: COLORS.silver + '40' }]} />
+                      <Text style={[s.listLabel, { color: COLORS.silver }]}>🥈 SILVER TIER · TOP 100</Text>
+                      <View style={[s.challengersDivider, { backgroundColor: COLORS.silver + '40' }]} />
+                    </View>
+                    <View style={{ marginHorizontal: 10, borderRadius: 14, backgroundColor: 'rgba(160,170,190,0.04)', borderWidth: 1, borderColor: 'rgba(192,192,210,0.12)', overflow: 'hidden', marginBottom: 6 }}>
+                      {topUsers.slice(50, 100).map((u) => (
+                        <SilverTierRow key={u.uid} user={u} navigation={navigation} />
+                      ))}
+                    </View>
+                  </>
+                )}
+
+                {topUsers.length >= 100 && (
+                  <Text style={{ textAlign: 'center', color: COLORS.gray, fontSize: 10, marginVertical: 14, letterSpacing: 1 }}>— TOP 100 —</Text>
+                )}
               </>
             )}
           </>
@@ -769,8 +1050,25 @@ export default function RankingsScreen({ navigation }) {
         {/* ───────────── HISTORY ───────────── */}
         {activeTab === 'history' && (
           <>
-            <Text style={s.sectionNote}>📅 The Hall of Champions</Text>
-            <Text style={s.empty}>Monthly champions archive coming soon. Rankings reset at end of each month.</Text>
+            <Text style={s.sectionNote}>🏛️ Wall of Legends — monthly champions & top 3</Text>
+            {wall.length === 0 ? (
+              <Text style={s.empty}>No legends yet. The first champions will be crowned at the end of this month! 👑 Rankings reset monthly.</Text>
+            ) : wall.map((w) => (
+              <View key={w.id} style={{ marginHorizontal: 14, marginBottom: 14, backgroundColor: COLORS.card, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(201,168,76,0.35)', overflow: 'hidden' }}>
+                <View style={{ paddingHorizontal: 14, paddingVertical: 10, backgroundColor: 'rgba(201,168,76,0.1)' }}>
+                  <Text style={{ color: COLORS.gold, fontWeight: '900', fontSize: 13, letterSpacing: 1 }}>{w.month}</Text>
+                </View>
+                {(w.podium || []).map((p) => (
+                  <View key={p.uid} style={s.pRow}>
+                    <Text style={[s.pRank, { color: p.rank === 1 ? COLORS.gold : COLORS.white }]}>{p.rank === 1 ? '👑' : `#${p.rank}`}</Text>
+                    <Text style={s.pName} numberOfLines={1}>{p.username}</Text>
+                    <View style={{ flex: 1 }} />
+                    <Text style={s.pGG}>{fmtGG(p.ggMonth || 0)}</Text>
+                    <Text style={s.pGGLabel}> GG</Text>
+                  </View>
+                ))}
+              </View>
+            ))}
           </>
         )}
 
@@ -781,7 +1079,7 @@ export default function RankingsScreen({ navigation }) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#080810' },
+  container: { flex: 1, backgroundColor: COLORS.black },
   starfield: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   star: { position: 'absolute', borderRadius: 2, backgroundColor: '#FFFFFF' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 54 : 30, paddingBottom: 14, borderBottomWidth: 0.5, borderBottomColor: 'rgba(201,168,76,0.2)' },

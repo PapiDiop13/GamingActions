@@ -57,8 +57,8 @@ export default function EditProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
 
   const filteredGames = gameSearch.length > 0
-    ? GAMES.filter(g => g.name.toLowerCase().includes(gameSearch.toLowerCase())).slice(0, 20)
-    : GAMES.slice(0, 20);
+    ? GAMES.filter(g => g.name.toLowerCase().includes(gameSearch.toLowerCase()))
+    : GAMES;
 
   const filteredCountries = countrySearch.length > 0
     ? COUNTRIES.filter(c => c.name.toLowerCase().includes(countrySearch.toLowerCase()))
@@ -217,11 +217,12 @@ export default function EditProfileScreen({ navigation }) {
           <TextInput
             value={username}
             onChangeText={setUsername}
+            placeholder="Your GamerTag..."
             style={[styles.input, { fontSize: SW < 375 ? 13 : 14 }]}
             placeholderTextColor={COLORS.gray}
             maxLength={14}
             autoCapitalize="characters"
-            scrollEnabled
+            returnKeyType="done"
           />
           <Text style={[styles.hint, { textAlign: 'right' }]}>{username.length}/14 · Unique</Text>
         </View>
@@ -320,22 +321,40 @@ export default function EditProfileScreen({ navigation }) {
                 <TextInput
                   value={gameSearch}
                   onChangeText={setGameSearch}
-                  placeholder="Search game..."
+                  placeholder="Search among 500+ games..."
                   placeholderTextColor={COLORS.gray}
                   style={{ flex: 1, color: COLORS.white, fontSize: 13, marginLeft: 8 }}
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
                 />
+                {gameSearch.length > 0 && (
+                  <TouchableOpacity onPress={() => setGameSearch('')} style={{ padding: 4 }}>
+                    <Ionicons name="close-circle" size={16} color={COLORS.gray} />
+                  </TouchableOpacity>
+                )}
               </View>
-              {filteredGames.map((g) => (
-                <TouchableOpacity
-                  key={g.id}
-                  onPress={() => { setMainGame(g.name); setShowGamePicker(false); setGameSearch(''); }}
-                  style={[styles.gameOption, mainGame === g.name && { backgroundColor: 'rgba(201,168,76,0.1)' }]}
-                >
-                  <Text style={[styles.gameOptionText, mainGame === g.name && { color: COLORS.gold }]}>{g.name}</Text>
-                  {mainGame === g.name && <Ionicons name="checkmark" size={16} color={COLORS.gold} />}
-                </TouchableOpacity>
-              ))}
+              <ScrollView
+                style={{ maxHeight: 280 }}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                {filteredGames.length === 0 ? (
+                  <Text style={{ color: COLORS.gray, fontSize: 12, padding: 14, textAlign: 'center' }}>No game found — try another name.</Text>
+                ) : (
+                  filteredGames.map((g) => (
+                    <TouchableOpacity
+                      key={g.id}
+                      onPress={() => { setMainGame(g.name); setShowGamePicker(false); setGameSearch(''); }}
+                      style={[styles.gameOption, mainGame === g.name && { backgroundColor: 'rgba(201,168,76,0.1)' }]}
+                    >
+                      <Text style={[styles.gameOptionText, mainGame === g.name && { color: COLORS.gold }]}>{g.name}</Text>
+                      {mainGame === g.name && <Ionicons name="checkmark" size={16} color={COLORS.gold} />}
+                    </TouchableOpacity>
+                  ))
+                )}
+              </ScrollView>
             </View>
           )}
         </View>
@@ -381,21 +400,43 @@ export default function EditProfileScreen({ navigation }) {
         {/* Plan */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>SUBSCRIPTION PLAN</Text>
+          {(() => {
+            // iOS : tout le monde peut gérer/s'abonner. Android : coming soon (sauf admin).
+            const canManage = Platform.OS === 'ios' || isAdmin;
+            return (
+              <TouchableOpacity
+                style={[styles.planRow, !canManage && { opacity: 0.6 }]}
+                onPress={() => canManage ? navigation.navigate('Subscription') : null}
+                activeOpacity={canManage ? 0.7 : 1}
+              >
+                <View style={[styles.planBadge, { backgroundColor: userProfile?.plan === 'legendary' ? COLORS.gold : COLORS.gray3 }]}>
+                  <Text style={[styles.planBadgeText, { color: userProfile?.plan === 'legendary' ? COLORS.black : COLORS.gray }]}>
+                    {userProfile?.plan === 'legendary' ? '⭐ LEGENDARY' : 'FREE'}
+                  </Text>
+                </View>
+                <Text style={styles.planUpgrade}>
+                  {canManage
+                    ? (userProfile?.plan === 'legendary' ? 'Manage plan →' : 'Upgrade to Legendary →')
+                    : '🔒 Coming soon'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })()}
+        </View>
+
+        {/* Support us */}
+        <View style={styles.section}>
           <TouchableOpacity
-            style={[styles.planRow, !isAdmin && { opacity: 0.6 }]}
-            onPress={() => isAdmin ? navigation.navigate('Subscription') : null}
-            activeOpacity={isAdmin ? 0.7 : 1}
+            onPress={() => navigation.navigate('Support')}
+            activeOpacity={0.85}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 12, backgroundColor: 'rgba(201,168,76,0.08)', borderWidth: 0.5, borderColor: COLORS.gold + '50' }}
           >
-            <View style={[styles.planBadge, { backgroundColor: userProfile?.plan === 'legendary' ? COLORS.gold : COLORS.gray3 }]}>
-              <Text style={[styles.planBadgeText, { color: userProfile?.plan === 'legendary' ? COLORS.black : COLORS.gray }]}>
-                {userProfile?.plan === 'legendary' ? '⭐ LEGENDARY' : 'FREE'}
-              </Text>
+            <Text style={{ fontSize: 22 }}>💛</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 14, fontWeight: '800', color: COLORS.white }}>Support us</Text>
+              <Text style={{ fontSize: 11, color: COLORS.gray, marginTop: 2 }}>Help Gaming Actions keep growing</Text>
             </View>
-            <Text style={styles.planUpgrade}>
-              {isAdmin
-                ? (userProfile?.plan === 'legendary' ? 'Manage plan →' : 'Upgrade to Legendary →')
-                : '🔒 Coming soon'}
-            </Text>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.gray} />
           </TouchableOpacity>
         </View>
 
@@ -427,7 +468,7 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: COLORS.card, borderWidth: 0.5, borderColor: COLORS.gray3, marginRight: 8, marginBottom: 8 },
   chipActive: { backgroundColor: 'rgba(201,168,76,0.15)', borderColor: COLORS.gold },
   chipText: { fontSize: 13, color: COLORS.gray, fontWeight: '600' },
-  gamePicker: { backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.gray3, marginTop: 8, maxHeight: 250, overflow: 'hidden' },
+  gamePicker: { backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.gray3, marginTop: 8 },
   gameSearch: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
   gameOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
   gameOptionText: { fontSize: 13, color: COLORS.white },

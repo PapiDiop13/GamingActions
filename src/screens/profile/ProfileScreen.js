@@ -398,8 +398,12 @@ const THEME_COLORS_MAP = {
   theme_sakura:      '#FF69B4',
   theme_cyber:       '#FF0080',
   theme_arctic:      '#A0E8FF',
-  theme_void_walker: '#7C4DFF',
-  theme_neon_city:   '#FF00FF',
+  theme_void_walker:   '#7C4DFF',
+  theme_neon_city:     '#FF00FF',
+  theme_white:         '#DDDDDD',
+  theme_glacier:       '#A8DCEA',
+  theme_konoha:        '#C8A83C',
+  theme_sunset_ember:  '#FF8C42',
 };
 
 // Derives theme id from equipped background if equippedTheme not set
@@ -410,6 +414,9 @@ const THEME_BG_MAP = {
   bg_cherry_bloom: 'theme_sakura', bg_glitch: 'theme_cyber',
   bg_ice_storm: 'theme_arctic', bg_void_pulse: 'theme_void_walker',
   bg_vaporwave: 'theme_neon_city',
+  bg_white_clean: 'theme_white',
+  bg_glacier: 'theme_glacier', bg_konoha: 'theme_konoha',
+  bg_sunset_ember: 'theme_sunset_ember',
 };
 
 // Animated glow effect around the banner when a cosmetic banner is equipped
@@ -732,7 +739,6 @@ export default function ProfileScreen({ navigation, route }) {
   const handleShare = async () => {
     await Share.share({
       message: `Check out ${user?.username} on Gaming Actions! 🎮\nhttps://gamingactions.app/user/${user?.username}`,
-      url: `https://gamingactions.app/user/${user?.username}`,
     });
   };
 
@@ -1021,8 +1027,10 @@ export default function ProfileScreen({ navigation, route }) {
             {(() => {
               const ueId = user?.equippedUsernameEffect;
               const ueItem = ueId ? USERNAME_EFFECTS.find(effect => effect.id === ueId) : null;
-              const nameColor = ueItem ? (ueItem.color || (ueItem.colors?.[0]) || tc.primary) : tc.primary;
-              const hasGlow = ueItem?.glow || false;
+              // On light backgrounds (white theme), skip white/very-light effects — fallback to tc.primary (dark)
+              const _rawColor = ueItem ? (ueItem.color || (ueItem.colors?.[0]) || tc.primary) : tc.primary;
+              const nameColor = (!tc.isDark && _lum(_rawColor) > 0.5) ? tc.primary : _rawColor;
+              const hasGlow = ueItem?.glow && tc.isDark; // no glow on light bg — invisible
               const isAnimated = ueItem?.animated || false;
               return (
                 <AnimatedUsername
@@ -1034,25 +1042,41 @@ export default function ProfileScreen({ navigation, route }) {
                 />
               );
             })()}
-            {user?.plan === 'legendary' && <View style={styles.legBadge}><Text style={styles.legBadgeText}>LEGENDARY</Text></View>}
+            {(() => {
+              const sl = STREAK_LEVELS.find(l => l.id === (user?.streakLevel || 'noob'));
+              if (!sl || sl.id === 'noob') return null;
+              return (
+                <View style={{ backgroundColor: sl.color, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4 }}>
+                  <Text style={{ fontSize: 8, fontWeight: '900', color: '#1A1A2E', letterSpacing: 0.5 }}>{sl.label}</Text>
+                </View>
+              );
+            })()}
             {user?.accountType === 'gameconic' && <View style={[styles.legBadge, { backgroundColor: COLORS.red }]}><Text style={styles.legBadgeText}>GAMECONIC</Text></View>}
+            {user?.accountType === 'board' && <View style={[styles.legBadge, { backgroundColor: '#00E676' }]}><Text style={styles.legBadgeText}>BOARD</Text></View>}
             {user?.accountType === 'creator' && <View style={[styles.legBadge, { backgroundColor: COLORS.blue }]}><Text style={[styles.legBadgeText, { color: COLORS.dark }]}>CREATOR</Text></View>}
+            {user?.plan === 'legendary' && <View style={styles.legBadge}><Text style={styles.legBadgeText}>LEGENDARY</Text></View>}
+          </View>
+          {/* Ligne 2 : titre + leader/champion */}
+          <View style={styles.badgeRow}>
+            {(() => {
+              const badgeId = user?.equippedProfileBadge;
+              const badge = badgeId ? PROFILE_BADGES.find(b => b.id === badgeId) : null;
+              if (!badge || badge.id === 'badge_none') return null;
+              const _bc = badge.color || COLORS.gold;
+              // On light bg: stronger bg opacity + darken border so badge stays visible
+              const _bgAlpha  = tc.isDark ? '18' : '30';
+              const _brdAlpha = tc.isDark ? '40' : '80';
+              // If badge color itself is too light on light bg, cap luminance
+              const _textColor = (!tc.isDark && _lum(_bc) > 0.6) ? '#444444' : _bc;
+              return (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: _bc + _bgAlpha, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 0.5, borderColor: _bc + _brdAlpha }}>
+                  {badge.emoji ? <Text style={{ fontSize: 11, marginRight: 4 }}>{badge.emoji}</Text> : null}
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: _textColor }}>{badge.name}</Text>
+                </View>
+              );
+            })()}
             {!EXCLUDED_ACCOUNT_TYPES.includes(user?.accountType) && (user?.isChampion ? <ChampionBadge /> : user?.isCurrentLeader ? <LeaderBadge /> : null)}
           </View>
-          {/* Profile Badge / Title cosmétique */}
-          {(() => {
-            const badgeId = user?.equippedProfileBadge;
-            const badge = badgeId ? PROFILE_BADGES.find(b => b.id === badgeId) : null;
-            if (!badge || badge.id === 'badge_none') return null;
-            return (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, marginTop: -2 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: (badge.color || COLORS.gold) + '18', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 0.5, borderColor: (badge.color || COLORS.gold) + '40' }}>
-                  {badge.emoji ? <Text style={{ fontSize: 11, marginRight: 4 }}>{badge.emoji}</Text> : null}
-                  <Text style={{ fontSize: 10, fontWeight: '800', color: badge.color || COLORS.gold }}>{badge.name}</Text>
-                </View>
-              </View>
-            );
-          })()}
           <View style={styles.metaRow}>
             <Text style={[styles.metaItem, { color: tc.secondary }]}>🎮 {user?.mainGame || 'Gaming'}</Text>
             {user?.country ? <Text style={[styles.metaItem, { color: tc.secondary }]}>🌍 {user.country}</Text> : null}
@@ -1079,6 +1103,12 @@ export default function ProfileScreen({ navigation, route }) {
               </Text>
               <Text style={[styles.statLabel, { color: COLORS.gold }]}>GG ⓘ</Text>
             </TouchableOpacity>
+            {user?.monthlyRank ? (
+              <TouchableOpacity onPress={() => navigation.navigate('Rankings')} style={[styles.stat, { borderColor: COLORS.gold + '50', backgroundColor: 'rgba(201,168,76,0.06)' }]}>
+                <Text style={[styles.statNum, { color: COLORS.gold }]}>#{user.monthlyRank}</Text>
+                <Text style={[styles.statLabel, { color: COLORS.gold }]}>GG Rank</Text>
+              </TouchableOpacity>
+            ) : null}
             {isOwn && (
               <TouchableOpacity onPress={() => setShowPointsPopup(true)} style={[styles.stat, { borderColor: COLORS.blue + '40' }]}>
                 <Text style={[styles.statNum, { color: COLORS.blue }]}>{(user?.gaPoints || 0).toLocaleString()}</Text>
@@ -1396,7 +1426,8 @@ const styles = StyleSheet.create({
   bellBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' },
   fanbaseBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 22, borderWidth: 1, borderColor: COLORS.blue, backgroundColor: 'rgba(0,212,255,0.06)', gap: 5 },
   fanbaseBtnText: { fontSize: 12, color: COLORS.blue, fontWeight: '800' },
-  nameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 5, gap: 6 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 4, gap: 6 },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 5, gap: 6 },
   name: { fontSize: 20, fontWeight: '900', color: COLORS.white, letterSpacing: 0.3 },
   legBadge: { backgroundColor: COLORS.gold, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   legBadgeText: { fontSize: 9, fontWeight: '900', color: COLORS.black, letterSpacing: 0.5 },

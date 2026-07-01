@@ -54,33 +54,43 @@ export default function NotificationsScreen({ navigation }) {
       where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
-    const avatarCache = {};
+    const profileCache = {};
     const unsub = onSnapshot(q, async (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Récupère les avatars des expéditeurs (utilisateurs) qui n'en ont pas déjà
+      // Récupère le profil actuel de tous les expéditeurs (nom + avatar à jour)
       const senderIds = [...new Set(
-        list.filter(n => n.fromUserId && n.fromUserId !== 'SYSTEM' && !n.fromAvatar).map(n => n.fromUserId)
+        list.filter(n => n.fromUserId && n.fromUserId !== 'SYSTEM').map(n => n.fromUserId)
       )];
       await Promise.all(senderIds.map(async (uid) => {
-        if (avatarCache[uid] !== undefined) return;
+        if (profileCache[uid] !== undefined) return;
         try {
           const s = await getDoc(doc(db, 'users', uid));
-          avatarCache[uid] = s.exists() ? (s.data().avatar || '') : '';
-        } catch (e) { avatarCache[uid] = ''; }
+          if (s.exists()) {
+            const d = s.data();
+            profileCache[uid] = { avatar: d.avatar || '', username: d.username || '' };
+          } else {
+            profileCache[uid] = { avatar: '', username: '' };
+          }
+        } catch (e) { profileCache[uid] = { avatar: '', username: '' }; }
       }));
       if (!mountedRef.current) return;
-      // Injecte l'avatar trouvé
-      const enriched = list.map(n => ({
-        ...n,
-        fromAvatar: n.fromAvatar || (n.fromUserId ? avatarCache[n.fromUserId] : '') || '',
-      }));
+      // Injecte le profil actuel (avatar + username à jour)
+      const enriched = list.map(n => {
+        if (!n.fromUserId || n.fromUserId === 'SYSTEM') return n;
+        const p = profileCache[n.fromUserId] || {};
+        return {
+          ...n,
+          fromAvatar: p.avatar || n.fromAvatar || '',
+          fromUsername: p.username || n.fromUsername || '',
+        };
+      });
       setNotifs(enriched);
       setLoading(false);
       // Clear app icon badge when notifications are viewed
       const unread = enriched.filter(n => !n.read).length;
       Notifications.setBadgeCountAsync(unread).catch(() => {});
     }, (error) => {
-      console.log('Notif error:', error);
+      if (__DEV__) { console.log('Notif error:', error); }
       setLoading(false);
     });
     return () => unsub();

@@ -1,5 +1,7 @@
-import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform, Alert } from 'react-native';
+import React, { useRef, useEffect } from 'react';
+import { View, TouchableOpacity, StyleSheet, Platform, Alert, Animated, Easing, Dimensions } from 'react-native';
+
+const { width: SW } = Dimensions.get('window');
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,10 +46,12 @@ import HowToUploadScreen from '../screens/upload/HowToUploadScreen';
 import NotificationsScreen from '../screens/notifications/NotificationsScreen';
 import ReportScreen from '../screens/report/ReportScreen';
 import SubscriptionScreen from '../screens/subscription/SubscriptionScreen';
+import SupportScreen from '../screens/support/SupportScreen';
 import EarningsScreen from '../screens/earnings/EarningsScreen';
 import ProfileFeedScreen from '../screens/profile/ProfileFeedScreen';
 import GiftCardsScreen from '../screens/giftcards/GiftCardsScreen';
 import SearchScreen from '../screens/search/SearchScreen';
+import ExploreScreen from '../screens/explore/ExploreScreen';
 import HashtagScreen from '../screens/search/HashtagScreen';
 import MyFanbaseScreen from '../screens/fanbase/MyFanbaseScreen';
 import FanBoxScreen from '../screens/fanbase/FanBoxScreen';
@@ -96,6 +100,7 @@ function FeedStack() {
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="Report" component={ReportScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+      <Stack.Screen name="Support" component={SupportScreen} />
       <Stack.Screen name="Earnings" component={EarningsScreen} />
       <Stack.Screen name="ProfileFeed" component={ProfileFeedScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
       <Stack.Screen name="GiftCards" component={GiftCardsScreen} />
@@ -114,6 +119,20 @@ function FeedStack() {
       <Stack.Screen name="NotificationsSettings" component={NotificationsSettingsScreen} />
       <Stack.Screen name="EditVideo" component={EditVideoScreen} />
 <Stack.Screen name="BellsList" component={BellsListScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function ExploreStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ExploreMain" component={ExploreScreen} />
+      <Stack.Screen name="VideoPlayer" component={VideoPlayerScreen} />
+      <Stack.Screen name="UserProfile" component={ProfileScreen} />
+      <Stack.Screen name="Comments" component={CommentsScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Followers" component={FollowersScreen} />
+      <Stack.Screen name="Following" component={FollowingScreen} />
+      <Stack.Screen name="Report" component={ReportScreen} />
     </Stack.Navigator>
   );
 }
@@ -146,6 +165,7 @@ function TipsStack() {
       <Stack.Screen name="EditVideo" component={EditVideoScreen} />
       <Stack.Screen name="Earnings" component={EarningsScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+      <Stack.Screen name="Support" component={SupportScreen} />
     </Stack.Navigator>
   );
 }
@@ -175,6 +195,7 @@ function RankingsStack() {
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="Earnings" component={EarningsScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+      <Stack.Screen name="Support" component={SupportScreen} />
     </Stack.Navigator>
   );
 }
@@ -184,6 +205,7 @@ function ShopStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="ShopMain" component={ShopScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+      <Stack.Screen name="Support" component={SupportScreen} />
       <Stack.Screen name="Earnings" component={EarningsScreen} />
       <Stack.Screen name="ProfileFeed" component={ProfileFeedScreen} options={{ headerShown: false, animation: 'slide_from_bottom' }} />
       <Stack.Screen name="Comments" component={CommentsScreen} options={{ presentation: 'modal' }} />
@@ -201,6 +223,7 @@ function UploadStack() {
       <Stack.Screen name="UploadMain" component={UploadScreen} />
       <Stack.Screen name="HowToUpload" component={HowToUploadScreen} />
       <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+      <Stack.Screen name="Support" component={SupportScreen} />
     </Stack.Navigator>
   );
 }
@@ -209,11 +232,33 @@ function CustomTabBar({ state, descriptors, navigation }) {
   const isGuest    = useAuthStore((s) => s.isGuest);
   const exitGuest  = useAuthStore((s) => s.exitGuestMode);
 
+  // Shimmer doré gauche → droite (boucle récursive pour reset correct)
+  const shimmerX = useRef(new Animated.Value(-140)).current;
+  useEffect(() => {
+    let active = true;
+    const run = () => {
+      shimmerX.setValue(-140);
+      Animated.sequence([
+        Animated.timing(shimmerX, {
+          toValue: SW + 140,
+          duration: 2400,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.delay(1800),
+      ]).start(({ finished }) => {
+        if (finished && active) run();
+      });
+    };
+    run();
+    return () => { active = false; shimmerX.stopAnimation(); };
+  }, []);
+
   const iconMap = {
-    Feed: ['home', 'home-outline'],
-    Tips: ['game-controller', 'game-controller-outline'],
-    Rankings: ['trophy', 'trophy-outline'],
-    Shop: ['storefront', 'storefront-outline'],
+    Feed:    ['home', 'home-outline'],
+    Tips:    ['game-controller', 'game-controller-outline'],
+    Rankings:['trophy', 'trophy-outline'],
+    Shop:    ['storefront', 'storefront-outline'],
   };
 
   // Hide tab bar when inside a nested screen
@@ -233,6 +278,37 @@ function CustomTabBar({ state, descriptors, navigation }) {
 
   return (
     <View style={styles.tabBar}>
+      {/* Boule lumineuse dorée — sweep de gauche à droite */}
+      {/* Boule lumineuse — centrée sur le bord supérieur */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          top: -9,          // centre du halo (18px / 2) aligné sur le bord à y=0
+          width: 18,
+          height: 18,
+          transform: [{ translateX: shimmerX }],
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 20,
+        }}
+      >
+        {/* Halo extérieur */}
+        <View style={{ position: 'absolute', width: 18, height: 18, borderRadius: 9, backgroundColor: 'rgba(201,168,76,0.08)' }} />
+        {/* Halo moyen */}
+        <View style={{ position: 'absolute', width: 11, height: 11, borderRadius: 6, backgroundColor: 'rgba(201,168,76,0.24)' }} />
+        {/* Noyau brillant */}
+        <View style={{
+          width: 4, height: 4, borderRadius: 2,
+          backgroundColor: '#FFE680',
+          shadowColor: '#FFD700',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 1,
+          shadowRadius: 5,
+          elevation: 10,
+        }} />
+      </Animated.View>
+
       {state.routes.map((route, index) => {
         const isFocused = state.index === index;
         const isUpload = route.name === 'Upload';
@@ -268,7 +344,10 @@ function CustomTabBar({ state, descriptors, navigation }) {
 
 export default function MainNavigator() {
   return (
-    <Tab.Navigator tabBar={(props) => <CustomTabBar {...props} />} screenOptions={{ headerShown: false }}>
+    <Tab.Navigator
+      tabBar={(props) => <CustomTabBar {...props} />}
+      screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: COLORS.black } }}
+    >
       <Tab.Screen name="Feed" component={FeedStack} />
       <Tab.Screen name="Tips" component={TipsStack} />
       <Tab.Screen name="Upload" component={UploadStack} />
@@ -281,7 +360,7 @@ export default function MainNavigator() {
 const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(6,6,14,0.98)',
+    backgroundColor: COLORS.dark,
     borderTopWidth: 0.5,
     borderTopColor: COLORS.gray3,
     height: Platform.OS === 'ios' ? 80 : 60,

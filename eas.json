@@ -29,7 +29,10 @@
       "ios": {
         "appleId": "pdiop08@outlook.fr",
         "ascAppId": "6780596082",
-        "appleTeamId": "9XA23TPXPG"
+        "appleTeamId": "9XA23TPXPG",
+        "ascApiKeyPath": "../keys/AuthKey_3TGG4V5N9Z.p8",
+        "ascApiKeyId": "3TGG4V5N9Z",
+        "ascApiKeyIssuerId": "83dd4669-4c02-4eb7-9dac-f681a2c95288"
       },
       "android": {
         "serviceAccountKeyPath": "./google-services-key.json",

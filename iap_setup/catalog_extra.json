@@ -1,0 +1,7 @@
+[
+ {"product_id":"com.gamingactions.app.support_299","ref":"Support the App 2.99","type":"Consumable","price":2.99,"cat":"support","item_id":"support_299","display":"Support the App $2.99","desc":"Support Gaming Actions"},
+ {"product_id":"com.gamingactions.app.support_499","ref":"Support the App 4.99","type":"Consumable","price":4.99,"cat":"support","item_id":"support_499","display":"Support the App $4.99","desc":"Support Gaming Actions"},
+ {"product_id":"com.gamingactions.app.support_999","ref":"Support the App 9.99","type":"Consumable","price":9.99,"cat":"support","item_id":"support_999","display":"Support the App $9.99","desc":"Support Gaming Actions"},
+ {"product_id":"com.gamingactions.app.support_1999","ref":"Support the App 19.99","type":"Consumable","price":19.99,"cat":"support","item_id":"support_1999","display":"Support the App $19.99","desc":"Support Gaming Actions"},
+ {"product_id":"com.gamingactions.app.support_4999","ref":"Support the App 49.99","type":"Consumable","price":49.99,"cat":"support","item_id":"support_4999","display":"Support the App $49.99","desc":"Support Gaming Actions"}
+]

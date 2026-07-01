@@ -83,7 +83,10 @@ export default function DashboardScreen({ navigation }) {
         const timeAgo = diffH < 1 ? 'Just now' : diffH < 24 ? `${diffH}h ago` : `${Math.floor(diffH / 24)}d ago`;
         return { id: d.id, ...data, timeAgo };
       }));
-    } catch(e){} finally {
+    } catch(e){
+      console.warn('Dashboard load error:', e?.message);
+      setLoading(false);
+    } finally {
       setLoading(false);
     }
   };
@@ -107,9 +110,7 @@ export default function DashboardScreen({ navigation }) {
           <Ionicons name="arrow-back" size={22} color={COLORS.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Dashboard</Text>
-        <TouchableOpacity onPress={() => Alert.alert('🚀 Bientôt disponible', 'Le retrait sera activé prochainement.')} style={styles.withdrawBtn}>
-          <Text style={styles.withdrawBtnText}>Withdraw</Text>
-        </TouchableOpacity>
+        <View style={{ width: 22 }} />
       </View>
 
       {loading ? (
@@ -175,10 +176,7 @@ export default function DashboardScreen({ navigation }) {
               <Text style={styles.revenueTitle}> Revenue & Withdrawals</Text>
             </View>
             <Text style={styles.revenueValue}>$0.00</Text>
-            <Text style={styles.revenueNote}>Revenue features will be activated soon. Your Fanbase earnings will appear here.</Text>
-            <TouchableOpacity onPress={() => Alert.alert('🚀 Bientôt disponible', 'Le retrait sera activé prochainement.')} style={styles.revenueBtn}>
-              <Text style={styles.revenueBtnText}>Bientôt disponible 🚀</Text>
-            </TouchableOpacity>
+            <Text style={styles.revenueNote}>Earnings and withdrawals can't be managed here.</Text>
           </View>
 
           {/* Top clips — vrais clips triés par GG */}

@@ -2,17 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { RefreshControl,
   View, Text, StyleSheet, ScrollView, FlatList,
   TouchableOpacity, Dimensions, Image, ActivityIndicator,
-  Modal, TouchableWithoutFeedback, TextInput,
+  Modal, TouchableWithoutFeedback, TextInput, Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, query, where, orderBy, getDocs, limit, startAfter } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, limit, startAfter, getDoc, doc, onSnapshot } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import { db } from '../../config/firebase';
 import useAuthStore from '../../store/useAuthStore';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
 import useFanbaseStore from '../../store/useFanbaseStore';
 import Avatar from '../../components/FramedAvatar';
+import { UserPlanBadges, ProfileBadgePill, PROFILE_BADGE_DATA as BADGE_DATA } from '../../components/UserBadges';
+import { USERNAME_EFFECTS } from '../../constants/cosmetics';
 
 const { width: SW } = Dimensions.get('window');
 const GREEN = '#00C853';
@@ -78,65 +80,135 @@ const lp = StyleSheet.create({
   cancelBtnText: { fontSize: 13, color: COLORS.gray, fontWeight: '600' },
 });
 
+function fmtAgo(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = Math.floor((Date.now() - d) / 1000);
+  if (diff < 60) return 'now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function cardNameColor(accountType, plan) {
+  if (accountType === 'gameconic') return COLORS.red;
+  if (accountType === 'creator') return COLORS.blue;
+  if (accountType === 'developer') return '#7C4DFF';
+  if (plan === 'legendary') return COLORS.gold;
+  return COLORS.white;
+}
+
 function TipCardBase({ tip, locked, onPress }) {
   const cat = CATEGORIES.find(c => c.id === tip.contentType);
-  const badge = BADGE_COLORS[tip.accountType] || BADGE_COLORS.gamer;
 
-  const formatDuration = (seconds) => {
-    if (!seconds) return '—';
+  // Live creator profile — onSnapshot so frames/effects update in real-time
+  const [creator, setCreator] = useState({ ...tip, uid: tip.userId });
+  useEffect(() => {
+    if (!tip.userId) return;
+    const unsub = onSnapshot(doc(db, 'users', tip.userId), snap => {
+      if (snap.exists()) setCreator({ uid: tip.userId, ...snap.data() });
+    }, () => {
+      getDoc(doc(db, 'users', tip.userId)).then(snap => {
+        if (snap.exists()) setCreator({ uid: tip.userId, ...snap.data() });
+      }).catch(() => {});
+    });
+    return () => unsub();
+  }, [tip.userId]);
+
+  const _baseNameColor = cardNameColor(creator.accountType || tip.accountType, creator.plan || tip.plan);
+  const _ue = USERNAME_EFFECTS?.find(e => e.id === creator.equippedUsernameEffect);
+  const nameColor = _ue ? (_ue.color || _ue.colors?.[0] || _baseNameColor) : _baseNameColor;
+  const nameGlow = _ue?.glow || false;
+  const nameAnim = _ue?.animated || false;
+  const uePulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!nameAnim) { uePulse.setValue(1); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(uePulse, { toValue: 0.55, duration: 750, useNativeDriver: true }),
+      Animated.timing(uePulse, { toValue: 1,    duration: 750, useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [nameAnim, nameColor]);
+
+  const fmtDur = (seconds) => {
+    if (!seconds) return null;
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
+  const dur = fmtDur(tip.duration);
 
   return (
-    <TouchableOpacity onPress={onPress} style={[cardS.container, tip.isFanbaseExclusive && { borderLeftWidth: 3, borderLeftColor: GREEN, backgroundColor: 'rgba(0,200,83,0.04)' }]} activeOpacity={0.85}>
-      <View style={[cardS.thumb, { borderColor: cat?.color || COLORS.gray3 }]}>
-        {tip.thumbnail ? (
-          <Image source={{ uri: tip.thumbnail }} style={{ width: '100%', height: '100%', borderRadius: 10 }} resizeMode="cover" blurRadius={locked ? 12 : 0} />
+    <TouchableOpacity
+      onPress={onPress}
+      style={[cardS.container, tip.isFanbaseExclusive && { borderLeftWidth: 3, borderLeftColor: GREEN, backgroundColor: 'rgba(0,200,83,0.04)' }]}
+      activeOpacity={0.85}
+    >
+      {/* ── Profile row ─────────────────────────────────────────── */}
+      <View style={cardS.profileRow}>
+        <Avatar user={creator} size={26} />
+        {nameAnim ? (
+          <Animated.Text style={[cardS.creatorName, { color: nameColor, opacity: uePulse, textShadowColor: nameColor, textShadowRadius: 9, textShadowOffset: { width: 0, height: 0 } }]} numberOfLines={1}>{creator.username || tip.username}</Animated.Text>
         ) : (
-          <Ionicons name={cat?.icon || 'videocam-outline'} size={28} color={cat?.color || COLORS.gray} style={{ opacity: 0.4 }} />
+          <Text style={[cardS.creatorName, { color: nameColor, textShadowColor: nameGlow ? nameColor : 'transparent', textShadowRadius: nameGlow ? 6 : 0, textShadowOffset: { width: 0, height: 0 } }]} numberOfLines={1}>{creator.username || tip.username}</Text>
         )}
-        {/* Overlay cadenas si verrouillé */}
-        {locked && (
-          <View style={cardS.lockOverlay}>
-            <Ionicons name="lock-closed" size={22} color={GREEN} />
-          </View>
+        {/* Account type icon */}
+        {(creator.accountType || tip.accountType) === 'gameconic' && <Ionicons name="flash" size={10} color={COLORS.red} style={{ marginLeft: 3 }} />}
+        {(creator.accountType || tip.accountType) === 'creator' && <Ionicons name="videocam" size={10} color={COLORS.blue} style={{ marginLeft: 3 }} />}
+        {(creator.accountType || tip.accountType) === 'developer' && <Ionicons name="code-slash" size={10} color="#7C4DFF" style={{ marginLeft: 3 }} />}
+        {/* Feed-style plan + type badges */}
+        <UserPlanBadges accountType={creator.accountType || tip.accountType} plan={creator.plan || tip.plan} style={{ marginLeft: 2 }} />
+        {tip.isFanbaseExclusive && (
+          <Text style={{ fontSize: 9, color: GREEN, marginLeft: 4 }}>{locked ? '🔒' : '🔓'}</Text>
         )}
-        <View style={cardS.duration}>
-          <Text style={cardS.durationText}>{formatDuration(tip.duration)}</Text>
-        </View>
-        {/* Tag catégorie coloré sur le thumbnail */}
-        <View style={[cardS.thumbCatTag, { backgroundColor: (cat?.color || COLORS.gray) }]}>
-          <Text style={cardS.thumbCatText}>{cat?.label || tip.contentType}</Text>
-        </View>
-        {tip.isFanbaseExclusive && !locked && (
-          <View style={cardS.fanbaseLock}>
-            <Ionicons name="lock-open" size={10} color={GREEN} />
-          </View>
-        )}
+        <Text style={cardS.timeAgo}>{fmtAgo(tip.createdAt)}</Text>
       </View>
-      <View style={cardS.info}>
-        <View style={[cardS.catTag, { backgroundColor: (cat?.color || COLORS.gray) + '18' }]}>
-          <Text style={[cardS.catTagText, { color: cat?.color || COLORS.gray }]}>{cat?.label || tip.contentType}</Text>
-        </View>
-        <Text style={cardS.title} numberOfLines={2}>{tip.caption}</Text>
-        <Text style={cardS.desc} numberOfLines={1}>🎮 {tip.game}</Text>
-        <View style={cardS.creatorRow}>
-          <Avatar user={tip} size={20} />
-          <Text style={[cardS.creatorName, { marginLeft: 5 }]}>{tip.username}</Text>
-          <View style={[cardS.badge, { backgroundColor: badge.bg, marginLeft: 4 }]}>
-            <Text style={[cardS.badgeText, { color: badge.text }]}>{badge.label}</Text>
+
+      {/* ── Content row: THUMBNAIL LEFT · INFO RIGHT ────────────── */}
+      <View style={cardS.contentRow}>
+        {/* Thumbnail gauche */}
+        <View style={[cardS.thumb, { borderColor: cat?.color || COLORS.gray3 }]}>
+          {tip.thumbnail ? (
+            <Image source={{ uri: tip.thumbnail }} style={{ width: '100%', height: '100%', borderRadius: 10 }} resizeMode="cover" blurRadius={locked ? 12 : 0} />
+          ) : (
+            <Ionicons name={cat?.icon || 'videocam-outline'} size={28} color={cat?.color || COLORS.gray} style={{ opacity: 0.4 }} />
+          )}
+          {locked && (
+            <View style={cardS.lockOverlay}>
+              <Ionicons name="lock-closed" size={20} color={GREEN} />
+            </View>
+          )}
+          {dur && (
+            <View style={cardS.duration}>
+              <Text style={cardS.durationText}>{dur}</Text>
+            </View>
+          )}
+          <View style={[cardS.thumbCatTag, { backgroundColor: cat?.color || COLORS.gray }]}>
+            <Text style={cardS.thumbCatText}>{cat?.label || tip.contentType}</Text>
           </View>
         </View>
-        <View style={cardS.statsRow}>
-          <Text style={cardS.stat}>{tip.viewsCount || 0} views</Text>
-          <Text style={cardS.statDot}> · </Text>
-          <Ionicons name="thumbs-up-outline" size={11} color="#7C4DFF" />
-          <Text style={[cardS.stat, { color: '#7C4DFF' }]}> {tip.thanksCount || 0} Thanks</Text>
-          {tip.isFanbaseExclusive && (
-            <Text style={[cardS.stat, { color: GREEN, marginLeft: 4 }]}> · {locked ? '🔒' : '🔓'} Fanbase</Text>
+
+        {/* Info droite: titre (tip.title) + description (tip.caption) + stats */}
+        <View style={cardS.info}>
+          <Text style={cardS.title} numberOfLines={2}>{tip.title || tip.caption}</Text>
+          {!!(tip.caption && tip.title) && (
+            <Text style={cardS.desc} numberOfLines={2}>{tip.caption}</Text>
           )}
+          <View style={{ flex: 1 }} />
+          <View style={cardS.cardBottom}>
+            <View style={cardS.statsInline}>
+              <Ionicons name="eye-outline" size={10} color={COLORS.gray2} />
+              <Text style={cardS.stat}> {tip.viewsCount || 0}</Text>
+              <Text style={cardS.dot}> · </Text>
+              <Ionicons name="flash-outline" size={10} color="#7C4DFF" />
+              <Text style={[cardS.stat, { color: '#7C4DFF' }]}> {tip.thanksCount || 0}</Text>
+              <Text style={cardS.dot}> · </Text>
+              <Ionicons name="chatbubble-outline" size={10} color={COLORS.gray2} />
+              <Text style={cardS.stat}> {tip.commentsCount || 0}</Text>
+            </View>
+            <Text style={cardS.gameTag} numberOfLines={1}>🎮 {tip.game}</Text>
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -145,26 +217,27 @@ function TipCardBase({ tip, locked, onPress }) {
 const TipCard = React.memo(TipCardBase);
 
 const cardS = StyleSheet.create({
-  container: { flexDirection: 'row', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
-  thumb: { width: 110, height: 74, borderRadius: 10, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', borderWidth: 0.5, marginRight: 12 },
+  container: { paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  profileRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  creatorName: { fontSize: 12, fontWeight: '700', marginLeft: 7, flexShrink: 1 },
+  timeAgo: { fontSize: 10, color: COLORS.gray2, marginLeft: 'auto' },
+  contentRow: { flexDirection: 'row' },
+  // Thumbnail — à gauche
+  thumb: { width: 120, height: 80, borderRadius: 10, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', borderWidth: 0.5, flexShrink: 0, marginRight: 10 },
   lockOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
   duration: { position: 'absolute', bottom: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
   durationText: { fontSize: 9, color: COLORS.white, fontWeight: '700' },
-  thumbCatTag: { position: 'absolute', top: 6, left: 6, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  thumbCatText: { fontSize: 8, color: COLORS.white, fontWeight: '900', letterSpacing: 0.3 },
-  fanbaseLock: { position: 'absolute', top: 6, right: 6, backgroundColor: 'rgba(0,200,83,0.15)', padding: 3, borderRadius: 4 },
-  info: { flex: 1 },
-  catTag: { alignSelf: 'flex-start', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, marginBottom: 4 },
-  catTagText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  title: { fontSize: 13, fontWeight: '700', color: COLORS.white, lineHeight: 17, marginBottom: 3 },
-  desc: { fontSize: 11, color: COLORS.gray, lineHeight: 14, marginBottom: 6 },
-  creatorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
-  creatorName: { fontSize: 11, color: COLORS.gray, fontWeight: '600' },
-  badge: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3 },
-  badgeText: { fontSize: 7, fontWeight: '900' },
-  statsRow: { flexDirection: 'row', alignItems: 'center' },
+  thumbCatTag: { position: 'absolute', top: 5, left: 5, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
+  thumbCatText: { fontSize: 7, color: COLORS.white, fontWeight: '900', letterSpacing: 0.3 },
+  // Info section — à droite
+  info: { flex: 1, justifyContent: 'flex-start' },
+  title: { fontSize: 13, fontWeight: '800', color: COLORS.white, lineHeight: 18 },
+  desc: { fontSize: 11, color: COLORS.gray, fontStyle: 'italic', lineHeight: 15, marginTop: 3 },
+  cardBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
+  statsInline: { flexDirection: 'row', alignItems: 'center' },
   stat: { fontSize: 10, color: COLORS.gray },
-  statDot: { fontSize: 10, color: COLORS.gray2 },
+  dot: { fontSize: 10, color: COLORS.gray3, marginHorizontal: 1 },
+  gameTag: { fontSize: 10, color: COLORS.gold, flexShrink: 1, marginLeft: 6, textAlign: 'right' },
 });
 
 export default function TipsScreen({ navigation }) {
@@ -283,7 +356,7 @@ export default function TipsScreen({ navigation }) {
   });
 
   // Liste des genres présents dans les tips chargés
-  const availableGenres = ['all', ...Array.from(new Set(tips.map(t => t.genre).filter(Boolean)))];
+  const availableGenres = ['all', ...Array.from(new Set(tips.map(t => t.genre).filter(g => Boolean(g) && g !== 'all')))];
 
   const handleTipPress = (tip) => {
     if (isLockedForMe(tip)) {

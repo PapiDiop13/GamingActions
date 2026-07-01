@@ -102,6 +102,20 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── Shop purchases (achats cosmétiques payés en $) ────────────────────────
+    match /shop_purchases/{docId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.userId == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Support purchases (dons "Support the App") ────────────────────────────
+    match /support_purchases/{docId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.userId == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
     // ── Notifications ─────────────────────────────────────────────────────────
     match /notifications/{notifId} {
       allow read: if isAuth() && resource.data.userId == request.auth.uid;
@@ -122,9 +136,15 @@ service cloud.firestore {
       );
     }
 
+    // ── Fanbase payments (gains créateurs par cycle — écrit côté serveur) ─────
+    match /fanbase_payments/{docId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.creatorId == request.auth.uid);
+      allow write: if false; // Cloud Functions only
+    }
+
     // ── Gift cards (create = user, update = admin only) ───────────────────────
     match /gift_card_requests/{docId} {
-      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow read: if isAdmin() || (isAuth() && resource.data.userId == request.auth.uid);
       allow create: if isAuth() && notBanned()
         && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isAdmin();
@@ -141,7 +161,7 @@ service cloud.firestore {
     }
 
     match /withdrawal_requests/{docId} {
-      allow read: if isAuth() && resource.data.creatorId == request.auth.uid;
+      allow read: if isAdmin() || (isAuth() && resource.data.creatorId == request.auth.uid);
       allow create: if isAuth()
         && request.resource.data.creatorId == request.auth.uid;
       allow update, delete: if isAdmin();
@@ -149,7 +169,7 @@ service cloud.firestore {
 
     // ── Subscriptions (géré par RevenueCat + Admin SDK) ───────────────────────
     match /subscriptions/{docId} {
-      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      allow read: if isAdmin() || (isAuth() && resource.data.userId == request.auth.uid);
       allow write: if isAdmin();
     }
 
@@ -230,6 +250,12 @@ service cloud.firestore {
     match /errorCounters/{docId} {
       allow read: if isAdmin();
       allow write: if isAuth();
+    }
+
+    // ── Wall of Legends (champions mensuels) — lecture publique, écriture serveur ──
+    match /hall_of_fame/{monthId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // ── Fanbases (metadata créateur) ─────────────────────────────────────────────

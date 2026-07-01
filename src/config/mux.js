@@ -52,8 +52,10 @@ export const getVideoUrl = (video) => {
 // Même chose pour les thumbnails
 export const getThumbnailUrl = (video) => {
   if (!video) return null;
-  if (video.muxPlaybackId) return getMuxThumbnailUrl(video.muxPlaybackId);
+  // 1) Image de couverture custom (uploadée par l'utilisateur) — prioritaire
   if (video.thumbnail) return video.thumbnail;
+  // 2) Frame choisie dans la vidéo (thumbnailTime) via Mux
+  if (video.muxPlaybackId) return getMuxThumbnailUrl(video.muxPlaybackId, { time: typeof video.thumbnailTime === 'number' ? video.thumbnailTime : 3 });
   if (video.thumbnailUrl) return video.thumbnailUrl;
   return null;
 };

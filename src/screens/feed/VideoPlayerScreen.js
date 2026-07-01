@@ -313,7 +313,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
                     if (!user) {
                       Alert.alert('Connecte-toi', 'Crée un compte pour GG ce clip !', [
                         { text: 'Annuler', style: 'cancel' },
-                        { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+                        { text: 'Se connecter', onPress: () => useAuthStore.getState().exitGuestMode() },
                       ]);
                       return;
                     }
@@ -344,7 +344,7 @@ export default function VideoPlayerScreen({ navigation, route }) {
                     if (!user) {
                       Alert.alert('Connecte-toi', 'Crée un compte pour commenter !', [
                         { text: 'Annuler', style: 'cancel' },
-                        { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+                        { text: 'Se connecter', onPress: () => useAuthStore.getState().exitGuestMode() },
                       ]);
                       return;
                     }
@@ -357,7 +357,6 @@ export default function VideoPlayerScreen({ navigation, route }) {
                 <TouchableOpacity
                   onPress={() => Share.share({
                     message: `Check out this clip on Gaming Actions! 🎮\nhttps://gamingactions.app/clip/${video?.id}`,
-                    url: `https://gamingactions.app/clip/${video?.id}`,
                   })}
                   style={[styles.sideAction, { marginTop: 20 }]}
                 >

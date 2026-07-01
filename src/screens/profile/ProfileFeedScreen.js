@@ -51,7 +51,7 @@ function ProfileVideoItem({ video, isActive, navigation }) {
     if (!user?.uid) {
       Alert.alert('Connecte-toi', 'Crée un compte pour GG ce clip !', [
         { text: 'Annuler', style: 'cancel' },
-        { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+        { text: 'Se connecter', onPress: () => useAuthStore.getState().exitGuestMode() },
       ]);
       return;
     }
@@ -105,7 +105,7 @@ function ProfileVideoItem({ video, isActive, navigation }) {
               if (!user?.uid) {
                 Alert.alert('Connecte-toi', 'Crée un compte pour commenter !', [
                   { text: 'Annuler', style: 'cancel' },
-                  { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+                  { text: 'Se connecter', onPress: () => useAuthStore.getState().exitGuestMode() },
                 ]);
                 return;
               }

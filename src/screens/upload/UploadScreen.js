@@ -1,21 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Platform, Alert,
+  TextInput, Platform, Alert, Modal, Pressable, Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { uploadBannerToCloudinary } from '../../config/cloudinary';
 import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, updateDoc, doc, increment, limit } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import { getMuxThumbnailUrl, getMuxPlaybackUrl } from '../../config/mux';
-import { db } from '../../config/firebase';
+import { db, auth } from '../../config/firebase';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import ConsoleIcon from '../../components/ConsoleIcon';
 import { awardPoints, POINTS } from '../../utils/points';
 import { showAlert } from '../../store/useAlertStore';
 import { VIDEO_FRAMES, getVideoFrameById } from '../../constants/frames';
+import { isFreebieCosmetic, userHasLegendary } from '../../constants/cosmeticAccess';
 import { setUploadState } from '../feed/FeedScreen';
 import { globalNavigate } from '../../utils/navigationRef';
 import * as StoreReview from 'expo-store-review';
@@ -96,10 +98,44 @@ export default function UploadScreen({ navigation, route }) {
     const extra = customGamesFromDB.filter(cg => cg.genre === g.id).map(cg => cg.name);
     return { ...g, games: [...g.games, ...extra] };
   });
-  const availableFrames = VIDEO_FRAMES.filter(f => !f.exclusive && (f.free || ownedVideoFrames.includes(f.id)));
+  const _legendaryAccess = userHasLegendary(userProfile);
+  const availableFrames = VIDEO_FRAMES.filter(f => !f.exclusive && (f.free || ownedVideoFrames.includes(f.id) || (_legendaryAccess && isFreebieCosmetic(f))));
   const [isFanbaseExclusive, setIsFanbaseExclusive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [videoUri, setVideoUri] = useState(null);
+  const [agreedRights, setAgreedRights] = useState(false);
+  const [showRightsModal, setShowRightsModal] = useState(false);
+  // Cover / thumbnail
+  const [thumbTime, setThumbTime] = useState(null);       // frame choisie (secondes)
+  const [customThumbUrl, setCustomThumbUrl] = useState(null); // image custom uploadée
+  const [thumbBarW, setThumbBarW] = useState(0);
+  const [thumbFrac, setThumbFrac] = useState(null);
+  const [thumbUploading, setThumbUploading] = useState(false);
+
+  const handlePickThumbnail = async () => {
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.85 });
+      if (res.canceled || !res.assets?.[0]?.uri) return;
+      setThumbUploading(true);
+      const url = await uploadBannerToCloudinary(res.assets[0].uri);
+      setCustomThumbUrl(url);
+      setThumbTime(null);
+    } catch (e) { Alert.alert('Error', 'Could not upload cover image.'); }
+    setThumbUploading(false);
+  };
+
+  const seekCover = (e) => {
+    if (thumbBarW <= 0) return;
+    const frac = Math.max(0, Math.min(1, e.nativeEvent.locationX / thumbBarW));
+    setThumbFrac(frac);                       // déplace le thumb tout de suite
+    const dur = previewPlayer?.duration || 0;
+    if (dur > 0) {
+      const t = frac * dur;
+      setThumbTime(t);
+      try { previewPlayer.pause(); previewPlayer.currentTime = t; } catch (err) {}
+    }
+  };
+  const coverPct = thumbFrac != null ? thumbFrac * 100 : 0;
 
   // NC21 — guard against setState on unmounted component
   const mountedRef = useRef(true);
@@ -159,6 +195,7 @@ export default function UploadScreen({ navigation, route }) {
     if (!game) return Alert.alert('Missing', 'Please select or enter a game.');
     if (!selectedConsole) return Alert.alert('Missing', 'Please select your console.');
     if (!videoUri) return Alert.alert('Missing', 'Please select a video.');
+    if (!agreedRights) return Alert.alert('Confirmation required', 'Please check the content-rights box below the video before posting.');
 
     // ─── Limite hebdomadaire ───────────────────────────────────────────────
     if (user?.uid && !hasUnlimitedUploads) {
@@ -181,7 +218,10 @@ export default function UploadScreen({ navigation, route }) {
             ]
           );
         }
-      } catch (e) {}
+      } catch (e) {
+        Alert.alert('Erreur', "Impossible de vérifier la limite d'upload. Réessaie.");
+        return;
+      }
     }
 
     setUploading(true);
@@ -196,120 +236,153 @@ export default function UploadScreen({ navigation, route }) {
 
     try {
       // ── 1. Obtenir l'URL d'upload Mux ──────────────────────────────────
+      const idToken = await auth.currentUser?.getIdToken();
       const urlResponse = await fetch(
         'https://us-central1-gamingactions-app.cloudfunctions.net/muxGetUploadUrl',
-        { method: 'POST' }
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${idToken}` },
+        }
       );
       if (!urlResponse.ok) throw new Error("Impossible d'obtenir l'URL Mux: " + urlResponse.status);
       const { uploadUrl, uploadId } = await urlResponse.json();
       if (!uploadUrl) throw new Error('uploadUrl manquant dans la réponse');
 
-      // ── 2. PUT binaire vers Mux — accepte tout 2xx (200 ou 204) ────────
-      const uploadResult = await FileSystem.uploadAsync(uploadUrl, videoUri, {
-        httpMethod: 'PUT',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        headers: { 'Content-Type': 'video/mp4' },
-      });
+      // ── 2. PUT binaire vers Mux — timeout 120s pour éviter freeze ─────
+      const uploadTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timeout — connexion trop lente')), 120000)
+      );
+      const uploadResult = await Promise.race([
+        FileSystem.uploadAsync(uploadUrl, videoUri, {
+          httpMethod: 'PUT',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: { 'Content-Type': 'video/mp4' },
+        }),
+        uploadTimeout,
+      ]);
       if (uploadResult.status < 200 || uploadResult.status >= 300) {
         throw new Error('Mux upload failed: ' + uploadResult.status);
       }
 
-      // ── 3. Jeu custom ──────────────────────────────────────────────────
-      if (showCustomGame && customGame.trim()) {
-        try {
-          const exists = await getDocs(query(collection(db, 'custom_games'), where('name', '==', customGame.trim())));
-          const existsStatic = GAMES.some(g => g.name.toLowerCase() === customGame.trim().toLowerCase());
-          if (exists.empty && !existsStatic) {
-            await addDoc(collection(db, 'custom_games'), {
-              name: customGame.trim(),
-              genre: selectedGenre || 'other',
-              addedAt: serverTimestamp(),
-              addedBy: user?.uid || 'user',
-            });
-          }
-        } catch (e) {}
+      // ── 3. Succès immédiat : reset état + alerte native + naviguer ─────
+      //    Les writes Firestore se font en background pour ne pas bloquer l'UI
+      if (mountedRef.current) {
+        setUploading(false);
+        setUploadState({ isUploading: false, progress: 0 });
       }
 
-      // ── 4. Hashtags ────────────────────────────────────────────────────
-      const allText = (title.trim() + ' ' + caption).toLowerCase();
-      const hashtags = [...new Set((allText.match(/#(\w+)/g) || []).map(h => h.slice(1)))];
-
-      // ── 5. Doc Firestore — muxPlaybackId rempli par le webhook ─────────
-      await addDoc(collection(db, 'videos'), {
-        userId: user?.uid,
-        username: userProfile?.username || 'PLAYER',
-        avatar: userProfile?.avatar || '',
-        title: title.trim(),
-        caption,
-        hashtags,
-        game,
-        genre: selectedGenre,
-        console: selectedConsole,
-        contentType,
-        videoFrame,
-        isLegendaryFrame: videoFrame !== 'none',
-        isFanbaseExclusive,
-        videoUrl: null,
-        thumbnail: null,
-        publicId: uploadId,
-        muxUploadId: uploadId,
-        muxPlaybackId: null,
-        muxStatus: 'processing',
-        duration: 0,
-        ggCount: 0,
-        commentsCount: 0,
-        viewCount: 0,
-        createdAt: serverTimestamp(),
-        randomOrder: Date.now() + Math.floor(Math.random() * 100000),
-      });
-
-      // ── 6. Points + videoCount ─────────────────────────────────────────
-      if (user?.uid) {
-        await awardPoints(user.uid, POINTS.POST_CLIP, 0, 'Posted a clip');
-        updateDoc(doc(db, 'users', user.uid), { videoCount: increment(1) }).catch(() => {});
-      }
       logEvent(LOG_CONTEXT.UPLOAD_SUCCESS, { contentType, game }, user?.uid).catch(() => {});
 
-      // ── 7. Store review (1er clip seulement) ──────────────────────────
-      try {
-        const isAvailable = await StoreReview.isAvailableAsync();
-        const currentCount = (userProfile?.videoCount || 0) + 1;
-        if (isAvailable && currentCount === 1) await StoreReview.requestReview();
-      } catch (e) {}
+      // Alerte native (toujours fiable, pas de dépendance Zustand/Modal)
+      Alert.alert(
+        '✅ Published!',
+        'Your clip is being processed and will appear soon. +25 GA Points earned! 🎮',
+        [
+          { text: 'OK 🎮', style: 'default', onPress: () => {} },
+          { text: 'My Profile', onPress: () => {
+            try { globalNavigate('UserProfile', { userId: user?.uid }); } catch(e) {}
+          }},
+        ]
+      );
 
-      // ── 8. Succès : reset état → naviguer → alerte ────────────────────
-      setUploading(false);
-      setUploadState({ isUploading: false, progress: 0 });
+      // Naviguer vers Feed après un court délai
+      setTimeout(() => goToFeed(), 300);
 
-      goToFeed();
+      // ── 4. Writes Firestore en background (ne bloquent pas l'UI) ───────
+      (async () => {
+        try {
+          // Jeu custom
+          if (showCustomGame && customGame.trim()) {
+            try {
+              const exists = await getDocs(query(collection(db, 'custom_games'), where('name', '==', customGame.trim())));
+              const existsStatic = GAMES.some(g => g.name.toLowerCase() === customGame.trim().toLowerCase());
+              if (exists.empty && !existsStatic) {
+                await addDoc(collection(db, 'custom_games'), {
+                  name: customGame.trim(),
+                  genre: selectedGenre || 'other',
+                  addedAt: serverTimestamp(),
+                  addedBy: user?.uid || 'user',
+                });
+              }
+            } catch (e) {}
+          }
 
-      setTimeout(() => {
-        showAlert({
-          title: '✅ Published!',
-          message: 'Your clip is being processed and will appear soon. +25 GA Points earned! 🎮',
-          type: 'success',
-          buttons: [
-            { text: 'OK 🎮', style: 'default' },
-            { text: 'My Profile', onPress: () => {
-              try { globalNavigate('Feed', { screen: 'UserProfile', params: { userId: user?.uid } }); } catch(e) {}
-            }},
-          ],
-        });
-      }, 300);
+          // Hashtags
+          const allText = (title.trim() + ' ' + caption).toLowerCase();
+          const hashtags = [...new Set((allText.match(/#(\w+)/g) || []).map(h => h.slice(1)))];
+
+          // Frame choisie pour le cover : résout en secondes (au cas où la durée
+          // n'était pas chargée pendant le scrub → on utilise la fraction + durée).
+          let resolvedThumbTime = null;
+          if (!customThumbUrl) {
+            const dur = previewPlayer?.duration || 0;
+            if (thumbTime != null) resolvedThumbTime = Math.round(thumbTime * 10) / 10;
+            else if (thumbFrac != null && dur > 0) resolvedThumbTime = Math.round(thumbFrac * dur * 10) / 10;
+          }
+
+          // Doc vidéo Firestore
+          await addDoc(collection(db, 'videos'), {
+            userId: user?.uid,
+            username: userProfile?.username || 'PLAYER',
+            avatar: userProfile?.avatar || '',
+            title: title.trim(),
+            caption,
+            hashtags,
+            game,
+            genre: selectedGenre,
+            console: selectedConsole,
+            contentType,
+            videoFrame,
+            isLegendaryFrame: videoFrame !== 'none',
+            isFanbaseExclusive,
+            videoUrl: null,
+            thumbnail: customThumbUrl || null,
+            thumbnailTime: customThumbUrl ? null : resolvedThumbTime,
+            publicId: uploadId,
+            muxUploadId: uploadId,
+            muxPlaybackId: null,
+            muxStatus: 'processing',
+            duration: 0,
+            ggCount: 0,
+            commentsCount: 0,
+            viewCount: 0,
+            createdAt: serverTimestamp(),
+            randomOrder: Date.now() + Math.floor(Math.random() * 100000),
+          });
+
+          // Points + videoCount
+          if (user?.uid) {
+            awardPoints(user.uid, POINTS.POST_CLIP, 0, 'Posted a clip').catch(() => {});
+            updateDoc(doc(db, 'users', user.uid), { videoCount: increment(1) }).catch(() => {});
+          }
+
+          // Store review (1er clip seulement) — fire & forget
+          try {
+            const currentCount = (userProfile?.videoCount || 0) + 1;
+            if (currentCount === 1) {
+              StoreReview.isAvailableAsync().then(isAvailable => {
+                if (isAvailable) StoreReview.requestReview().catch(() => {});
+              }).catch(() => {});
+            }
+          } catch (e) {}
+        } catch (e) {
+          logError(LOG_CONTEXT.UPLOAD_FAIL, e, user?.uid).catch(() => {});
+        }
+      })();
 
     } catch (e) {
-      setUploading(false);
-      setUploadState({ isUploading: false, progress: 0 });
+      if (mountedRef.current) {
+        setUploading(false);
+        setUploadState({ isUploading: false, progress: 0 });
+      }
       logError(LOG_CONTEXT.UPLOAD_FAIL, e, user?.uid).catch(() => {});
-      // Naviguer vers Feed même en cas d'échec — l'user ne doit pas rester bloqué
-      goToFeed();
-      setTimeout(() => {
-        showAlert({
-          title: '❌ Upload Failed',
-          message: 'Something went wrong. Please try again.\n\n' + (e?.message || ''),
-          type: 'danger',
-        });
-      }, 300);
+      // Alerte native AVANT navigation — toujours fiable
+      Alert.alert(
+        '❌ Upload Failed',
+        'Something went wrong. Please try again.\n\n' + (e?.message || ''),
+        [{ text: 'OK', style: 'cancel' }]
+      );
+      setTimeout(() => goToFeed(), 300);
     }
   };
 
@@ -469,10 +542,13 @@ export default function UploadScreen({ navigation, route }) {
         contentFit="cover"
         nativeControls={false}
       />
-      <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' }}>
-        <Ionicons name="checkmark-circle" size={44} color={COLORS.green} />
-        <Text style={[styles.videoAreaText, { color: COLORS.green }]}>Video selected ✓</Text>
-        <Text style={styles.videoAreaSub}>Tap to change</Text>
+      {/* Badge coin haut-droit — n'obscurcit plus la frame qu'on choisit */}
+      <View style={{ position: 'absolute', top: 8, right: 8, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 5, paddingHorizontal: 9, borderRadius: 14 }}>
+        <Ionicons name="checkmark-circle" size={15} color={COLORS.green} />
+        <Text style={{ color: COLORS.green, fontSize: 11, fontWeight: '700', marginLeft: 4 }}>Selected</Text>
+      </View>
+      <View style={{ position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 4, paddingHorizontal: 9, borderRadius: 12 }}>
+        <Text style={{ color: COLORS.white, fontSize: 10, fontWeight: '600' }}>Tap to change</Text>
       </View>
     </View>
   ) : (
@@ -485,6 +561,56 @@ export default function UploadScreen({ navigation, route }) {
     </>
   )}
 </TouchableOpacity>
+
+      {/* ── Content rights checkbox (obligatoire, façon TikTok) ── */}
+      <TouchableOpacity onPress={() => setAgreedRights(v => !v)} activeOpacity={0.8} style={styles.rightsRow}>
+        <View style={[styles.checkbox, agreedRights && styles.checkboxChecked]}>
+          {agreedRights && <Ionicons name="checkmark" size={13} color={COLORS.black} />}
+        </View>
+        <Text style={styles.rightsText}>
+          I confirm I own or have the rights to all content in this clip (gameplay, music, etc.).{' '}
+          <Text style={styles.rightsLink} onPress={() => setShowRightsModal(true)}>Content Usage Confirmation ›</Text>
+        </Text>
+      </TouchableOpacity>
+
+      <Modal visible={showRightsModal} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowRightsModal(false)}>
+        <View style={styles.rightsBackdrop}>
+          <View style={styles.rightsModalCard}>
+            <Text style={styles.rightsModalTitle}>Content Usage Confirmation</Text>
+            <Text style={styles.rightsModalText}>
+              By checking this box, you confirm that (A) you own all of the rights to the content included in this video (gameplay, music, voices, and any third-party material); or (B) the content is in the public domain; or (C) you have permission from all necessary rights holders to use it on Gaming Actions. If you cannot confirm (A), (B), or (C), the content may be removed, and you are solely responsible for it.
+            </Text>
+            <TouchableOpacity onPress={() => setShowRightsModal(false)} style={styles.rightsModalBtn}>
+              <Text style={styles.rightsModalBtnText}>Got it 👍</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Cover / thumbnail (frame picker + image custom) ── */}
+      {videoUri && (
+        <View style={styles.coverSection}>
+          <Text style={styles.coverLabel}>COVER</Text>
+          <Text style={styles.coverHint}>Tap the bar to pick a frame from your clip, or upload your own image.</Text>
+          {customThumbUrl ? (
+            <View style={styles.coverCustomRow}>
+              <Image source={{ uri: customThumbUrl }} style={styles.coverCustomImg} />
+              <TouchableOpacity onPress={() => setCustomThumbUrl(null)}>
+                <Text style={styles.coverRemoveText}>Remove custom cover</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Pressable onLayout={(e) => setThumbBarW(e.nativeEvent.layout.width)} onPress={seekCover} style={styles.scrubTrack}>
+              <View style={[styles.scrubFill, { width: `${coverPct}%` }]} />
+              <View style={[styles.scrubThumb, { left: `${coverPct}%` }]} />
+            </Pressable>
+          )}
+          <TouchableOpacity onPress={handlePickThumbnail} disabled={thumbUploading} style={styles.coverUploadBtn}>
+            <Ionicons name="image-outline" size={15} color={COLORS.gold} />
+            <Text style={styles.coverUploadText}>{thumbUploading ? 'Uploading…' : 'Upload custom cover'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
         <View style={styles.selectedInfo}>
           <Text style={styles.selectedInfoEmoji}>{genreIcon}</Text>
@@ -646,6 +772,28 @@ const styles = StyleSheet.create({
   videoArea: { margin: 14, height: 180, backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.gray3, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
   videoAreaText: { fontSize: 15, fontWeight: '700', color: COLORS.white, marginTop: 10 },
   videoAreaSub: { fontSize: 11, color: COLORS.gray, marginTop: 4 },
+  rightsRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginHorizontal: 14, marginTop: 12, marginBottom: 4 },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: COLORS.gray, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  checkboxChecked: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  rightsText: { flex: 1, fontSize: 12, color: COLORS.gray, lineHeight: 17 },
+  rightsLink: { color: COLORS.gold, fontWeight: '700' },
+  rightsBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 28 },
+  rightsModalCard: { width: '100%', maxWidth: 380, backgroundColor: COLORS.card, borderRadius: 18, padding: 22, borderWidth: 1, borderColor: COLORS.gray3 },
+  rightsModalTitle: { fontSize: 17, fontWeight: '900', color: COLORS.white, marginBottom: 12, textAlign: 'center' },
+  rightsModalText: { fontSize: 13, color: COLORS.gray, lineHeight: 20, marginBottom: 20 },
+  rightsModalBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  rightsModalBtnText: { fontSize: 15, fontWeight: '900', color: COLORS.black },
+  coverSection: { marginHorizontal: 14, marginTop: 16, padding: 14, backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.gray3 },
+  coverLabel: { fontSize: 10, color: COLORS.gray, fontWeight: '700', letterSpacing: 1.5, marginBottom: 4 },
+  coverHint: { fontSize: 11, color: COLORS.gray, marginBottom: 12, lineHeight: 15 },
+  scrubTrack: { height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', overflow: 'visible' },
+  scrubFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: 'rgba(201,168,76,0.3)', borderRadius: 13 },
+  scrubThumb: { position: 'absolute', width: 14, height: 30, borderRadius: 7, backgroundColor: COLORS.gold, marginLeft: -7, borderWidth: 2, borderColor: COLORS.black },
+  coverUploadBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: COLORS.gold + '50' },
+  coverUploadText: { fontSize: 12, color: COLORS.gold, fontWeight: '700' },
+  coverCustomRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  coverCustomImg: { width: 80, height: 45, borderRadius: 8, backgroundColor: COLORS.gray3 },
+  coverRemoveText: { fontSize: 12, color: '#FF2D55', fontWeight: '700' },
   toggle_row: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 14, marginBottom: 10, padding: 14, backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.gray3 },
   toggle_rowGold: { borderColor: COLORS.gold, backgroundColor: 'rgba(201,168,76,0.06)' },
   toggle_rowGreen: { borderColor: GREEN, backgroundColor: 'rgba(0,200,83,0.06)' },

@@ -93,6 +93,10 @@ export default function App() {
     if (user?.uid) {
       registerPushToken(user.uid);
       updateLastSeen(user.uid);
+      // Init RevenueCat dès que l'user est connecté
+      import('./src/hooks/useRevenueCat').then(({ initRevenueCat }) => {
+        initRevenueCat(user.uid);
+      }).catch(() => {});
     }
   }, [user?.uid]);
 

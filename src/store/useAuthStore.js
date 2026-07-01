@@ -28,6 +28,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { friendlyError, logError, logEvent, LOG_CONTEXT } from '../utils/errorLogger';
+import { revokeLegendaryFreebies } from '../constants/cosmeticAccess';
 
 const useAuthStore = create((set, get) => ({
   user: null,
@@ -74,6 +75,18 @@ const useAuthStore = create((set, get) => ({
                 });
               });
             }
+            // Révoque les cosmétiques ≤0,99 offerts par Legendary si l'abonnement a expiré
+            try {
+              const revoke = revokeLegendaryFreebies(profile);
+              if (revoke) {
+                import('firebase/firestore').then(({ updateDoc, doc: fDoc }) => {
+                  import('../config/firebase').then(({ db: fdb }) => {
+                    updateDoc(fDoc(fdb, 'users', firebaseUser.uid), revoke).catch(() => {});
+                  });
+                });
+                Object.assign(profile, revoke);
+              }
+            } catch (e) {}
             set({ user: firebaseUser, userProfile: { ...profile, gaPoints: profile.gaPoints ?? 0, streakLevel: profile.streakLevel ?? 'noob', streakPoints: profile.streakPoints ?? 0, ggReceived: profile.ggReceived ?? 0 }, isAuthenticated: true, isLoading: false });
           } else {
             set({ user: firebaseUser, userProfile: null, isAuthenticated: true, isLoading: false });
@@ -83,7 +96,7 @@ const useAuthStore = create((set, get) => ({
             if (snap.exists()) {
               set({ user: firebaseUser, userProfile: snap.data(), isAuthenticated: true, isLoading: false });
             }
-          });
+          }).catch(() => { set({ isLoading: false, user: null }); });
         });
       } else {
         set({ user: null, userProfile: null, isAuthenticated: false, isLoading: false });

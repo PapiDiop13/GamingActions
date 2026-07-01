@@ -28,6 +28,26 @@ const CREATOR_SHARE = 0.70;
 const LEGENDARY_PRICE_CAD = 3.99;
 const FANBASE_PRICE_CAD   = 4.99;
 
+// Libellés des catégories du shop (collection shop_purchases)
+const SHOP_CATS = {
+  avatar_frame:   'Avatar Frames',
+  video_frame:    'Video Frames',
+  comment_frame:  'Comment Frames',
+  background:     'Backgrounds',
+  banner:         'Banners',
+  username_effect:'Username FX',
+  badge:          'Badges / Titles',
+  card_border:    'Card Borders',
+  theme:          'Themes',
+};
+
+const weekKey = (d) => {
+  const dt = new Date(d); const day = (dt.getDay() + 6) % 7;
+  dt.setDate(dt.getDate() - day);            // lundi de la semaine
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+};
+const monthKey = (d) => { const dt = new Date(d); return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`; };
+
 const PERIODS = [
   { id: 'today',   label: 'Today' },
   { id: 'week',    label: 'Week' },
@@ -132,8 +152,10 @@ export default function AdminFinanceTab() {
   const [fanbaseSubs, setFanbaseSubs] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
   const [giftCards, setGiftCards]     = useState([]);
+  const [shopPurchases, setShop]      = useState([]);
+  const [support, setSupport]         = useState([]);
   const [loading, setLoading]         = useState(true);
-  const [section, setSection]         = useState('overview'); // overview | withdrawals | giftcards | subs
+  const [section, setSection]         = useState('overview'); // overview | shop | withdrawals | giftcards | subs
 
   useEffect(() => { loadAll(); }, [period]);
 
@@ -157,6 +179,26 @@ export default function AdminFinanceTab() {
       // Gift card requests
       const gcSnap = await getDocs(query(collection(db, 'gift_card_requests'), orderBy('requestedAt', 'desc'), limit(100)));
       setGiftCards(gcSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      // Achats du shop (cosmétiques payés en $) — pour les stats de gains
+      try {
+        const spSnap = await getDocs(query(collection(db, 'shop_purchases'), orderBy('createdAt', 'desc'), limit(5000)));
+        setShop(spSnap.docs.map(d => {
+          const x = d.data();
+          const ts = x.createdAt?.toDate ? x.createdAt.toDate() : (x.createdAt ? new Date(x.createdAt) : new Date());
+          return { id: d.id, ...x, _date: ts };
+        }));
+      } catch (e) { console.log('shop_purchases load:', e.message); }
+
+      // Dons "Support the App"
+      try {
+        const suSnap = await getDocs(query(collection(db, 'support_purchases'), orderBy('createdAt', 'desc'), limit(5000)));
+        setSupport(suSnap.docs.map(d => {
+          const x = d.data();
+          const ts = x.createdAt?.toDate ? x.createdAt.toDate() : (x.createdAt ? new Date(x.createdAt) : new Date());
+          return { id: d.id, ...x, _date: ts };
+        }));
+      } catch (e) { console.log('support_purchases load:', e.message); }
     } catch (e) { console.log('Finance load:', e.message); }
     setLoading(false);
   };
@@ -269,8 +311,54 @@ export default function AdminFinanceTab() {
   const pendingW      = withdrawals.filter(w => w.status === 'pending').length;
   const pendingGC     = giftCards.filter(g => g.status === 'pending').length;
 
+  // ── Stats SHOP (cosmétiques payés en $) ───────────────────────────────────
+  const shopReal      = shopPurchases.filter(p => !p.isTest);
+  const shopDateFilter= getDateFilter(period);
+  const shopInPeriod  = shopReal.filter(p => !shopDateFilter || p._date >= shopDateFilter);
+  const sum           = (arr, k) => arr.reduce((a, p) => a + (Number(p[k]) || 0), 0);
+  const shopGross     = sum(shopInPeriod, 'amount');
+  const shopNet       = sum(shopInPeriod, 'netAmount') || shopGross * (1 - STORE_FEE);
+
+  // Par catégorie (sur la période sélectionnée)
+  const byCategory = Object.keys(SHOP_CATS).map(cat => {
+    const items = shopInPeriod.filter(p => p.category === cat);
+    return { cat, label: SHOP_CATS[cat], count: items.length, gross: sum(items, 'amount'), net: sum(items, 'netAmount') };
+  }).filter(r => r.count > 0).sort((a, b) => b.gross - a.gross);
+
+  // Agrégation générique par clé temporelle (toutes périodes confondues)
+  const groupByTime = (keyFn, limitN) => {
+    const m = {};
+    for (const p of shopReal) {
+      const k = keyFn(p._date);
+      if (!m[k]) m[k] = { key: k, count: 0, gross: 0, net: 0 };
+      m[k].count++; m[k].gross += Number(p.amount) || 0; m[k].net += Number(p.netAmount) || 0;
+    }
+    return Object.values(m).sort((a, b) => b.key.localeCompare(a.key)).slice(0, limitN);
+  };
+  const byWeek  = groupByTime(weekKey, 8);
+  const byMonth = groupByTime(monthKey, 6);
+  const shopTotalGross = sum(shopReal, 'amount');
+  const shopTotalNet   = sum(shopReal, 'netAmount') || shopTotalGross * (1 - STORE_FEE);
+
+  // ── Stats SUPPORT (dons "Support the App") ────────────────────────────────
+  const supportReal     = support.filter(p => !p.isTest);
+  const supportInPeriod = supportReal.filter(p => !shopDateFilter || p._date >= shopDateFilter);
+  const supportGross    = sum(supportInPeriod, 'amount');
+  const supportNet      = sum(supportInPeriod, 'netAmount') || supportGross * (1 - STORE_FEE);
+  const supportGroupBy = (keyFn, limitN) => {
+    const m = {};
+    for (const p of supportReal) { const k = keyFn(p._date); if (!m[k]) m[k] = { key: k, count: 0, gross: 0, net: 0 }; m[k].count++; m[k].gross += Number(p.amount)||0; m[k].net += Number(p.netAmount)||0; }
+    return Object.values(m).sort((a, b) => b.key.localeCompare(a.key)).slice(0, limitN);
+  };
+  const supportByWeek  = supportGroupBy(weekKey, 8);
+  const supportByMonth = supportGroupBy(monthKey, 6);
+  const supportTotalGross = sum(supportReal, 'amount');
+  const supportTotalNet   = sum(supportReal, 'netAmount') || supportTotalGross * (1 - STORE_FEE);
+
   const SECTIONS = [
     { id: 'overview',    label: 'Overview',    icon: 'bar-chart-outline' },
+    { id: 'shop',        label: 'Shop 🛒',     icon: 'pricetags-outline' },
+    { id: 'support',     label: 'Support 💛',  icon: 'heart-outline' },
     { id: 'withdrawals', label: `Withdrawals ${pendingW > 0 ? `(${pendingW})` : ''}`, icon: 'cash-outline' },
     { id: 'giftcards',   label: `Gift Cards ${pendingGC > 0 ? `(${pendingGC})` : ''}`, icon: 'gift-outline' },
     { id: 'subs',        label: 'Subscribers', icon: 'people-outline' },
@@ -344,6 +432,121 @@ export default function AdminFinanceTab() {
                 <Text style={[af.alertChipText, { color: COLORS.blue }]}>{pendingGC} gift card request{pendingGC > 1 ? 's' : ''}</Text>
               </TouchableOpacity>
             )}
+          </View>
+        </ScrollView>
+      )}
+
+      {/* ── SHOP (gains cosmétiques) ── */}
+      {section === 'shop' && (
+        <ScrollView contentContainerStyle={{ padding: 14, gap: 12 }}>
+
+          <Text style={af.subTitle}>🛒 Shop Earnings ({PERIODS.find(p=>p.id===period)?.label})</Text>
+
+          <View style={af.statsGrid}>
+            <StatBox icon="bag-handle-outline" label="Purchases"     value={shopInPeriod.length}            color={COLORS.white} />
+            <StatBox icon="cash-outline"       label="Gross (CAD)"   value={`CA$${shopGross.toFixed(2)}`}   color={COLORS.gold} />
+            <StatBox icon="checkmark-circle-outline" label="Net (−30%)" value={`CA$${shopNet.toFixed(2)}`}  color={COLORS.green} />
+          </View>
+
+          {/* Par catégorie */}
+          <View style={af.breakdownCard}>
+            <Text style={af.breakdownTitle}>Par catégorie — {PERIODS.find(p=>p.id===period)?.label}</Text>
+            {byCategory.length === 0 ? (
+              <Text style={{ color: COLORS.gray, padding: 14, textAlign: 'center' }}>Aucun achat sur cette période.</Text>
+            ) : byCategory.map((r, i) => (
+              <View key={r.cat} style={[af.breakdownRow, i < byCategory.length-1 && { borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }]}>
+                <Text style={af.breakdownLabel}>{r.label} · {r.count} vente{r.count>1?'s':''}</Text>
+                <Text style={af.breakdownValue}>CA${r.gross.toFixed(2)}  <Text style={{ color: COLORS.green }}>(net {r.net.toFixed(2)})</Text></Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Par semaine */}
+          <View style={af.breakdownCard}>
+            <Text style={af.breakdownTitle}>Par semaine (8 dernières)</Text>
+            {byWeek.length === 0 ? (
+              <Text style={{ color: COLORS.gray, padding: 14, textAlign: 'center' }}>Pas encore de ventes.</Text>
+            ) : byWeek.map((r, i) => (
+              <View key={r.key} style={[af.breakdownRow, i < byWeek.length-1 && { borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }]}>
+                <Text style={af.breakdownLabel}>Semaine du {r.key} · {r.count} vente{r.count>1?'s':''}</Text>
+                <Text style={af.breakdownValue}>CA${r.gross.toFixed(2)}  <Text style={{ color: COLORS.green }}>(net {r.net.toFixed(2)})</Text></Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Par mois */}
+          <View style={af.breakdownCard}>
+            <Text style={af.breakdownTitle}>Par mois (6 derniers)</Text>
+            {byMonth.length === 0 ? (
+              <Text style={{ color: COLORS.gray, padding: 14, textAlign: 'center' }}>Pas encore de ventes.</Text>
+            ) : byMonth.map((r, i) => (
+              <View key={r.key} style={[af.breakdownRow, i < byMonth.length-1 && { borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }]}>
+                <Text style={af.breakdownLabel}>{r.key} · {r.count} vente{r.count>1?'s':''}</Text>
+                <Text style={af.breakdownValue}>CA${r.gross.toFixed(2)}  <Text style={{ color: COLORS.green }}>(net {r.net.toFixed(2)})</Text></Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Total all-time */}
+          <View style={af.breakdownCard}>
+            <Text style={af.breakdownTitle}>Total (depuis le début)</Text>
+            <View style={af.breakdownRow}>
+              <Text style={af.breakdownLabel}>{shopReal.length} achat{shopReal.length>1?'s':''} · brut</Text>
+              <Text style={af.breakdownValue}>CA${shopTotalGross.toFixed(2)}</Text>
+            </View>
+            <View style={[af.breakdownRow, { borderTopWidth: 0.5, borderTopColor: COLORS.gray3 }]}>
+              <Text style={[af.breakdownLabel, { color: COLORS.gold, fontWeight: '800' }]}>✅ NET (après frais 30%)</Text>
+              <Text style={[af.breakdownValue, { color: COLORS.gold, fontWeight: '900' }]}>CA${shopTotalNet.toFixed(2)}</Text>
+            </View>
+          </View>
+        </ScrollView>
+      )}
+
+      {/* ── SUPPORT (dons) ── */}
+      {section === 'support' && (
+        <ScrollView contentContainerStyle={{ padding: 14, gap: 12 }}>
+          <Text style={af.subTitle}>💛 Support Donations ({PERIODS.find(p=>p.id===period)?.label})</Text>
+
+          <View style={af.statsGrid}>
+            <StatBox icon="heart-outline"    label="Donations"   value={supportInPeriod.length}          color={COLORS.white} />
+            <StatBox icon="cash-outline"     label="Gross (CAD)" value={`CA$${supportGross.toFixed(2)}`}  color="#FF2D55" />
+            <StatBox icon="checkmark-circle-outline" label="Net (−30%)" value={`CA$${supportNet.toFixed(2)}`} color={COLORS.green} />
+          </View>
+
+          <View style={af.breakdownCard}>
+            <Text style={af.breakdownTitle}>Par semaine (8 dernières)</Text>
+            {supportByWeek.length === 0 ? (
+              <Text style={{ color: COLORS.gray, padding: 14, textAlign: 'center' }}>Aucun don pour l'instant.</Text>
+            ) : supportByWeek.map((r, i) => (
+              <View key={r.key} style={[af.breakdownRow, i < supportByWeek.length-1 && { borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }]}>
+                <Text style={af.breakdownLabel}>Semaine du {r.key} · {r.count} don{r.count>1?'s':''}</Text>
+                <Text style={af.breakdownValue}>CA${r.gross.toFixed(2)}  <Text style={{ color: COLORS.green }}>(net {r.net.toFixed(2)})</Text></Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={af.breakdownCard}>
+            <Text style={af.breakdownTitle}>Par mois (6 derniers)</Text>
+            {supportByMonth.length === 0 ? (
+              <Text style={{ color: COLORS.gray, padding: 14, textAlign: 'center' }}>Aucun don pour l'instant.</Text>
+            ) : supportByMonth.map((r, i) => (
+              <View key={r.key} style={[af.breakdownRow, i < supportByMonth.length-1 && { borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }]}>
+                <Text style={af.breakdownLabel}>{r.key} · {r.count} don{r.count>1?'s':''}</Text>
+                <Text style={af.breakdownValue}>CA${r.gross.toFixed(2)}  <Text style={{ color: COLORS.green }}>(net {r.net.toFixed(2)})</Text></Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={af.breakdownCard}>
+            <Text style={af.breakdownTitle}>Total (depuis le début)</Text>
+            <View style={af.breakdownRow}>
+              <Text style={af.breakdownLabel}>{supportReal.length} don{supportReal.length>1?'s':''} · brut</Text>
+              <Text style={af.breakdownValue}>CA${supportTotalGross.toFixed(2)}</Text>
+            </View>
+            <View style={[af.breakdownRow, { borderTopWidth: 0.5, borderTopColor: COLORS.gray3 }]}>
+              <Text style={[af.breakdownLabel, { color: COLORS.gold, fontWeight: '800' }]}>✅ NET (après frais 30%)</Text>
+              <Text style={[af.breakdownValue, { color: COLORS.gold, fontWeight: '900' }]}>CA${supportTotalNet.toFixed(2)}</Text>
+            </View>
           </View>
         </ScrollView>
       )}

@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import AdminFinanceTab from '../../components/AdminFinanceTab';
+import AdminSalesTab from '../../components/AdminSalesTab';
 import { db, auth } from '../../config/firebase';
 import { GAMES } from '../../constants/games';
 import { fetchPeriodStats, fetchTopErrors, fetchRecentErrors } from '../../utils/errorLogger';
@@ -21,6 +22,7 @@ import { fetchPeriodStats, fetchTopErrors, fetchRecentErrors } from '../../utils
 const TABS = [
   { id: 'overview',  label: 'Stats',    icon: 'bar-chart' },
   { id: 'finance',   label: 'Finance',  icon: 'cash' },
+  { id: 'sales',     label: 'Sales',    icon: 'receipt' },
   { id: 'reports',   label: 'Reports',  icon: 'flag' },
   { id: 'videos',    label: 'Videos',   icon: 'videocam' },
   { id: 'creators',  label: 'Creators', icon: 'rocket' },
@@ -757,8 +759,11 @@ This cannot be undone.`,
   // BROADCAST
   const [notifTitle, setNotifTitle] = useState('');
   const [notifBody, setNotifBody] = useState('');
+  const [broadcasting, setBroadcasting] = useState(false);
   const sendBroadcast = async () => {
+    if (broadcasting) return;
     if (!notifTitle.trim() || !notifBody.trim()) return Alert.alert('Erreur', 'Titre et message requis');
+    setBroadcasting(true);
     try {
       // 1. Créer les notifs Firestore pour toutes les notifications in-app
       const uSnap = await getDocs(collection(db, 'users'));
@@ -789,6 +794,8 @@ This cannot be undone.`,
       setNotifTitle(''); setNotifBody('');
     } catch (e) {
       Alert.alert('Erreur', 'Broadcast partiel: ' + e.message);
+    } finally {
+      setBroadcasting(false);
     }
   };
 
@@ -857,6 +864,9 @@ This cannot be undone.`,
         ))}
       </ScrollView>
 
+      {tab === 'sales' ? (
+        <View style={{ flex: 1 }}><AdminSalesTab /></View>
+      ) : (
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
@@ -1509,8 +1519,10 @@ This cannot be undone.`,
             <TextInput value={notifTitle} onChangeText={setNotifTitle} style={st.input} placeholder="Titre..." placeholderTextColor={COLORS.gray}/>
             <Text style={st.fieldLabel}>Message</Text>
             <TextInput value={notifBody} onChangeText={setNotifBody} style={[st.input,{height:80,textAlignVertical:'top'}]} placeholder="Message..." placeholderTextColor={COLORS.gray} multiline/>
-            <TouchableOpacity onPress={sendBroadcast} style={[st.actionBtn,{backgroundColor:COLORS.red}]}>
-              <Ionicons name="send" size={16} color={COLORS.white}/><Text style={[st.actionBtnText,{color:COLORS.white}]}>Envoyer</Text>
+            <TouchableOpacity onPress={sendBroadcast} disabled={broadcasting} style={[st.actionBtn,{backgroundColor:COLORS.red},broadcasting&&{opacity:0.7}]}>
+              {broadcasting
+                ? <><ActivityIndicator color={COLORS.white} size="small"/><Text style={[st.actionBtnText,{color:COLORS.white,marginLeft:8}]}>Envoi en cours…</Text></>
+                : <><Ionicons name="send" size={16} color={COLORS.white}/><Text style={[st.actionBtnText,{color:COLORS.white}]}>Envoyer</Text></>}
             </TouchableOpacity>
           </>
         )}
@@ -1588,6 +1600,7 @@ This cannot be undone.`,
         {tab === 'finance' && <AdminFinanceTab navigation={navigation} />}
 
       </ScrollView>
+      )}
     </KeyboardAvoidingView>
   );
 }

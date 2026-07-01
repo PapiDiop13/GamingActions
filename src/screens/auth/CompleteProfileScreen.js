@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert, Image
@@ -9,6 +9,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import { db } from '../../config/firebase';
+import { GAMES } from '../../constants/games';
 
 const ACCOUNT_TYPES = ['gamer', 'creator', 'developer'];
 const LOGO_URI = require('../../../assets/logo.png');
@@ -18,7 +19,15 @@ export default function CompleteProfileScreen({ navigation }) {
   const [bio, setBio] = useState('');
   const [accountType, setAccountType] = useState('gamer');
   const [mainGame, setMainGame] = useState('');
+  const [gameSearch, setGameSearch] = useState('');
+  const [showGamePicker, setShowGamePicker] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const filteredGames = useMemo(() =>
+    gameSearch.length > 0
+      ? GAMES.filter(g => g.name.toLowerCase().includes(gameSearch.toLowerCase()))
+      : GAMES,
+  [gameSearch]);
   const [error, setError] = useState('');
   const { saveProfile } = useAuthStore();
 
@@ -107,10 +116,55 @@ export default function CompleteProfileScreen({ navigation }) {
         </View>
 
         <Text style={styles.inputLabel}>MAIN GAME (optional)</Text>
-        <View style={styles.inputBox}>
-          <Ionicons name="trophy-outline" size={16} color={COLORS.gray} />
-          <TextInput value={mainGame} onChangeText={setMainGame} placeholder="Call of Duty, FIFA..." placeholderTextColor={COLORS.gray} style={styles.input} />
-        </View>
+        <TouchableOpacity
+          onPress={() => setShowGamePicker(!showGamePicker)}
+          style={[styles.inputBox, { justifyContent: 'space-between' }]}
+          activeOpacity={0.85}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+            <Ionicons name="trophy-outline" size={16} color={COLORS.gray} />
+            <Text style={[styles.input, { color: mainGame ? COLORS.white : COLORS.gray, marginTop: 0, paddingTop: 0 }]} numberOfLines={1}>
+              {mainGame || 'Select your main game...'}
+            </Text>
+          </View>
+          <Ionicons name={showGamePicker ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.gray} />
+        </TouchableOpacity>
+        {showGamePicker && (
+          <View style={styles.gamePicker}>
+            <View style={styles.gameSearch}>
+              <Ionicons name="search-outline" size={14} color={COLORS.gray} />
+              <TextInput
+                value={gameSearch}
+                onChangeText={setGameSearch}
+                placeholder="Search among 500+ games..."
+                placeholderTextColor={COLORS.gray}
+                style={{ flex: 1, color: COLORS.white, fontSize: 13, marginLeft: 8 }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+              {gameSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setGameSearch('')} style={{ padding: 4 }}>
+                  <Ionicons name="close-circle" size={16} color={COLORS.gray} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled showsVerticalScrollIndicator={false}>
+              {filteredGames.length === 0 ? (
+                <Text style={{ color: COLORS.gray, fontSize: 12, padding: 14, textAlign: 'center' }}>No game found.</Text>
+              ) : filteredGames.map((g) => (
+                <TouchableOpacity
+                  key={g.id}
+                  onPress={() => { setMainGame(g.name); setShowGamePicker(false); setGameSearch(''); }}
+                  style={[styles.gameOption, mainGame === g.name && { backgroundColor: 'rgba(201,168,76,0.1)' }]}
+                >
+                  <Text style={[styles.gameOptionText, mainGame === g.name && { color: COLORS.gold }]}>{g.name}</Text>
+                  {mainGame === g.name && <Ionicons name="checkmark" size={16} color={COLORS.gold} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         <Text style={styles.inputLabel}>BIO (optional)</Text>
         <View style={[styles.inputBox, { alignItems: 'flex-start', paddingVertical: 10 }]}>
@@ -142,6 +196,10 @@ const styles = StyleSheet.create({
   typeText: { fontSize: 11, fontWeight: '700', color: COLORS.gray },
   typeTextActive: { color: COLORS.gold },
   charCount: { fontSize: 11, color: COLORS.gray, textAlign: 'right', marginTop: -10, marginBottom: 14 },
+  gamePicker: { backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 0.5, borderColor: COLORS.gray3, marginTop: 6, marginBottom: 14 },
+  gameSearch: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  gameOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 },
+  gameOptionText: { fontSize: 13, color: COLORS.white },
   doneBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 8 },
   doneText: { fontSize: 15, fontWeight: '900', color: COLORS.black, letterSpacing: 1 },
 });

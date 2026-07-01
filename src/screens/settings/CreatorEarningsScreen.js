@@ -115,15 +115,8 @@ export default function CreatorEarningsScreen({ navigation }) {
 
         <View style={{ marginHorizontal: 16, marginBottom: 4, backgroundColor: 'rgba(201,168,76,0.12)', borderRadius: 12, padding: 14, borderWidth: 0.5, borderColor: COLORS.gold + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Text style={{ fontSize: 18 }}>🚀</Text>
-          <Text style={{ color: COLORS.gold, fontSize: 13, fontWeight: '700', flex: 1 }}>Le retrait des gains sera disponible très prochainement !</Text>
+          <Text style={{ color: COLORS.gold, fontSize: 13, fontWeight: '700', flex: 1 }}>Earnings and withdrawals can't be managed here.</Text>
         </View>
-        <TouchableOpacity
-          onPress={() => Alert.alert('🚀 Bientôt disponible', 'Le retrait des gains sera activé très prochainement.')}
-          style={styles.withdrawBtn}
-        >
-          <Ionicons name="cash-outline" size={18} color={COLORS.black} />
-          <Text style={styles.withdrawBtnText}>Withdraw Earnings</Text>
-        </TouchableOpacity>
       </ScrollView>
     </View>
   );

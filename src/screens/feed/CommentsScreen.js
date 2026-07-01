@@ -21,7 +21,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput,
-  Platform, KeyboardAvoidingView, ActivityIndicator, Animated, Alert,
+  Platform, KeyboardAvoidingView, ActivityIndicator, Animated, Alert, Easing,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -185,10 +185,12 @@ function CommentItem({ item, replies = [], onReply, onDelete, currentUserId, isR
 
   const BADGES = {
     gameconic: { label: 'ICON', bg: COLORS.red },
+    board:     { label: 'BOARD', bg: '#00E676' },
     creator:   { label: 'CR',   bg: COLORS.blue },
   };
   const badge = BADGES[liveUser?.accountType];
   const baseNameColor = liveUser?.accountType === 'gameconic' ? COLORS.red
+    : liveUser?.accountType === 'board' ? '#00E676'
     : liveUser?.accountType === 'creator' ? COLORS.blue
     : liveUser?.plan === 'legendary'      ? COLORS.gold
     : COLORS.white;
@@ -212,6 +214,24 @@ function CommentItem({ item, replies = [], onReply, onDelete, currentUserId, isR
     a.start();
     return () => a.stop();
   }, [cf?.id]);
+
+  // Reflet (sweep) + boules pulsantes pour les comment frames animés — identique au shop
+  const cfSweep = React.useRef(new Animated.Value(0)).current;
+  const cfSpark = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (!cf?.shimmer && !cf?.animated) { cfSweep.setValue(0); cfSpark.setValue(0); return; }
+    const sweepA = Animated.loop(Animated.timing(cfSweep, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: true }));
+    const sparkA = Animated.loop(Animated.sequence([
+      Animated.timing(cfSpark, { toValue: 1, duration: 480, useNativeDriver: true }),
+      Animated.timing(cfSpark, { toValue: 0, duration: 480, useNativeDriver: true }),
+    ]));
+    sweepA.start(); sparkA.start();
+    return () => { sweepA.stop(); sparkA.stop(); };
+  }, [cf?.id]);
+  const cfSweepTx   = cfSweep.interpolate({ inputRange: [0, 1], outputRange: [-50, 360] });
+  const cfSweepOpac = cfSweep.interpolate({ inputRange: [0, 0.12, 0.7, 1], outputRange: [0, 0.7, 0.25, 0] });
+  const cfDotScale  = cfSpark.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.6] });
+  const cfDotOpac   = cfSpark.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
 
   const uePulse = React.useRef(new Animated.Value(1)).current;
   React.useEffect(() => {
@@ -268,6 +288,19 @@ function CommentItem({ item, replies = [], onReply, onDelete, currentUserId, isR
               shadowOpacity: 0.6, shadowRadius: 6,
             }]} pointerEvents="none" />
           )
+        )}
+        {hasBorder && !isChampionFrame && (cf.shimmer || cf.animated) && (
+          <>
+            <View style={[StyleSheet.absoluteFill, { borderRadius: 12, overflow: 'hidden' }]} pointerEvents="none">
+              <Animated.View style={{
+                position: 'absolute', top: -24, bottom: -24, width: 38,
+                backgroundColor: borderColor, opacity: cfSweepOpac,
+                transform: [{ translateX: cfSweepTx }, { skewX: '-18deg' }],
+              }} />
+            </View>
+            <Animated.View pointerEvents="none" style={{ position: 'absolute', top: 5, right: 6, width: 5, height: 5, borderRadius: 2.5, backgroundColor: borderColor, opacity: cfDotOpac, transform: [{ scale: cfDotScale }] }} />
+            <Animated.View pointerEvents="none" style={{ position: 'absolute', bottom: 5, right: 7, width: 4, height: 4, borderRadius: 2, backgroundColor: borderColor, opacity: cfDotOpac, transform: [{ scale: cfDotScale }] }} />
+          </>
         )}
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
@@ -405,7 +438,7 @@ export default function CommentsScreen({ navigation, route }) {
   const handleAuthRequired = () => {
     Alert.alert('Connecte-toi', 'Crée un compte pour interagir avec les commentaires !', [
       { text: 'Annuler', style: 'cancel' },
-      { text: 'Se connecter', onPress: () => navigation.navigate('Auth') },
+      { text: 'Se connecter', onPress: () => useAuthStore.getState().exitGuestMode() },
     ]);
   };
 

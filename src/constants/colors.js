@@ -1,16 +1,18 @@
 export const COLORS = {
-    black: '#0A0A0F',
-    dark: '#12121A',
-    card: '#1A1A26',
-    card2: '#202030',
-    input: '#16161F',
+    // Bleu de nuit luxe — remplace le noir pur partout
+    background: '#07091C',
+    black: '#07091C',   // fond principal — bleu minuit très sombre
+    dark:  '#0D1028',   // surfaces secondaires
+    card:  '#131730',   // cartes / modales
+    card2: '#191E38',   // cartes secondaires
+    input: '#0F1226',   // champs de saisie
     gold: '#C9A84C',
     gold2: '#E8C96B',
     goldDim: 'rgba(201,168,76,0.15)',
     white: '#FFFFFF',
-    gray: '#888899',
-    gray2: '#444455',
-    gray3: '#2A2A3A',
+    gray: '#8890AA',
+    gray2: '#424666',
+    gray3: '#1E2340',
     red: '#FF2D55',
     redDim: 'rgba(255,45,85,0.15)',
     blue: '#00D4FF',

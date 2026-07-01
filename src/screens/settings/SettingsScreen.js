@@ -195,9 +195,15 @@ export default function SettingsScreen({ navigation }) {
         <View style={styles.section}>
           <SettingsRow
             icon="star-outline"
-            label="Legendary Plan"
+            label="Legendary subscription"
             onPress={() => navigation.navigate('Subscription')}
             right={<ActiveBadge label={userProfile?.plan === 'legendary' ? 'ACTIVE' : 'UPGRADE'} />}
+          />
+          <SettingsRow
+            icon="heart-outline"
+            label="Support the App 💛"
+            onPress={() => navigation.navigate('Support')}
+            color={COLORS.gold}
           />
           {(userProfile?.accountType === 'creator' || userProfile?.accountType === 'gameconic') && (
             <SettingsRow
@@ -215,7 +221,7 @@ export default function SettingsScreen({ navigation }) {
           )}
           <SettingsRow
             icon="lock-open-outline"
-            label="My subscriptions"
+            label="Fanbase subscription"
             onPress={() => navigation.navigate('MyFanbase')}
           />
         </View>

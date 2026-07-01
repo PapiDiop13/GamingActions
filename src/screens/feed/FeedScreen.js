@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Dimensions, ScrollView, TextInput, Alert,
+  Dimensions, ScrollView, TextInput, Alert, Share,
   Platform, Animated, Easing, Modal, Image,
   TouchableWithoutFeedback, KeyboardAvoidingView, ActivityIndicator, RefreshControl,
 } from 'react-native';
@@ -13,6 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import { COLORS } from '../../constants/colors';
 import { PROFILE_BADGES } from '../../constants/cosmetics';
+import { UserPlanBadges, ProfileBadgePill, PROFILE_BADGE_DATA } from '../../components/UserBadges';
 import useFeedStore from '../../store/useFeedStore';
 import useAuthStore from '../../store/useAuthStore';
 import { logError, LOG_CONTEXT } from '../../utils/errorLogger';
@@ -24,12 +25,16 @@ import useUserStore from '../../store/useUserStore';
 import useGuestGuard from '../../hooks/useGuestGuard';
 import { collection, query, where, orderBy, onSnapshot, getDoc, getDocs, doc, updateDoc, deleteDoc, increment, arrayUnion, arrayRemove, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getVideoUrl, getThumbnailUrl } from '../../config/mux';
 import ConsoleIcon from '../../components/ConsoleIcon';
 import { ringColorForUser, glowColorForUser, getFrameById, getVideoFrameById, commentFrameStyle } from '../../constants/frames';
 import { ElectricBorder, LeaderElectricBorder, ChampionBadge, LeaderBadge } from '../../components/ElectricEffect';
 import FramedAvatar from '../../components/FramedAvatar';
 import CommentsSheet, { CommentBubble } from '../../components/CommentsSheet';
+import ExploreScreen from '../explore/ExploreScreen';
 
 
 const { width: SW, height: SH } = Dimensions.get('window');
@@ -89,13 +94,8 @@ function VideoGlowFrame({ color, width, isShimmer }) {
   );
 }
 
-// Tab bar height (matches MainNavigator CustomTabBar)
 const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 80 : 60;
 const HEADER_H = Platform.OS === 'ios' ? 110 : 90;
-// CRITICAL: subtract tab bar height so the feed card never goes under the navbar.
-// iOS Pro Max (932px): 932 - 110 - 80 = 742px card
-// iPhone Pro (852px):  852 - 110 - 80 = 662px card
-// iPhone SE (667px):   667 - 110 - 80 = 477px card
 const CARD_HEIGHT = SH - HEADER_H - TAB_BAR_HEIGHT;
 
 function shuffle(arr) {
@@ -205,29 +205,9 @@ function GGListModal({ visible, onClose, videoId }) {
               <Text style={{ color: COLORS.gray, textAlign: 'center', marginTop: 20 }}>No GGs yet.</Text>
             ) : users.map((u) => (
               <View key={u.uid} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
-                <View style={u?.equippedCardBorder ? {
-                  borderWidth: 1.5, borderRadius: 22,
-                  borderColor: (() => {
-                    const CB = { cb_gold:'#C9A84C', cb_silver:'#C0C0C0', cb_blue_neon:'#00D4FF',
-                      cb_red_neon:'#FF2D55', cb_purple_neon:'#BF5AF2', cb_green_neon:'#39FF14',
-                      cb_galaxy_border:'#7C4DFF', cb_fire_border:'#FF3D00',
-                      cb_lightning_border:'#FFD700', cb_holo_border:'#FF0080' };
-                    return CB[u.equippedCardBorder] || '#C9A84C';
-                  })(),
-                  shadowColor: (() => {
-                    const CB = { cb_blue_neon:'#00D4FF', cb_red_neon:'#FF2D55',
-                      cb_purple_neon:'#BF5AF2', cb_green_neon:'#39FF14', cb_galaxy_border:'#7C4DFF',
-                      cb_fire_border:'#FF3D00', cb_lightning_border:'#FFD700', cb_holo_border:'#FF0080' };
-                    return CB[u.equippedCardBorder] || 'transparent';
-                  })(),
-                  shadowOpacity: 0.7, shadowRadius: 4, shadowOffset: { width:0, height:0 },
-                } : null}>
-                  <FramedAvatar user={u} size={36} />
-                </View>
+                <FramedAvatar user={u} size={36} />
                 <Text style={{ fontSize: 14, color: COLORS.white, fontWeight: '600', marginLeft: 12 }}>{u.username || 'Player'}</Text>
-                {u.plan === 'legendary' && <View style={[cardS.legBadge, { marginLeft: 6 }]}><Text style={cardS.legBadgeText}>LEG</Text></View>}
-                {u.accountType === 'gameconic' && <View style={[cardS.legBadge, { marginLeft: 6, backgroundColor: COLORS.red }]}><Text style={cardS.legBadgeText}>ICON</Text></View>}
-                {u.accountType === 'creator' && <View style={[cardS.legBadge, { marginLeft: 6, backgroundColor: COLORS.blue }]}><Text style={[cardS.legBadgeText, { color: COLORS.dark }]}>CR</Text></View>}
+                <UserPlanBadges accountType={u.accountType} plan={u.plan} style={{ marginLeft: 6 }} />
               </View>
             ))}
           </ScrollView>
@@ -535,6 +515,58 @@ function FeedAnimatedUsername({ username, ueId, baseStyle }) {
   );
 }
 
+function DownloadButton({ item }) {
+  const [state, setState] = React.useState('idle'); // idle | loading | done | error
+
+  const handleDownload = async () => {
+    if (state === 'loading') return;
+    setState('loading');
+    try {
+      // Ask for media library permission
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission requise', 'Autorise Gaming Actions à accéder à ta librairie photo.');
+        setState('idle');
+        return;
+      }
+
+      // Call Cloud Function
+      const functions = getFunctions();
+      const generate = httpsCallable(functions, 'generateBrandedVideo');
+      const result = await generate({ videoId: item.id, skipIntro: true }); // TEST MODE — remove skipIntro when intro video is ready
+      const { url } = result.data;
+
+      // Download the file locally
+      const localUri = FileSystem.cacheDirectory + `ga_branded_${item.id}.mp4`;
+      const download = await FileSystem.downloadAsync(url, localUri);
+
+      // Save to camera roll
+      await MediaLibrary.saveToLibraryAsync(download.uri);
+
+      setState('done');
+      Alert.alert('✅ Téléchargé !', 'La vidéo avec intro Gaming Actions est dans ta galerie.');
+      setTimeout(() => setState('idle'), 3000);
+
+    } catch (e) {
+      setState('error');
+      Alert.alert('Erreur', 'Impossible de préparer la vidéo. Réessaie.');
+      setTimeout(() => setState('idle'), 3000);
+    }
+  };
+
+  const iconName = state === 'loading' ? null : state === 'done' ? 'checkmark-circle' : 'download-outline';
+  const iconColor = state === 'done' ? COLORS.green : COLORS.gray;
+
+  return (
+    <TouchableOpacity onPress={handleDownload} style={cardS.actionItem} activeOpacity={0.7}>
+      {state === 'loading'
+        ? <ActivityIndicator size={16} color={COLORS.gold} />
+        : <Ionicons name={iconName} size={18} color={iconColor} />
+      }
+    </TouchableOpacity>
+  );
+}
+
 function VideoCardInner({ item, onNavigateProfile, navigation, userProfile, userProfiles = {}, isActive, shouldLoad = true }) {
   const { toggleGG, incrementView } = useFeedStore();
   const { user } = useAuthStore();
@@ -731,73 +763,49 @@ const isOwnVideo = item.userId === user?.uid;
   }, [isMuted]);
 
   return (
-    <View style={{ width: SW, height: CARD_HEIGHT, backgroundColor: COLORS.black }}>
+    <View style={{
+      width: SW, height: CARD_HEIGHT, backgroundColor: COLORS.black,
+      // Box surélévé — bordure dorée subtile sur les côtés + shadow glow
+      borderLeftWidth: 0.5,
+      borderRightWidth: 0.5,
+      borderColor: 'rgba(201,168,76,0.22)',
+      shadowColor: '#C9A84C',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.16,
+      shadowRadius: 18,
+      elevation: 8,
+    }}>
 
       {/* CREATOR — en haut de la vidéo */}
       <View style={{ height: CREATOR_H, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, borderBottomWidth: 0.5, borderBottomColor: COLORS.gray3 }}>
-        <FramedAvatar user={enrichedItem} size={32} onPress={onNavigateProfile} />
-        <View style={{ marginLeft: 8, flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+        <FramedAvatar user={enrichedItem} size={40} onPress={onNavigateProfile} />
+        <TouchableOpacity onPress={onNavigateProfile} activeOpacity={0.7} style={{ marginLeft: 8, flex: 1 }}>
+          {/* Ligne 1 : nom + streak level + type de compte + abonnement (streak AVANT LEG) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
             <FeedAnimatedUsername
               username={enrichedItem.username || item.username}
               ueId={enrichedItem.equippedUsernameEffect || item.equippedUsernameEffect}
               baseStyle={cardS.creatorName}
             />
-            {isLegendary && <View style={cardS.legBadge}><Text style={cardS.legBadgeText}>LEG</Text></View>}
-            {item.accountType === 'gameconic' && <View style={[cardS.legBadge, { backgroundColor: COLORS.red }]}><Text style={cardS.legBadgeText}>ICON</Text></View>}
-            {item.accountType === 'creator' && <View style={[cardS.legBadge, { backgroundColor: COLORS.blue }]}><Text style={[cardS.legBadgeText, { color: COLORS.dark }]}>CR</Text></View>}
-            {(() => { const excl = ['creator','gameconic']; if (enrichedItem.isChampion && !excl.includes(enrichedItem.accountType)) return <ChampionBadge small />; if (enrichedItem.isCurrentLeader && !excl.includes(enrichedItem.accountType)) return <LeaderBadge small />; return null; })()}
-          </View>
-          {/* Profile badge cosmétique */}
-          {(() => {
-            const badgeId = item.equippedProfileBadge;
-            if (!badgeId || badgeId === 'badge_none') return null;
-            const BADGE_DATA = {
-              badge_goat:     { emoji: '🐐', name: 'The GOAT',      color: '#FFD700' },
-              badge_champion_t: { emoji: '👑', name: 'Champion',    color: '#FFD700' },
-              badge_elite:    { emoji: '💎', name: 'Elite',         color: '#00D4FF' },
-              badge_vip:      { emoji: '👑', name: 'VIP',           color: '#C9A84C' },
-              badge_clutch:   { emoji: '⚡', name: 'Clutch Player', color: '#FFD700' },
-              badge_legend:   { emoji: '🔥', name: 'Living Legend', color: '#FF3D00' },
-              badge_apex:     { emoji: '🦅', name: 'Apex Predator', color: '#FF3D00' },
-              badge_immortal: { emoji: '⚔️', name: 'Immortal',     color: '#FFD700' },
-              badge_godmode:  { emoji: '🌟', name: 'GOD MODE',      color: '#FFD700' },
-              badge_phantom:  { emoji: '👻', name: 'Phantom',       color: '#7C4DFF' },
-              badge_sniper:   { emoji: '🎯', name: 'Sniper',        color: '#00D4FF' },
-              badge_tryhard:  { emoji: '💪', name: 'Tryhard',       color: '#FF6D00' },
-              badge_fragger:  { emoji: '💥', name: 'Top Fragger',   color: '#FF2D55' },
-              badge_strat:    { emoji: '🧠', name: 'Strategist',    color: '#BF5AF2' },
-              badge_rookie:   { emoji: '🎮', name: 'Rookie',        color: '#C0C0C0' },
-              badge_og:       { emoji: '🏅', name: 'OG Player',     color: '#C9A84C' },
-              badge_nochill:  { emoji: '🥶', name: 'No Chill',      color: '#00E5FF' },
-              badge_verified: { emoji: '✅', name: 'Verified',      color: '#00C853' },
-            };
-            const bd = BADGE_DATA[badgeId];
-            if (!bd) return null;
-            return (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: bd.color + '18', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 }}>
-                  <Text style={{ fontSize: 9 }}>{bd.emoji} </Text>
-                  <Text style={{ fontSize: 9, fontWeight: '800', color: bd.color }}>{bd.name}</Text>
-                </View>
-              </View>
-            );
-          })()}
-          {(() => {
-            const sl = item.streakLevel;
-            if (!sl || sl === 'noob') return null;
-            if (item.hideStreakLevel) return null;
-            const c = SL_COLORS[sl] || '#555555';
-            const lbl = SL_LABELS[sl] || sl.toUpperCase();
-            return (
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+            {(() => {
+              const sl = item.streakLevel;
+              if (!sl || sl === 'noob' || item.hideStreakLevel) return null;
+              const c = SL_COLORS[sl] || '#555555';
+              const lbl = SL_LABELS[sl] || sl.toUpperCase();
+              return (
                 <View style={{ backgroundColor: c, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
                   <Text style={{ fontSize: 8, fontWeight: '900', color: '#1A1A2E', letterSpacing: 0.5 }}>{lbl}</Text>
                 </View>
-              </View>
-            );
-          })()}
-        </View>
+              );
+            })()}
+            <UserPlanBadges accountType={item.accountType} plan={isLegendary ? 'legendary' : item.plan} />
+          </View>
+          {/* Ligne 2 : titre + leader/champion */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
+            <ProfileBadgePill equippedProfileBadge={item.equippedProfileBadge} style={{ marginTop: 0 }} />
+            {(() => { const excl = ['creator','gameconic']; if (enrichedItem.isChampion && !excl.includes(enrichedItem.accountType)) return <ChampionBadge small />; if (enrichedItem.isCurrentLeader && !excl.includes(enrichedItem.accountType)) return <LeaderBadge small />; return null; })()}
+          </View>
+        </TouchableOpacity>
         {item.userId !== user?.uid && (
           <TouchableOpacity
             onPress={() => guestGuard(() => toggleFollow(user?.uid, item.userId, userProfile?.username))}
@@ -920,6 +928,21 @@ const isOwnVideo = item.userId === user?.uid;
           onShowList={() => setShowGGList(true)}
           disabled={item.userId === user?.uid}
         />
+        <TouchableOpacity
+          style={cardS.actionItem}
+          activeOpacity={0.7}
+          onPress={() => Alert.alert('🔜 Bientôt disponible', 'Le téléchargement avec branding Gaming Actions arrive très prochainement !')}
+        >
+          <Ionicons name="download-outline" size={18} color={COLORS.gray3} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => Share.share({
+            message: `Check out this clip on Gaming Actions! 🎮\nhttps://gamingactions.app/clip/${item.id}`,
+          })}
+          style={cardS.actionItem}
+        >
+          <Ionicons name="share-social-outline" size={18} color={COLORS.gray} />
+        </TouchableOpacity>
         {!isOwnVideo && (
           <TouchableOpacity onPress={() => navigation.navigate('Report', { target: item, targetType: 'video' })} style={cardS.actionItem}>
             <Ionicons name="flag-outline" size={18} color={COLORS.gray} />
@@ -943,8 +966,7 @@ const isOwnVideo = item.userId === user?.uid;
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Ionicons name="chatbubble-ellipses" size={18} color={COLORS.gold} />
             <Text style={{ fontSize: 14, color: COLORS.white, fontWeight: '800', marginLeft: 8 }}>{liveCommentCount} Comments</Text>
-            <Text style={{ fontSize: 11, color: COLORS.gray2, marginLeft: 10 }}>⭐ {item.ggCount >= 1000 ? `${(item.ggCount / 1000).toFixed(1)}K` : item.ggCount || 0}</Text>
-            <Ionicons name="eye-outline" size={12} color={COLORS.gray2} style={{ marginLeft: 8 }} />
+            <Ionicons name="eye-outline" size={12} color={COLORS.gray2} style={{ marginLeft: 10 }} />
             <Text style={{ fontSize: 11, color: COLORS.gray2, marginLeft: 3 }}>{liveViewCount >= 1000 ? `${(liveViewCount / 1000).toFixed(1)}K` : liveViewCount}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.gold, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}>
@@ -1177,29 +1199,27 @@ export default function FeedScreen({ navigation }) {
             >
               <FramedAvatar user={userProfile} size={36} />
               <View style={{ marginLeft: 8, flex: 1 }}>
-                {/* Username with UE effect */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* Ligne 1 : nom + streak level + type de compte + abonnement (même ordre que la vidéo) */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
                   <FeedAnimatedUsername
                     username={userProfile?.username || 'Player'}
                     ueId={userProfile?.equippedUsernameEffect}
                     baseStyle={styles.headerUsername}
                   />
-                  {isLeg  && <View style={styles.hBadge}><Text style={styles.hBadgeTxt}>LEG</Text></View>}
-                  {isIcon && <View style={[styles.hBadge, { backgroundColor: COLORS.red }]}><Text style={styles.hBadgeTxt}>ICON</Text></View>}
-                  {isCr   && <View style={[styles.hBadge, { backgroundColor: COLORS.blue }]}><Text style={[styles.hBadgeTxt, { color: COLORS.black }]}>CR</Text></View>}
-                  {showChampion && <ChampionBadge small />}
-                  {showLeader   && <LeaderBadge small />}
+                  <View style={{ backgroundColor: streakColor, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4 }}>
+                    <Text style={{ fontSize: 8, fontWeight: '900', color: '#1A1A2E', letterSpacing: 0.5 }}>{streakLabel}</Text>
+                  </View>
+                  <UserPlanBadges accountType={userProfile?.accountType} plan={userProfile?.plan} size="md" />
                 </View>
-                {/* Title badge + streak level pill */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                {/* Ligne 2 : titre + leader/champion */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginTop: 3 }}>
                   {equippedBadge && (
                     <Text style={styles.headerBadge} numberOfLines={1}>
                       {equippedBadge.emoji} {equippedBadge.name}
                     </Text>
                   )}
-                  <View style={{ backgroundColor: streakColor, paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 4 }}>
-                    <Text style={{ fontSize: 8, fontWeight: '900', color: '#1A1A2E', letterSpacing: 0.5 }}>{streakLabel}</Text>
-                  </View>
+                  {showChampion && <ChampionBadge small />}
+                  {showLeader   && <LeaderBadge small />}
                 </View>
               </View>
             </TouchableOpacity>
@@ -1261,6 +1281,33 @@ export default function FeedScreen({ navigation }) {
       </TouchableOpacity>
     );
   })}
+  {/* ORB LEGENDARY — même ligne que For You / Following, à droite */}
+  {userProfile && userProfile.plan !== 'legendary' && !userProfile.isAdmin && (
+    <TouchableOpacity
+      onPress={() => navigation.navigate('Subscription')}
+      activeOpacity={0.85}
+      style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', paddingLeft: 10 }}
+    >
+      <Text style={{ fontSize: 12, marginRight: -2, marginBottom: 2 }}>👑</Text>
+      <View style={{
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#0A0A18',
+        borderWidth: 1.2,
+        borderColor: '#C9A84C',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#C9A84C',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.9,
+        shadowRadius: 8,
+        elevation: 8,
+      }}>
+        <Image source={require('../../../assets/logo.png')} style={{ width: 18, height: 18, borderRadius: 9 }} resizeMode="cover" />
+      </View>
+    </TouchableOpacity>
+  )}
 </View>
 
       {/* QUICK FILTER BAR — filtre rapide par genre, en haut du feed */}
@@ -1381,6 +1428,7 @@ export default function FeedScreen({ navigation }) {
           setFilterModal(false);
         }}
       />
+
     </View>
   );
 }

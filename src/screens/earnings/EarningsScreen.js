@@ -19,7 +19,7 @@ import useAuthStore from '../../store/useAuthStore';
 const MIN_WITHDRAWAL = 25;
 const STORE_FEE = 0.30;
 const CREATOR_SHARE = 0.70;
-const FANBASE_PRICE = 4.99;
+const FANBASE_PRICE = 3.99;
 
 function StatCard({ label, value, color = COLORS.white, icon }) {
   return (
@@ -176,11 +176,10 @@ export default function EarningsScreen({ navigation }) {
             <Text style={st.balanceLabel}>Available Balance</Text>
             <Text style={st.balanceValue}>CA${balance.toFixed(2)}</Text>
             {earnings?.pendingWithdrawal > 0 && <Text style={{ color: COLORS.gold, fontSize: 12, marginTop: 4 }}>CA${earnings.pendingWithdrawal.toFixed(2)} pending</Text>}
-            <TouchableOpacity onPress={() => Alert.alert('🚀 Bientôt disponible', 'Le retrait des gains sera activé très prochainement.')} style={st.withdrawBtn}>
-              <Ionicons name="cash-outline" size={16} color={COLORS.black} />
-              <Text style={st.withdrawBtnText}>Request Withdrawal</Text>
-            </TouchableOpacity>
-            <Text style={st.minNote}>Minimum CA${MIN_WITHDRAWAL} · 5–7 business days · PayPal or Interac</Text>
+            <View style={st.infoNote}>
+              <Ionicons name="information-circle-outline" size={15} color={COLORS.gray} />
+              <Text style={st.infoNoteText}>Earnings and withdrawals can't be managed here.</Text>
+            </View>
           </View>
 
           {/* Stats */}
@@ -264,6 +263,8 @@ const st = StyleSheet.create({
   withdrawBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 24, marginTop: 14, gap: 8 },
   withdrawBtnText: { fontSize: 14, fontWeight: '900', color: COLORS.black },
   minNote: { fontSize: 11, color: COLORS.gray, marginTop: 8, textAlign: 'center' },
+  infoNote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(150,150,170,0.10)' },
+  infoNoteText: { flex: 1, fontSize: 12, color: COLORS.gray, lineHeight: 16 },
   sectionLabel: { fontSize: 10, color: COLORS.gray, fontWeight: '700', letterSpacing: 1.5, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 10 },
   statsRow: { flexDirection: 'row', marginHorizontal: 14, gap: 10 },
   statCard: { flex: 1, backgroundColor: COLORS.card, borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 0.5, borderColor: COLORS.gray3 },

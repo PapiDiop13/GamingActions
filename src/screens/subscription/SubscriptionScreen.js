@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, Alert, Animated, Easing, Image,
+  Platform, Alert, Animated, Easing, Image, ActivityIndicator, Linking,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,15 +13,15 @@ import { COLORS } from '../../constants/colors';
 import useAuthStore from '../../store/useAuthStore';
 import { db } from '../../config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { activateTestLegendary, cancelTestLegendary } from '../../hooks/useRevenueCat';
+import { activateTestLegendary, cancelTestLegendary, purchaseLegendary, restorePurchases } from '../../hooks/useRevenueCat';
 
 
 const PLANS = [
   {
     id: 'legendary_monthly',
     label: 'Monthly',
-    price: '$2.99',
-    priceCAD: 'CA$3.99',
+    price: 'CA$2.99',
+    priceCAD: 'CA$2.99',
     period: '/month',
     desc: 'Billed monthly · Cancel anytime',
     badge: null,
@@ -29,18 +29,18 @@ const PLANS = [
   {
     id: 'legendary_yearly',
     label: 'Yearly',
-    price: '$24.99',
-    priceCAD: 'CA$33.99',
+    price: 'CA$19.99',
+    priceCAD: 'CA$19.99',
     period: '/year',
-    desc: 'Only CA$2.83/month · Best deal',
-    badge: 'SAVE 30%',
+    desc: 'Only CA$1.67/month · Best deal',
+    badge: 'SAVE 44%',
   },
 ];
 
 const BENEFITS = [
   { icon: 'infinite-outline',         label: 'Unlimited uploads',            sub: 'Free: 20 clips/week' },
   { icon: 'videocam-outline',         label: '1080p / 4K quality',           sub: 'Max resolution for all clips' },
-  { icon: 'color-palette-outline',    label: '15+ exclusive frames free',     sub: 'Legendary frames unlocked' },
+  { icon: 'color-palette-outline',    label: 'All CA$0.99 cosmetics included', sub: 'Frames, banners, titles & more — free while subscribed' },
   { icon: 'star-outline',             label: 'LEGENDARY gold badge',          sub: 'Stands out everywhere' },
   { icon: 'trending-up-outline',      label: 'Priority feed placement',       sub: 'Your clips seen first' },
   { icon: 'analytics-outline',        label: 'Advanced analytics',            sub: 'Views, reach, GG rate' },
@@ -70,18 +70,20 @@ function BenefitRow({ b, i }) {
   );
 }
 
-function PlanCard({ plan, selected, onSelect }) {
+function PlanCard({ plan, selected, onSelect, showPrice = true }) {
   return (
     <TouchableOpacity onPress={() => onSelect(plan.id)} style={[s.planCard, selected && s.planCardActive]}>
       {plan.badge && <View style={s.planBadge}><Text style={s.planBadgeText}>{plan.badge}</Text></View>}
       <View style={{ flex: 1 }}>
         <Text style={s.planLabel}>{plan.label}</Text>
-        <Text style={s.planDesc}>{plan.desc}</Text>
+        <Text style={s.planDesc}>{showPrice ? plan.desc : 'Coming soon'}</Text>
       </View>
-      <View style={{ alignItems: 'flex-end', marginRight: 10 }}>
-        <Text style={[s.planPrice, selected && { color: COLORS.gold }]}>{plan.priceCAD}</Text>
-        <Text style={s.planPeriod}>{plan.period}</Text>
-      </View>
+      {showPrice && (
+        <View style={{ alignItems: 'flex-end', marginRight: 10 }}>
+          <Text style={[s.planPrice, selected && { color: COLORS.gold }]}>{plan.priceCAD}</Text>
+          <Text style={s.planPeriod}>{plan.period}</Text>
+        </View>
+      )}
       <View style={[s.radio, selected && s.radioActive]}>
         {selected && <View style={s.radioDot} />}
       </View>
@@ -92,7 +94,7 @@ function PlanCard({ plan, selected, onSelect }) {
 export default function SubscriptionScreen({ navigation }) {
   const { user, userProfile } = useAuthStore();
   const isAdminUser = userProfile?.accountType === 'gameconic' || userProfile?.accountType === 'admin'
-    || !!userProfile?.isAdmin;
+    || userProfile?.accountType === 'board' || !!userProfile?.isAdmin;
   const [selectedPlan, setSelectedPlan] = useState('legendary_yearly');
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -118,7 +120,6 @@ export default function SubscriptionScreen({ navigation }) {
 
   const handleSubscribe = async () => {
     if (isAdminUser) {
-      // Admin/Gameconic — activate test mode directly
       setLoading(true);
       try {
         await activateTestLegendary(user?.uid, selectedPlan);
@@ -129,11 +130,35 @@ export default function SubscriptionScreen({ navigation }) {
       setLoading(false);
       return;
     }
-    // Bientôt disponible — pas encore actif sur mobile
-    Alert.alert(
-      '🚀 Bientôt disponible',
-      "Les abonnements Legendary sur mobile arrivent prochainement.\n\nReste connecté pour ne pas rater la sortie !"
-    );
+    // Non-admin → vrai achat via RevenueCat
+    if (!user?.uid) { Alert.alert('Sign in required', 'Please sign in to subscribe.'); return; }
+    setLoading(true);
+    const result = await purchaseLegendary(user.uid, selectedPlan);
+    setLoading(false);
+    if (result.success) {
+      const snap = await getDoc(doc(db, 'subscriptions', user.uid));
+      if (snap.exists()) setSubscription(snap.data());
+      navigation.navigate('SubscriptionSuccess', { type: 'legendary', plan: selectedPlan });
+    } else if (!result.cancelled) {
+      Alert.alert('Purchase failed', result.error || 'Please try again in a moment.');
+    }
+  };
+
+  const handleRestore = async () => {
+    setLoading(true);
+    try {
+      const result = await restorePurchases(user?.uid);
+      if (result.success && result.isLegendary) {
+        const snap = await getDoc(doc(db, 'subscriptions', user.uid));
+        if (snap.exists()) setSubscription(snap.data());
+        Alert.alert('✅ Restored', 'Your Legendary subscription has been restored.');
+      } else {
+        Alert.alert('Aucun achat', 'Aucun abonnement actif trouvé pour ce compte.');
+      }
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    }
+    setLoading(false);
   };
 
   const handleTestActivate = () => {
@@ -159,9 +184,13 @@ export default function SubscriptionScreen({ navigation }) {
     Alert.alert('Cancel test?', '', [
       { text: 'No', style: 'cancel' },
       { text: 'Yes', style: 'destructive', onPress: async () => {
-        await cancelTestLegendary(user?.uid);
-        setSubscription(null);
-        Alert.alert('Cancelled');
+        try {
+          await cancelTestLegendary(user?.uid);
+          setSubscription(null);
+          Alert.alert('Cancelled');
+        } catch (e) {
+          Alert.alert('Error', e.message || 'Cancellation failed');
+        }
       }},
     ]);
   };
@@ -231,16 +260,39 @@ export default function SubscriptionScreen({ navigation }) {
         {!isLegendary && (
           <>
             <Text style={s.sectionLabel}>CHOOSE YOUR PLAN</Text>
-            {PLANS.map(p => <PlanCard key={p.id} plan={p} selected={selectedPlan === p.id} onSelect={setSelectedPlan} />)}
+            {PLANS.map(p => <PlanCard key={p.id} plan={p} selected={selectedPlan === p.id} onSelect={setSelectedPlan} showPrice={true} />)}
 
-            {/* Bientôt disponible — remplace le bouton d'abonnement (conformité Apple) */}
-            <View style={s.comingSoonCard}>
-              <Ionicons name="time-outline" size={20} color={COLORS.gold} />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={s.comingSoonTitle}>Bientôt disponible sur mobile 🚀</Text>
-                <Text style={s.comingSoonDesc}>Les achats en application arrivent prochainement. Reste connecté !</Text>
+            {Platform.OS === 'ios' ? (
+              <>
+                <TouchableOpacity
+                  onPress={handleSubscribe}
+                  disabled={loading}
+                  style={[s.subscribeBtn, loading && { opacity: 0.6 }]}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={COLORS.black} />
+                  ) : (
+                    <>
+                      <Ionicons name="star" size={18} color={COLORS.black} />
+                      <Text style={s.subscribeBtnText}>
+                        {selectedPlan === 'legendary_yearly' ? 'Get Legendary — CA$19.99/year' : 'Get Legendary — CA$2.99/month'}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleRestore} style={s.restoreBtn}>
+                  <Text style={s.restoreBtnText}>Restore purchases</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <View style={s.comingSoonCard}>
+                <Ionicons name="time-outline" size={20} color={COLORS.gold} />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={s.comingSoonTitle}>Coming soon on Android 🚀</Text>
+                  <Text style={s.comingSoonDesc}>Android subscriptions are coming soon!</Text>
+                </View>
               </View>
-            </View>
+            )}
 
             {isAdmin && (
               <TouchableOpacity onPress={handleTestActivate} style={s.testBtn}>
@@ -295,6 +347,31 @@ export default function SubscriptionScreen({ navigation }) {
                   Pour gérer votre abonnement, rendez-vous sur la plateforme où vous l'avez souscrit.
                 </Text>
               </View>
+            )}
+
+            {/* Gestion / résiliation abonnement natif (App Store / Play Store).
+                Apple/Google exigent que la résiliation passe par leur page native. */}
+            {!subscription?.isTest
+              && subscription?.platform !== 'web' && subscription?.platform !== 'stripe'
+              && userProfile?.subscriptionSource !== 'stripe_web' && (
+              <>
+                <TouchableOpacity
+                  onPress={() => Linking.openURL(
+                    Platform.OS === 'ios'
+                      ? 'https://apps.apple.com/account/subscriptions'
+                      : 'https://play.google.com/store/account/subscriptions'
+                  ).catch(() => Alert.alert('Erreur', 'Impossible d’ouvrir la gestion des abonnements.'))}
+                  style={s.cancelBtn}
+                >
+                  <Ionicons name="settings-outline" size={15} color={COLORS.red} />
+                  <Text style={s.cancelBtnText}>Manage / Cancel Subscription</Text>
+                </TouchableOpacity>
+                <Text style={s.manageInfoText}>
+                  {Platform.OS === 'ios'
+                    ? 'La résiliation se fait dans Réglages App Store. Votre accès Legendary reste actif jusqu’à la fin de la période payée.'
+                    : 'La résiliation se fait dans Google Play. Votre accès Legendary reste actif jusqu’à la fin de la période payée.'}
+                </Text>
+              </>
             )}
 
             {subscription?.isTest && isAdmin && (
